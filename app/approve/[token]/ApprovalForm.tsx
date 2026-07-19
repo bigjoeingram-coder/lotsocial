@@ -22,7 +22,7 @@ type ApprovalRequest = {
   termsVersion: string;
 };
 
-const manageableStatuses = ["manager_approved", "provider_pending", "feed_connected", "active", "suspended"];
+const manageableStatuses = ["manager_approved", "provider_pending", "provider_verified", "provider_declined", "feed_connected", "active", "suspended"];
 
 export function ApprovalForm({ token }: { token: string }) {
   const [record, setRecord] = useState<ApprovalRequest | null>(null);

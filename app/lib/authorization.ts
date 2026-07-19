@@ -43,6 +43,22 @@ export type AuthorizationAuditEvent = {
   created_at: string;
 };
 
+export type ProviderVerificationRecord = {
+  request_id: string;
+  verification_token_hash: string;
+  provider_name: string;
+  contact_name: string;
+  contact_email: string;
+  delivery_method: string;
+  feed_format: string;
+  connection_notes: string;
+  status: string;
+  typed_signature: string | null;
+  created_at: string;
+  decided_at: string | null;
+  updated_at: string;
+};
+
 let schemaReady: Promise<void> | null = null;
 
 function database() {
@@ -91,6 +107,21 @@ export function ensureAuthorizationSchema() {
         action TEXT NOT NULL,
         metadata TEXT NOT NULL DEFAULT '{}',
         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      )`),
+      db.prepare(`CREATE TABLE IF NOT EXISTS provider_verifications (
+        request_id TEXT PRIMARY KEY,
+        verification_token_hash TEXT NOT NULL UNIQUE,
+        provider_name TEXT NOT NULL,
+        contact_name TEXT NOT NULL,
+        contact_email TEXT NOT NULL,
+        delivery_method TEXT NOT NULL DEFAULT '',
+        feed_format TEXT NOT NULL DEFAULT '',
+        connection_notes TEXT NOT NULL DEFAULT '',
+        status TEXT NOT NULL DEFAULT 'pending',
+        typed_signature TEXT,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        decided_at TEXT,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
       )`),
       db.prepare("CREATE INDEX IF NOT EXISTS authorization_requests_status_idx ON authorization_requests(status, requested_at DESC)"),
       db.prepare("CREATE INDEX IF NOT EXISTS authorization_audit_request_idx ON authorization_audit_events(request_id, created_at ASC)"),
@@ -145,6 +176,95 @@ export async function listAuditEvents(requestId: string) {
     .bind(requestId)
     .all<AuthorizationAuditEvent>();
   return result.results;
+}
+
+export async function getProviderVerification(requestId: string) {
+  await ensureAuthorizationSchema();
+  return database()
+    .prepare("SELECT * FROM provider_verifications WHERE request_id = ? LIMIT 1")
+    .bind(requestId)
+    .first<ProviderVerificationRecord>();
+}
+
+export async function createProviderVerificationInvite(input: {
+  record: AuthorizationRequestRecord;
+  tokenHash: string;
+  providerName: string;
+  contactName: string;
+  contactEmail: string;
+}) {
+  await ensureAuthorizationSchema();
+  await database().batch([
+    database().prepare(`INSERT INTO provider_verifications (
+      request_id, verification_token_hash, provider_name, contact_name, contact_email, status
+    ) VALUES (?, ?, ?, ?, ?, 'pending') ON CONFLICT(request_id) DO UPDATE SET
+      verification_token_hash = excluded.verification_token_hash,
+      provider_name = excluded.provider_name,
+      contact_name = excluded.contact_name,
+      contact_email = excluded.contact_email,
+      delivery_method = '', feed_format = '', connection_notes = '',
+      status = 'pending', typed_signature = NULL, decided_at = NULL,
+      updated_at = CURRENT_TIMESTAMP`)
+      .bind(input.record.id, input.tokenHash, input.providerName, input.contactName, input.contactEmail),
+    database().prepare(`UPDATE authorization_requests SET provider_name = ?,
+      provider_contact_name = ?, provider_contact_email = ?, status = 'provider_pending',
+      updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+      .bind(input.providerName, input.contactName, input.contactEmail, input.record.id),
+  ]);
+  await addAuditEvent(input.record.id, "associate", input.record.associate_email, "provider_verification_invited", {
+    providerName: input.providerName,
+    contactEmail: input.contactEmail,
+  });
+}
+
+export async function getProviderVerificationByToken(token: string) {
+  await ensureAuthorizationSchema();
+  const tokenHash = await hashToken(token);
+  return database()
+    .prepare(`SELECT pv.*, ar.dealership_name, ar.rooftop_location, ar.associate_name,
+      ar.requested_permissions, ar.approved_permissions, ar.manager_name
+      FROM provider_verifications pv JOIN authorization_requests ar ON ar.id = pv.request_id
+      WHERE pv.verification_token_hash = ? LIMIT 1`)
+    .bind(tokenHash)
+    .first<ProviderVerificationRecord & AuthorizationRequestRecord>();
+}
+
+export async function decideProviderVerification(input: {
+  token: string;
+  decision: "verified" | "declined";
+  providerName: string;
+  contactName: string;
+  contactEmail: string;
+  deliveryMethod: string;
+  feedFormat: string;
+  connectionNotes: string;
+  typedSignature: string;
+}) {
+  const verification = await getProviderVerificationByToken(input.token);
+  if (!verification) return null;
+  if (verification.status !== "pending") return { verification, alreadyDecided: true };
+
+  const requestStatus = input.decision === "verified" ? "provider_verified" : "provider_declined";
+  await database().batch([
+    database().prepare(`UPDATE provider_verifications SET status = ?, provider_name = ?,
+      contact_name = ?, contact_email = ?, delivery_method = ?, feed_format = ?,
+      connection_notes = ?, typed_signature = ?, decided_at = CURRENT_TIMESTAMP,
+      updated_at = CURRENT_TIMESTAMP WHERE request_id = ?`)
+      .bind(input.decision, input.providerName, input.contactName, input.contactEmail,
+        input.deliveryMethod, input.feedFormat, input.connectionNotes, input.typedSignature,
+        verification.request_id),
+    database().prepare(`UPDATE authorization_requests SET status = ?, provider_name = ?,
+      provider_contact_name = ?, provider_contact_email = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?`)
+      .bind(requestStatus, input.providerName, input.contactName, input.contactEmail, verification.request_id),
+  ]);
+  await addAuditEvent(verification.request_id, "provider", input.contactEmail,
+    input.decision === "verified" ? "provider_rights_verified" : "provider_verification_declined", {
+      providerName: input.providerName,
+      deliveryMethod: input.deliveryMethod,
+      feedFormat: input.feedFormat,
+    });
+  return { verification: { ...verification, status: input.decision }, alreadyDecided: false };
 }
 
 export function evaluateAuthorization(record: AuthorizationRequestRecord | null, permission: PermissionId) {
@@ -280,7 +400,7 @@ export async function manageAuthorization(input: {
   const record = await getAuthorizationByToken(input.token);
   if (!record) return null;
 
-  const manageableStatuses = ["manager_approved", "provider_pending", "feed_connected", "active", "suspended"];
+  const manageableStatuses = ["manager_approved", "provider_pending", "provider_verified", "provider_declined", "feed_connected", "active", "suspended"];
   if (!manageableStatuses.includes(record.status)) return { record, unavailable: true };
 
   const nextStatus = input.action === "revoke"

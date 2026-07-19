@@ -44,3 +44,19 @@ export const authorizationAuditEvents = sqliteTable("authorization_audit_events"
 }, (table) => [
   index("authorization_audit_request_idx").on(table.requestId, table.createdAt),
 ]);
+
+export const providerVerifications = sqliteTable("provider_verifications", {
+  requestId: text("request_id").primaryKey(),
+  verificationTokenHash: text("verification_token_hash").notNull().unique(),
+  providerName: text("provider_name").notNull(),
+  contactName: text("contact_name").notNull(),
+  contactEmail: text("contact_email").notNull(),
+  deliveryMethod: text("delivery_method").notNull().default(""),
+  feedFormat: text("feed_format").notNull().default(""),
+  connectionNotes: text("connection_notes").notNull().default(""),
+  status: text("status").notNull().default("pending"),
+  typedSignature: text("typed_signature"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  decidedAt: text("decided_at"),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});

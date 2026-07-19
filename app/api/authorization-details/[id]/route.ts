@@ -1,5 +1,5 @@
 import { getChatGPTUser } from "../../../chatgpt-auth";
-import { evaluateAuthorization, getAuthorizationByIdForAssociate, listAuditEvents, parsePermissions } from "../../../lib/authorization";
+import { evaluateAuthorization, getAuthorizationByIdForAssociate, getProviderVerification, listAuditEvents, parsePermissions } from "../../../lib/authorization";
 
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
   const user = await getChatGPTUser();
@@ -9,6 +9,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   const record = await getAuthorizationByIdForAssociate(id, user.email);
   if (!record) return Response.json({ error: "Authorization record not found." }, { status: 404 });
   const auditEvents = await listAuditEvents(record.id);
+  const providerVerification = await getProviderVerification(record.id);
   const approvedPermissions = parsePermissions(record.approved_permissions);
 
   return Response.json({
@@ -34,6 +35,13 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
       expiresAt: record.expires_at,
       managerNotes: record.manager_notes,
       effectiveAccess: approvedPermissions.map((permission) => ({ permission, ...evaluateAuthorization(record, permission) })),
+      providerVerification: providerVerification ? {
+        status: providerVerification.status,
+        deliveryMethod: providerVerification.delivery_method,
+        feedFormat: providerVerification.feed_format,
+        connectionNotes: providerVerification.connection_notes,
+        decidedAt: providerVerification.decided_at,
+      } : null,
     },
     auditEvents: auditEvents.map((event) => ({
       id: event.id,

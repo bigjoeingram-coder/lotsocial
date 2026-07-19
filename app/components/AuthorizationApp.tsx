@@ -42,6 +42,7 @@ type RequestDetail = {
   expiresAt: string | null;
   managerNotes: string;
   effectiveAccess: { permission: PermissionId; allowed: boolean; reason: string }[];
+  providerVerification: { status: string; deliveryMethod: string; feedFormat: string; connectionNotes: string; decidedAt: string | null } | null;
 };
 
 type AuditEvent = { id: number; actorType: string; actorEmail: string; action: string; createdAt: string };
@@ -79,6 +80,8 @@ const statusLabels: Record<string, string> = {
   requested: "Awaiting manager",
   manager_approved: "Manager approved",
   provider_pending: "Provider pending",
+  provider_verified: "Provider verified",
+  provider_declined: "Provider declined",
   feed_connected: "Feed connected",
   active: "Active",
   declined: "Declined",
@@ -88,8 +91,8 @@ const statusLabels: Record<string, string> = {
 };
 
 function statusTone(status: string) {
-  if (["active", "feed_connected", "manager_approved"].includes(status)) return "success";
-  if (["declined", "revoked", "expired", "suspended"].includes(status)) return "danger";
+  if (["active", "feed_connected", "manager_approved", "provider_verified"].includes(status)) return "success";
+  if (["declined", "revoked", "expired", "suspended", "provider_declined"].includes(status)) return "danger";
   return "pending";
 }
 
@@ -127,6 +130,8 @@ export function AuthorizationApp({ user }: { user: User }) {
   const [result, setResult] = useState<{ approvalUrl: string; emailDeliveryStatus: string; emailPreview?: string } | null>(null);
   const [detail, setDetail] = useState<{ request: RequestDetail; auditEvents: AuditEvent[] } | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [providerDraft, setProviderDraft] = useState({ providerName: "", contactName: "", contactEmail: "" });
+  const [providerInvite, setProviderInvite] = useState<{ providerUrl: string; emailDeliveryStatus: string; emailPreview?: string } | null>(null);
 
   async function loadRequests() {
     try {
@@ -148,6 +153,8 @@ export function AuthorizationApp({ user }: { user: User }) {
       const payload = await response.json() as { request?: RequestDetail; auditEvents?: AuditEvent[]; error?: string };
       if (!response.ok || !payload.request) throw new Error(payload.error ?? "Unable to load authorization details.");
       setDetail({ request: payload.request, auditEvents: payload.auditEvents ?? [] });
+      setProviderDraft({ providerName: payload.request.providerName === "Unknown" ? "" : payload.request.providerName, contactName: payload.request.providerContactName, contactEmail: payload.request.providerContactEmail });
+      setProviderInvite(null);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Unable to load authorization details.");
     } finally {
@@ -155,10 +162,32 @@ export function AuthorizationApp({ user }: { user: User }) {
     }
   }
 
+  async function inviteProvider() {
+    if (!detail) return;
+    setSubmitting(true);
+    setError("");
+    try {
+      const response = await fetch(`/api/authorization-details/${detail.request.id}/provider-invite`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(providerDraft),
+      });
+      const payload = await response.json() as { error?: string; providerUrl?: string; emailDeliveryStatus?: string; emailPreview?: string };
+      if (!response.ok || !payload.providerUrl || !payload.emailDeliveryStatus) throw new Error(payload.error ?? "Unable to prepare provider verification.");
+      setProviderInvite({ providerUrl: payload.providerUrl, emailDeliveryStatus: payload.emailDeliveryStatus, emailPreview: payload.emailPreview });
+      setDetail((current) => current ? { ...current, request: { ...current.request, status: "provider_pending", providerName: providerDraft.providerName, providerContactName: providerDraft.contactName, providerContactEmail: providerDraft.contactEmail, providerVerification: { status: "pending", deliveryMethod: "", feedFormat: "", connectionNotes: "", decidedAt: null } } } : current);
+      await loadRequests();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Unable to prepare provider verification.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
   const stats = useMemo(() => ({
     total: requests.length,
     waiting: requests.filter((request) => request.status === "requested").length,
-    approved: requests.filter((request) => ["manager_approved", "provider_pending", "feed_connected", "active"].includes(request.status)).length,
+    approved: requests.filter((request) => ["manager_approved", "provider_pending", "provider_verified", "feed_connected", "active"].includes(request.status)).length,
     active: requests.filter((request) => request.status === "active").length,
   }), [requests]);
 
@@ -361,6 +390,8 @@ export function AuthorizationApp({ user }: { user: User }) {
           <div className="detail-grid"><div><span>Associate</span><strong>{detail.request.associateName}</strong><small>{detail.request.associateEmail}</small></div><div><span>Manager</span><strong>{detail.request.managerName}</strong><small>{detail.request.managerEmail}</small></div><div><span>Provider</span><strong>{detail.request.providerName || "Unknown"}</strong><small>{detail.request.providerContactEmail || "Contact not added"}</small></div><div><span>Expiration</span><strong>{detail.request.expiresAt || "No expiration"}</strong><small>Checked on every connector request</small></div></div>
           <section className="detail-section"><div className="detail-section-title"><h3>Approved permissions</h3><span>{detail.request.approvedPermissions.length}</span></div>{detail.request.approvedPermissions.length === 0 ? <p className="detail-empty">No permissions are currently approved.</p> : <div className="detail-permissions">{detail.request.approvedPermissions.map((id) => { const permission = PERMISSIONS.find((item) => item.id === id)!; const effective = detail.request.effectiveAccess.find((item) => item.permission === id); return <div key={id}><span className={effective?.allowed ? "permission-live" : "permission-blocked"}>{effective?.allowed ? "Allowed" : "Blocked"}</span><strong>{permission.label}</strong><p>{permission.detail}</p></div>; })}</div>}</section>
           {detail.request.managerNotes && <section className="detail-section"><h3>Manager restrictions</h3><p className="manager-note">{detail.request.managerNotes}</p></section>}
+          {["manager_approved", "provider_pending", "provider_declined"].includes(detail.request.status) && <section className="detail-section provider-invite-card"><div className="detail-section-title"><h3>Provider verification</h3><span>Next</span></div><p>Send the feed company a secure rights-and-delivery confirmation. A new invitation replaces any older provider link.</p><div className="provider-invite-grid"><label><span>Provider company</span><input value={providerDraft.providerName} onChange={(event) => setProviderDraft((current) => ({ ...current, providerName: event.target.value }))} placeholder="HomeNet, DealerOn, vAuto..." /></label><label><span>Contact name</span><input value={providerDraft.contactName} onChange={(event) => setProviderDraft((current) => ({ ...current, contactName: event.target.value }))} placeholder="Feed operations contact" /></label><label className="provider-email"><span>Contact email</span><input type="email" value={providerDraft.contactEmail} onChange={(event) => setProviderDraft((current) => ({ ...current, contactEmail: event.target.value }))} placeholder="feeds@provider.com" /></label></div><button className="primary-button provider-invite-button" disabled={submitting} onClick={() => void inviteProvider()}>{submitting ? "Preparing..." : detail.request.status === "provider_pending" ? "Replace & resend verification" : "Create provider verification"}</button>{providerInvite && <div className="provider-invite-result"><strong>{providerInvite.emailDeliveryStatus === "sent" ? "Verification email sent" : "Verification link ready"}</strong><div><code>{providerInvite.providerUrl}</code><button onClick={() => void navigator.clipboard.writeText(providerInvite.providerUrl)}>Copy</button></div>{providerInvite.emailPreview && <details><summary>Preview email</summary><pre>{providerInvite.emailPreview}</pre></details>}</div>}</section>}
+          {detail.request.status === "provider_verified" && detail.request.providerVerification && <section className="detail-section provider-verified-card"><div><span className="permission-live">Verified</span><h3>Provider rights confirmed</h3><p>{detail.request.providerVerification.deliveryMethod} · {detail.request.providerVerification.feedFormat}</p></div><p>{detail.request.providerVerification.connectionNotes || "No additional connection notes were supplied."}</p><small>Technical feed testing is the final gate before activation.</small></section>}
           <section className="detail-section"><div className="detail-section-title"><h3>Audit history</h3><span>{detail.auditEvents.length}</span></div><div className="audit-list">{detail.auditEvents.map((event) => <div className="audit-event" key={event.id}><span className="audit-dot" /><div><strong>{formatAuditAction(event.action)}</strong><p>{event.actorType} · {event.actorEmail || "system"}</p></div><time>{formatDate(event.createdAt)}</time></div>)}</div></section>
         </section>
       </div>}
@@ -377,6 +408,10 @@ function formatAuditAction(action: string) {
     manager_access_suspended: "Access paused",
     manager_access_resumed: "Access restored",
     manager_access_revoked: "Access revoked",
+    provider_verification_invited: "Provider verification created",
+    provider_invitation_prepared: "Provider invitation prepared",
+    provider_rights_verified: "Provider rights verified",
+    provider_verification_declined: "Provider verification declined",
   };
   return labels[action] ?? action.replaceAll("_", " ");
 }

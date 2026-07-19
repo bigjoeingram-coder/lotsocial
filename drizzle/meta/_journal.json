@@ -15,6 +15,13 @@
       "when": 1784438808312,
       "tag": "0001_smooth_jetstream",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1784453899011,
+      "tag": "0002_fine_ozymandias",
+      "breakpoints": true
     }
   ]
 }
