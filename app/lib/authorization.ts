@@ -33,6 +33,16 @@ export type AuthorizationRequestRecord = {
   updated_at: string;
 };
 
+export type AuthorizationAuditEvent = {
+  id: number;
+  request_id: string;
+  actor_type: string;
+  actor_email: string;
+  action: string;
+  metadata: string;
+  created_at: string;
+};
+
 let schemaReady: Promise<void> | null = null;
 
 function database() {
@@ -99,16 +109,54 @@ export async function hashToken(token: string) {
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-export async function listAuthorizationRequests(limit = 20) {
+export async function listAuthorizationRequests(associateEmail: string, limit = 20) {
   await ensureAuthorizationSchema();
   const result = await database()
     .prepare(`SELECT id, dealership_name, rooftop_location, associate_name, associate_email,
       manager_name, manager_title, manager_email, provider_name, requested_permissions,
       approved_permissions, status, email_delivery_status, requested_at, decided_at, expires_at
-      FROM authorization_requests ORDER BY requested_at DESC LIMIT ?`)
-    .bind(limit)
+      FROM authorization_requests WHERE LOWER(associate_email) = LOWER(?)
+      ORDER BY requested_at DESC LIMIT ?`)
+    .bind(associateEmail, limit)
     .all<AuthorizationRequestRecord>();
   return result.results;
+}
+
+export async function getAuthorizationById(id: string) {
+  await ensureAuthorizationSchema();
+  return database()
+    .prepare("SELECT * FROM authorization_requests WHERE id = ? LIMIT 1")
+    .bind(id)
+    .first<AuthorizationRequestRecord>();
+}
+
+export async function getAuthorizationByIdForAssociate(id: string, associateEmail: string) {
+  await ensureAuthorizationSchema();
+  return database()
+    .prepare("SELECT * FROM authorization_requests WHERE id = ? AND LOWER(associate_email) = LOWER(?) LIMIT 1")
+    .bind(id, associateEmail)
+    .first<AuthorizationRequestRecord>();
+}
+
+export async function listAuditEvents(requestId: string) {
+  await ensureAuthorizationSchema();
+  const result = await database()
+    .prepare("SELECT * FROM authorization_audit_events WHERE request_id = ? ORDER BY created_at DESC, id DESC")
+    .bind(requestId)
+    .all<AuthorizationAuditEvent>();
+  return result.results;
+}
+
+export function evaluateAuthorization(record: AuthorizationRequestRecord | null, permission: PermissionId) {
+  if (!record) return { allowed: false, reason: "authorization_not_found" } as const;
+  if (record.status !== "active") return { allowed: false, reason: `status_${record.status}` } as const;
+  if (record.expires_at && new Date(`${record.expires_at}T23:59:59Z`).getTime() < Date.now()) {
+    return { allowed: false, reason: "authorization_expired" } as const;
+  }
+  if (!parsePermissions(record.approved_permissions).includes(permission)) {
+    return { allowed: false, reason: "permission_not_approved" } as const;
+  }
+  return { allowed: true, reason: "authorized" } as const;
 }
 
 export async function getAuthorizationByToken(token: string) {

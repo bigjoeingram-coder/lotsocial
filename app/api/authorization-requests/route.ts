@@ -78,7 +78,7 @@ export async function GET() {
   try {
     const user = await getChatGPTUser();
     if (!user) return Response.json({ error: "Associate sign-in is required." }, { status: 401 });
-    const requests = await listAuthorizationRequests();
+    const requests = await listAuthorizationRequests(user.email);
     return Response.json({ requests });
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : "Unable to load requests" }, { status: 500 });

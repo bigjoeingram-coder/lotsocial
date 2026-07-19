@@ -21,6 +21,31 @@ type RequestRow = {
   expires_at: string | null;
 };
 
+type RequestDetail = {
+  id: string;
+  dealershipName: string;
+  rooftopLocation: string;
+  associateName: string;
+  associateEmail: string;
+  managerName: string;
+  managerTitle: string;
+  managerEmail: string;
+  providerName: string;
+  providerContactName: string;
+  providerContactEmail: string;
+  requestedPermissions: PermissionId[];
+  approvedPermissions: PermissionId[];
+  status: string;
+  emailDeliveryStatus: string;
+  requestedAt: string;
+  decidedAt: string | null;
+  expiresAt: string | null;
+  managerNotes: string;
+  effectiveAccess: { permission: PermissionId; allowed: boolean; reason: string }[];
+};
+
+type AuditEvent = { id: number; actorType: string; actorEmail: string; action: string; createdAt: string };
+
 type FormState = {
   dealershipName: string;
   rooftopLocation: string;
@@ -100,6 +125,8 @@ export function AuthorizationApp({ user }: { user: User }) {
   const [error, setError] = useState("");
   const [form, setForm] = useState<FormState>(() => initialForm(user));
   const [result, setResult] = useState<{ approvalUrl: string; emailDeliveryStatus: string; emailPreview?: string } | null>(null);
+  const [detail, setDetail] = useState<{ request: RequestDetail; auditEvents: AuditEvent[] } | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
 
   async function loadRequests() {
     try {
@@ -112,6 +139,21 @@ export function AuthorizationApp({ user }: { user: User }) {
   }
 
   useEffect(() => { void loadRequests(); }, []);
+
+  async function openDetails(id: string) {
+    setDetailLoading(true);
+    setError("");
+    try {
+      const response = await fetch(`/api/authorization-details/${id}`, { cache: "no-store" });
+      const payload = await response.json() as { request?: RequestDetail; auditEvents?: AuditEvent[]; error?: string };
+      if (!response.ok || !payload.request) throw new Error(payload.error ?? "Unable to load authorization details.");
+      setDetail({ request: payload.request, auditEvents: payload.auditEvents ?? [] });
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Unable to load authorization details.");
+    } finally {
+      setDetailLoading(false);
+    }
+  }
 
   const stats = useMemo(() => ({
     total: requests.length,
@@ -224,13 +266,13 @@ export function AuthorizationApp({ user }: { user: User }) {
               ) : (
                 <div className="request-list">
                   {requests.map((request) => (
-                    <article className="request-row" key={request.id}>
+                    <button className="request-row" key={request.id} onClick={() => void openDetails(request.id)} disabled={detailLoading}>
                       <div className="dealer-monogram">{request.dealership_name.slice(0, 2).toUpperCase()}</div>
                       <div className="request-primary"><strong>{request.dealership_name}</strong><span>{request.rooftop_location}</span></div>
                       <div className="request-meta"><span>Approver</span><strong>{request.manager_name}</strong><small>{request.manager_email}</small></div>
                       <div className="request-meta"><span>Provider</span><strong>{request.provider_name || "Unknown"}</strong><small>Requested {formatDate(request.requested_at)}</small></div>
                       <div className={`status-badge ${statusTone(request.status)}`}><span />{statusLabels[request.status] ?? request.status}</div>
-                    </article>
+                    </button>
                   ))}
                 </div>
               )}
@@ -312,8 +354,31 @@ export function AuthorizationApp({ user }: { user: User }) {
           </section>
         )}
       </main>
+      {detail && <div className="detail-backdrop" role="presentation" onMouseDown={() => setDetail(null)}>
+        <section className="detail-drawer" role="dialog" aria-modal="true" aria-label="Authorization details" onMouseDown={(event) => event.stopPropagation()}>
+          <div className="detail-header"><div><p className="eyebrow">Authorization record</p><h2>{detail.request.dealershipName}</h2><p>{detail.request.rooftopLocation}</p></div><button className="detail-close" onClick={() => setDetail(null)} aria-label="Close details">×</button></div>
+          <div className="detail-status"><div className={`status-badge ${statusTone(detail.request.status)}`}><span />{statusLabels[detail.request.status] ?? detail.request.status}</div><strong>{detail.request.status === "active" ? "Connector access is enabled" : "Connector access is blocked"}</strong><p>{detail.request.status === "active" ? "The connector may use only the permissions listed below." : "The enforcement gate will deny inventory use until this record reaches Active status."}</p></div>
+          <div className="detail-grid"><div><span>Associate</span><strong>{detail.request.associateName}</strong><small>{detail.request.associateEmail}</small></div><div><span>Manager</span><strong>{detail.request.managerName}</strong><small>{detail.request.managerEmail}</small></div><div><span>Provider</span><strong>{detail.request.providerName || "Unknown"}</strong><small>{detail.request.providerContactEmail || "Contact not added"}</small></div><div><span>Expiration</span><strong>{detail.request.expiresAt || "No expiration"}</strong><small>Checked on every connector request</small></div></div>
+          <section className="detail-section"><div className="detail-section-title"><h3>Approved permissions</h3><span>{detail.request.approvedPermissions.length}</span></div>{detail.request.approvedPermissions.length === 0 ? <p className="detail-empty">No permissions are currently approved.</p> : <div className="detail-permissions">{detail.request.approvedPermissions.map((id) => { const permission = PERMISSIONS.find((item) => item.id === id)!; const effective = detail.request.effectiveAccess.find((item) => item.permission === id); return <div key={id}><span className={effective?.allowed ? "permission-live" : "permission-blocked"}>{effective?.allowed ? "Allowed" : "Blocked"}</span><strong>{permission.label}</strong><p>{permission.detail}</p></div>; })}</div>}</section>
+          {detail.request.managerNotes && <section className="detail-section"><h3>Manager restrictions</h3><p className="manager-note">{detail.request.managerNotes}</p></section>}
+          <section className="detail-section"><div className="detail-section-title"><h3>Audit history</h3><span>{detail.auditEvents.length}</span></div><div className="audit-list">{detail.auditEvents.map((event) => <div className="audit-event" key={event.id}><span className="audit-dot" /><div><strong>{formatAuditAction(event.action)}</strong><p>{event.actorType} · {event.actorEmail || "system"}</p></div><time>{formatDate(event.createdAt)}</time></div>)}</div></section>
+        </section>
+      </div>}
     </div>
   );
+}
+
+function formatAuditAction(action: string) {
+  const labels: Record<string, string> = {
+    permission_requested: "Authorization requested",
+    manager_approved: "Manager approved access",
+    declined: "Manager declined access",
+    manager_permissions_updated: "Permissions changed",
+    manager_access_suspended: "Access paused",
+    manager_access_resumed: "Access restored",
+    manager_access_revoked: "Access revoked",
+  };
+  return labels[action] ?? action.replaceAll("_", " ");
 }
 
 function Field({ label, value, onChange, placeholder, required, type = "text", full = false }: {
