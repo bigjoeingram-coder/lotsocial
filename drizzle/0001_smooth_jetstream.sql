@@ -1,0 +1,2 @@
+CREATE INDEX `authorization_audit_request_idx` ON `authorization_audit_events` (`request_id`,`created_at`);--> statement-breakpoint
+CREATE INDEX `authorization_requests_status_idx` ON `authorization_requests` (`status`,`requested_at`);
