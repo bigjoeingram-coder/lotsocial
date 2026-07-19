@@ -222,6 +222,48 @@ export async function decideAuthorization(input: {
   return { record: { ...record, status }, alreadyDecided: false };
 }
 
+export async function manageAuthorization(input: {
+  token: string;
+  action: "update" | "suspend" | "revoke";
+  approvedPermissions: PermissionId[];
+  expiresAt: string | null;
+  managerNotes: string;
+}) {
+  const record = await getAuthorizationByToken(input.token);
+  if (!record) return null;
+
+  const manageableStatuses = ["manager_approved", "provider_pending", "feed_connected", "active", "suspended"];
+  if (!manageableStatuses.includes(record.status)) return { record, unavailable: true };
+
+  const nextStatus = input.action === "revoke"
+    ? "revoked"
+    : input.action === "suspend"
+      ? "suspended"
+      : record.status === "suspended" ? "manager_approved" : record.status;
+  const nextPermissions = input.action === "revoke" ? [] : input.approvedPermissions;
+
+  await database()
+    .prepare(`UPDATE authorization_requests SET status = ?, approved_permissions = ?,
+      expires_at = ?, manager_notes = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+    .bind(nextStatus, JSON.stringify(nextPermissions), input.expiresAt, input.managerNotes, record.id)
+    .run();
+
+  const auditAction = input.action === "revoke"
+    ? "manager_access_revoked"
+    : input.action === "suspend"
+      ? "manager_access_suspended"
+      : record.status === "suspended" ? "manager_access_resumed" : "manager_permissions_updated";
+  await addAuditEvent(record.id, "manager", record.manager_email, auditAction, {
+    previousStatus: record.status,
+    status: nextStatus,
+    permissions: nextPermissions,
+    expiresAt: input.expiresAt,
+    notes: input.managerNotes,
+  });
+
+  return { record: { ...record, status: nextStatus, approved_permissions: JSON.stringify(nextPermissions) }, unavailable: false };
+}
+
 export function parsePermissions(value: string | null): PermissionId[] {
   if (!value) return [];
   try {

@@ -22,6 +22,7 @@ export async function GET(_request: Request, context: { params: Promise<{ token:
       status: record.status,
       requestedAt: record.requested_at,
       expiresAt: record.expires_at,
+      managerNotes: record.manager_notes,
       termsVersion: record.terms_version,
     },
   });

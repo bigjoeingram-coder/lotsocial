@@ -58,12 +58,13 @@ const statusLabels: Record<string, string> = {
   active: "Active",
   declined: "Declined",
   revoked: "Revoked",
+  suspended: "Paused by manager",
   expired: "Expired",
 };
 
 function statusTone(status: string) {
   if (["active", "feed_connected", "manager_approved"].includes(status)) return "success";
-  if (["declined", "revoked", "expired"].includes(status)) return "danger";
+  if (["declined", "revoked", "expired", "suspended"].includes(status)) return "danger";
   return "pending";
 }
 
