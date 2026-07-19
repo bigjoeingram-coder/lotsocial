@@ -1,4 +1,5 @@
 import { env } from "cloudflare:workers";
+import { getChatGPTUser } from "../../chatgpt-auth";
 import {
   PERMISSIONS,
   PermissionId,
@@ -75,6 +76,8 @@ async function deliverEmail(input: {
 
 export async function GET() {
   try {
+    const user = await getChatGPTUser();
+    if (!user) return Response.json({ error: "Associate sign-in is required." }, { status: 401 });
     const requests = await listAuthorizationRequests();
     return Response.json({ requests });
   } catch (error) {
@@ -84,13 +87,15 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
+    const user = await getChatGPTUser();
+    if (!user) return Response.json({ error: "Associate sign-in is required." }, { status: 401 });
     const payload = (await request.json()) as Record<string, unknown>;
     const input = {
       dealershipName: clean(payload.dealershipName),
       rooftopLocation: clean(payload.rooftopLocation),
       dealershipDomain: clean(payload.dealershipDomain),
-      associateName: clean(payload.associateName),
-      associateEmail: clean(payload.associateEmail).toLowerCase(),
+      associateName: user.fullName ?? (clean(payload.associateName) || user.displayName),
+      associateEmail: user.email.toLowerCase(),
       managerName: clean(payload.managerName),
       managerTitle: clean(payload.managerTitle),
       managerEmail: clean(payload.managerEmail).toLowerCase(),
