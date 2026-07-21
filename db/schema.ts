@@ -107,3 +107,20 @@ export const creativeProjects = sqliteTable("creative_projects", {
   index("creative_projects_associate_idx").on(table.associateEmail, table.createdAt),
   index("creative_projects_vehicle_idx").on(table.vehicleId, table.createdAt),
 ]);
+
+export const creativeRenderJobs = sqliteTable("creative_render_jobs", {
+  id: text("id").primaryKey(),
+  projectId: text("project_id").notNull(),
+  associateEmail: text("associate_email").notNull(),
+  provider: text("provider").notNull().default("shotstack"),
+  providerRenderId: text("provider_render_id").notNull().default(""),
+  status: text("status").notNull().default("prepared"),
+  renderPlan: text("render_plan").notNull(),
+  outputUrl: text("output_url").notNull().default(""),
+  errorMessage: text("error_message").notNull().default(""),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [
+  index("creative_render_jobs_project_idx").on(table.projectId, table.createdAt),
+  index("creative_render_jobs_associate_idx").on(table.associateEmail, table.createdAt),
+]);

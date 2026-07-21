@@ -19,6 +19,20 @@ export type CreativeProjectRecord = {
   updated_at: string;
 };
 
+export type CreativeRenderJobRecord = {
+  id: string;
+  project_id: string;
+  associate_email: string;
+  provider: string;
+  provider_render_id: string;
+  status: string;
+  render_plan: string;
+  output_url: string;
+  error_message: string;
+  created_at: string;
+  updated_at: string;
+};
+
 let schemaReady: Promise<void> | null = null;
 
 function database() {
@@ -49,6 +63,21 @@ async function ensureCreativeSchema() {
       )`),
       db.prepare("CREATE INDEX IF NOT EXISTS creative_projects_associate_idx ON creative_projects(associate_email, created_at DESC)"),
       db.prepare("CREATE INDEX IF NOT EXISTS creative_projects_vehicle_idx ON creative_projects(vehicle_id, created_at DESC)"),
+      db.prepare(`CREATE TABLE IF NOT EXISTS creative_render_jobs (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        associate_email TEXT NOT NULL,
+        provider TEXT NOT NULL DEFAULT 'shotstack',
+        provider_render_id TEXT NOT NULL DEFAULT '',
+        status TEXT NOT NULL DEFAULT 'prepared',
+        render_plan TEXT NOT NULL,
+        output_url TEXT NOT NULL DEFAULT '',
+        error_message TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      )`),
+      db.prepare("CREATE INDEX IF NOT EXISTS creative_render_jobs_project_idx ON creative_render_jobs(project_id, created_at DESC)"),
+      db.prepare("CREATE INDEX IF NOT EXISTS creative_render_jobs_associate_idx ON creative_render_jobs(associate_email, created_at DESC)"),
     ]).then(() => undefined);
   }
   return schemaReady;
@@ -129,5 +158,47 @@ export function serializeCreativeProject(record: CreativeProjectRecord) {
     endCardCta: record.end_card_cta,
     status: record.status,
     createdAt: record.created_at,
+  };
+}
+
+export async function getCreativeProject(id: string, associateEmail: string) {
+  await ensureCreativeSchema();
+  return database().prepare("SELECT * FROM creative_projects WHERE id = ? AND associate_email = ? LIMIT 1")
+    .bind(id, associateEmail).first<CreativeProjectRecord>();
+}
+
+export async function createRenderJob(input: {
+  projectId: string;
+  associateEmail: string;
+  renderPlan: unknown;
+  providerRenderId?: string;
+  status: string;
+  errorMessage?: string;
+}) {
+  await ensureCreativeSchema();
+  const id = crypto.randomUUID();
+  await database().prepare(`INSERT INTO creative_render_jobs (
+    id, project_id, associate_email, provider, provider_render_id, status,
+    render_plan, error_message
+  ) VALUES (?, ?, ?, 'shotstack', ?, ?, ?, ?)`)
+    .bind(id, input.projectId, input.associateEmail, input.providerRenderId ?? "",
+      input.status, JSON.stringify(input.renderPlan), input.errorMessage ?? "").run();
+  return database().prepare("SELECT * FROM creative_render_jobs WHERE id = ? LIMIT 1")
+    .bind(id).first<CreativeRenderJobRecord>();
+}
+
+export function serializeRenderJob(record: CreativeRenderJobRecord) {
+  const plan = JSON.parse(record.render_plan || "{}") as { summary?: unknown };
+  return {
+    id: record.id,
+    projectId: record.project_id,
+    provider: record.provider,
+    providerRenderId: record.provider_render_id,
+    status: record.status,
+    outputUrl: record.output_url,
+    errorMessage: record.error_message,
+    summary: plan.summary ?? null,
+    createdAt: record.created_at,
+    updatedAt: record.updated_at,
   };
 }

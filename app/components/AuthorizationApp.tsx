@@ -84,6 +84,25 @@ type CreativeProject = {
   createdAt: string;
 };
 
+type RenderJob = {
+  id: string;
+  projectId: string;
+  provider: string;
+  providerRenderId: string;
+  status: string;
+  outputUrl: string;
+  errorMessage: string;
+  summary: {
+    format: string;
+    durationSeconds: number;
+    photoCount: number;
+    endCardSeconds: number;
+    style: string;
+    fidelity: string;
+  } | null;
+  createdAt: string;
+};
+
 type FormState = {
   dealershipName: string;
   rooftopLocation: string;
@@ -193,6 +212,8 @@ export function AuthorizationApp({ user }: { user: User }) {
   const [creativeDraft, setCreativeDraft] = useState<CreativeProject | null>(null);
   const [creativeError, setCreativeError] = useState("");
   const [generatingCreative, setGeneratingCreative] = useState(false);
+  const [renderJob, setRenderJob] = useState<RenderJob | null>(null);
+  const [preparingRender, setPreparingRender] = useState(false);
 
   async function loadRequests() {
     try {
@@ -248,6 +269,7 @@ export function AuthorizationApp({ user }: { user: User }) {
     setCreativeStyle("walkaround");
     setCreativeDuration(30);
     setCreativeDraft(null);
+    setRenderJob(null);
     setCreativeError("");
     setView("creative");
   }
@@ -273,10 +295,27 @@ export function AuthorizationApp({ user }: { user: User }) {
       const payload = await response.json() as { project?: CreativeProject; error?: string };
       if (!response.ok || !payload.project) throw new Error(payload.error ?? "Unable to create the storyboard.");
       setCreativeDraft(payload.project);
+      setRenderJob(null);
     } catch (caught) {
       setCreativeError(caught instanceof Error ? caught.message : "Unable to create the storyboard.");
     } finally {
       setGeneratingCreative(false);
+    }
+  }
+
+  async function prepareRender() {
+    if (!creativeDraft) return;
+    setPreparingRender(true);
+    setCreativeError("");
+    try {
+      const response = await fetch(`/api/creative-projects/${creativeDraft.id}/render`, { method: "POST" });
+      const payload = await response.json() as { job?: RenderJob; error?: string };
+      if ((!response.ok && response.status !== 502) || !payload.job) throw new Error(payload.error ?? "Unable to prepare the production render.");
+      setRenderJob(payload.job);
+    } catch (caught) {
+      setCreativeError(caught instanceof Error ? caught.message : "Unable to prepare the production render.");
+    } finally {
+      setPreparingRender(false);
     }
   }
 
@@ -554,7 +593,7 @@ export function AuthorizationApp({ user }: { user: User }) {
                 </main>
                 <aside className="creative-preview"><div className="phone-preview"><div className="phone-screen">{selectedCreativeImages[0] ? <img src={selectedCreativeImages[0]} alt="First storyboard frame" referrerPolicy="no-referrer" /> : <div /> }<div className="preview-overlay"><span>{creativeStyle}</span><strong>{creativeVehicle.year} {creativeVehicle.make}<br />{creativeVehicle.model}</strong><small>{creativeVehicle.price ? `${formatPrice(creativeVehicle.price, creativeVehicle.currency)} as listed` : "Contact for pricing"}</small></div></div></div><div className="preview-sequence">{selectedCreativeImages.slice(0,6).map((image,index) => <div key={image}><img src={image} alt="" referrerPolicy="no-referrer" /><span>{index + 1}</span></div>)}<div className="end-frame"><strong>{endCardName || "Your name"}</strong><span>{endCardCta}</span></div></div><p className="preview-note">Storyboard preview · Final rendering will animate these shots and splice the end card.</p></aside>
               </div>
-              {creativeDraft && <section className="creative-output"><div className="output-heading"><div><p className="eyebrow">Storyboard ready</p><h2>Grounded copy and production brief</h2></div><span>Saved draft</span></div><div className="output-grid"><article><div><h3>Voiceover script</h3><button type="button" onClick={() => void navigator.clipboard.writeText(creativeDraft.voiceoverScript)}>Copy</button></div><p>{creativeDraft.voiceoverScript}</p></article><article><div><h3>Social caption</h3><button type="button" onClick={() => void navigator.clipboard.writeText(creativeDraft.socialCaption)}>Copy</button></div><pre>{creativeDraft.socialCaption}</pre></article></div><div className="render-gate"><span>Next production gate</span><strong>Render vertical video, attach music/voice, and export platform-ready files.</strong><p>The storyboard, selected media, script, caption, pacing, and end card are now saved.</p></div></section>}
+              {creativeDraft && <section className="creative-output"><div className="output-heading"><div><p className="eyebrow">Storyboard ready</p><h2>Grounded copy and production brief</h2></div><span>Saved draft</span></div><div className="output-grid"><article><div><h3>Voiceover script</h3><button type="button" onClick={() => void navigator.clipboard.writeText(creativeDraft.voiceoverScript)}>Copy</button></div><p>{creativeDraft.voiceoverScript}</p></article><article><div><h3>Social caption</h3><button type="button" onClick={() => void navigator.clipboard.writeText(creativeDraft.socialCaption)}>Copy</button></div><pre>{creativeDraft.socialCaption}</pre></article></div><div className="render-gate"><div><span>Production render</span><strong>Prepare a source-faithful 9:16 video.</strong><p>Original VDP photos, deterministic motion, exact listing copy, and the salesperson end card.</p></div><button type="button" onClick={() => void prepareRender()} disabled={preparingRender}>{preparingRender ? "Preparing..." : renderJob ? "Prepare again" : "Prepare vertical video"}</button></div>{renderJob && <div className={`render-result ${renderJob.status}`} role="status"><div><span className="render-status-dot" /><div><strong>{renderJob.status === "queued" ? "Video queued for rendering" : renderJob.status === "awaiting_provider_setup" ? "Production plan ready" : "Renderer needs attention"}</strong><p>{renderJob.status === "queued" ? "The original vehicle photos and locked timeline were sent to the renderer." : renderJob.errorMessage}</p></div></div>{renderJob.summary && <dl><div><dt>Output</dt><dd>{renderJob.summary.format}</dd></div><div><dt>Length</dt><dd>{renderJob.summary.durationSeconds}s</dd></div><div><dt>Shots</dt><dd>{renderJob.summary.photoCount} + end card</dd></div><div><dt>Fidelity</dt><dd>VDP originals</dd></div></dl>}</div>}</section>}
             </form>}
           </section>
         )}
