@@ -86,3 +86,24 @@ export const importedVehicles = sqliteTable("imported_vehicles", {
   index("imported_vehicles_associate_idx").on(table.associateEmail, table.importedAt),
   uniqueIndex("imported_vehicles_associate_source_unique").on(table.associateEmail, table.sourceUrl),
 ]);
+
+export const creativeProjects = sqliteTable("creative_projects", {
+  id: text("id").primaryKey(),
+  vehicleId: text("vehicle_id").notNull(),
+  associateEmail: text("associate_email").notNull(),
+  selectedImages: text("selected_images").notNull().default("[]"),
+  style: text("style").notNull(),
+  durationSeconds: integer("duration_seconds").notNull().default(30),
+  voiceoverScript: text("voiceover_script").notNull(),
+  socialCaption: text("social_caption").notNull(),
+  endCardName: text("end_card_name").notNull(),
+  endCardPhone: text("end_card_phone").notNull().default(""),
+  endCardEmail: text("end_card_email").notNull().default(""),
+  endCardCta: text("end_card_cta").notNull().default("Message me for details"),
+  status: text("status").notNull().default("draft"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [
+  index("creative_projects_associate_idx").on(table.associateEmail, table.createdAt),
+  index("creative_projects_vehicle_idx").on(table.vehicleId, table.createdAt),
+]);

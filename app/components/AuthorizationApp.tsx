@@ -68,6 +68,22 @@ type ImportedVehicle = {
   importedAt: string;
 };
 
+type CreativeProject = {
+  id: string;
+  vehicleId: string;
+  selectedImages: string[];
+  style: string;
+  durationSeconds: number;
+  voiceoverScript: string;
+  socialCaption: string;
+  endCardName: string;
+  endCardPhone: string;
+  endCardEmail: string;
+  endCardCta: string;
+  status: string;
+  createdAt: string;
+};
+
 type FormState = {
   dealershipName: string;
   rooftopLocation: string;
@@ -147,7 +163,7 @@ function initialForm(user: User): FormState {
 }
 
 export function AuthorizationApp({ user }: { user: User }) {
-  const [view, setView] = useState<"dashboard" | "request" | "inventory">("dashboard");
+  const [view, setView] = useState<"dashboard" | "request" | "inventory" | "creative">("dashboard");
   const [step, setStep] = useState(1);
   const [requests, setRequests] = useState<RequestRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -166,6 +182,17 @@ export function AuthorizationApp({ user }: { user: User }) {
   const [importingVdp, setImportingVdp] = useState(false);
   const [inventoryError, setInventoryError] = useState("");
   const [importNotice, setImportNotice] = useState("");
+  const [creativeVehicle, setCreativeVehicle] = useState<ImportedVehicle | null>(null);
+  const [selectedCreativeImages, setSelectedCreativeImages] = useState<string[]>([]);
+  const [creativeStyle, setCreativeStyle] = useState("walkaround");
+  const [creativeDuration, setCreativeDuration] = useState(30);
+  const [endCardName, setEndCardName] = useState(user?.name ?? "");
+  const [endCardPhone, setEndCardPhone] = useState("");
+  const [endCardEmail, setEndCardEmail] = useState(user?.email ?? "");
+  const [endCardCta, setEndCardCta] = useState("Message me for details");
+  const [creativeDraft, setCreativeDraft] = useState<CreativeProject | null>(null);
+  const [creativeError, setCreativeError] = useState("");
+  const [generatingCreative, setGeneratingCreative] = useState(false);
 
   async function loadRequests() {
     try {
@@ -212,6 +239,44 @@ export function AuthorizationApp({ user }: { user: User }) {
       setInventoryError(caught instanceof Error ? caught.message : "Unable to import that VDP.");
     } finally {
       setImportingVdp(false);
+    }
+  }
+
+  function startCreative(vehicle: ImportedVehicle) {
+    setCreativeVehicle(vehicle);
+    setSelectedCreativeImages(vehicle.imageUrls.slice(0, 6));
+    setCreativeStyle("walkaround");
+    setCreativeDuration(30);
+    setCreativeDraft(null);
+    setCreativeError("");
+    setView("creative");
+  }
+
+  function toggleCreativeImage(url: string) {
+    setSelectedCreativeImages((current) => current.includes(url)
+      ? current.filter((image) => image !== url)
+      : current.length < 10 ? [...current, url] : current);
+    setCreativeDraft(null);
+  }
+
+  async function generateCreative(event: FormEvent) {
+    event.preventDefault();
+    if (!creativeVehicle) return;
+    setGeneratingCreative(true);
+    setCreativeError("");
+    try {
+      const response = await fetch("/api/creative-projects", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ vehicleId: creativeVehicle.id, selectedImages: selectedCreativeImages, style: creativeStyle, durationSeconds: creativeDuration, endCardName, endCardPhone, endCardEmail, endCardCta }),
+      });
+      const payload = await response.json() as { project?: CreativeProject; error?: string };
+      if (!response.ok || !payload.project) throw new Error(payload.error ?? "Unable to create the storyboard.");
+      setCreativeDraft(payload.project);
+    } catch (caught) {
+      setCreativeError(caught instanceof Error ? caught.message : "Unable to create the storyboard.");
+    } finally {
+      setGeneratingCreative(false);
     }
   }
 
@@ -321,7 +386,7 @@ export function AuthorizationApp({ user }: { user: User }) {
           <span>LotSocial</span>
         </button>
         <nav className="workspace-nav" aria-label="Workspace">
-          <button className={view === "inventory" ? "active" : ""} onClick={() => setView("inventory")}>My Inventory</button>
+          <button className={["inventory", "creative"].includes(view) ? "active" : ""} onClick={() => setView("inventory")}>My Inventory</button>
           <button className={view !== "inventory" ? "active" : ""} onClick={() => setView("dashboard")}>Authorizations</button>
         </nav>
         <div className="topbar-actions">
@@ -455,7 +520,7 @@ export function AuthorizationApp({ user }: { user: User }) {
               </div>
             </div>
           </section>
-        ) : (
+        ) : view === "inventory" ? (
           <section className="inventory-workspace">
             <div className="inventory-hero">
               <div><p className="eyebrow">Starter inventory</p><h1>Paste a VDP. Start creating.</h1><p>Import one public dealership vehicle page at a time. LotSocial captures the listed facts, available imagery, source URL, and import time.</p></div>
@@ -471,8 +536,26 @@ export function AuthorizationApp({ user }: { user: User }) {
             </form>
             <section className="inventory-section">
               <div className="inventory-section-header"><div><p className="eyebrow">My inventory</p><h2>{vehicles.length} imported {vehicles.length === 1 ? "vehicle" : "vehicles"}</h2></div><div className="pro-callout"><span>PRO</span><p><strong>Want your entire lot here automatically?</strong><br />Connect HomeNet, vAuto, or an authorized dealership feed.</p><button onClick={() => setView("dashboard")}>Set up automation →</button></div></div>
-              {inventoryLoading ? <div className="empty-state"><span className="loader" /><p>Loading your inventory...</p></div> : vehicles.length === 0 ? <div className="empty-state inventory-empty"><div className="empty-icon">VIN</div><h3>Your first vehicle starts with a URL</h3><p>Paste one of the dealership's public VDP links above. The extracted record remains tied to its original source.</p></div> : <div className="vehicle-grid">{vehicles.map((vehicle) => <article className="vehicle-card" key={vehicle.id}><div className="vehicle-image">{vehicle.imageUrls[0] ? <img src={vehicle.imageUrls[0]} alt={vehicle.title} loading="lazy" referrerPolicy="no-referrer" /> : <div className="vehicle-placeholder">No VDP image found</div>}<span className="source-badge">{vehicle.sourceHost}</span></div><div className="vehicle-body"><div className="vehicle-title"><div><span>{vehicle.year} {vehicle.make}</span><h3>{vehicle.model || vehicle.title}</h3><p>{vehicle.trim}</p></div>{vehicle.price && <strong>{formatPrice(vehicle.price, vehicle.currency)}</strong>}</div><dl><div><dt>VIN</dt><dd>{vehicle.vin || "Not detected"}</dd></div><div><dt>Stock</dt><dd>{vehicle.stockNumber || "Not detected"}</dd></div><div><dt>Photos</dt><dd>{vehicle.imageUrls.length}</dd></div></dl><div className="vehicle-source"><span>Captured {formatDate(vehicle.importedAt)}</span><a href={vehicle.sourceUrl} target="_blank" rel="noreferrer">View source ↗</a></div><button className="creative-next" disabled>Creative studio · next build</button></div></article>)}</div>}
+              {inventoryLoading ? <div className="empty-state"><span className="loader" /><p>Loading your inventory...</p></div> : vehicles.length === 0 ? <div className="empty-state inventory-empty"><div className="empty-icon">VIN</div><h3>Your first vehicle starts with a URL</h3><p>Paste one of the dealership's public VDP links above. The extracted record remains tied to its original source.</p></div> : <div className="vehicle-grid">{vehicles.map((vehicle) => <article className="vehicle-card" key={vehicle.id}><div className="vehicle-image">{vehicle.imageUrls[0] ? <img src={vehicle.imageUrls[0]} alt={vehicle.title} loading="lazy" referrerPolicy="no-referrer" /> : <div className="vehicle-placeholder">No VDP image found</div>}<span className="source-badge">{vehicle.sourceHost}</span></div><div className="vehicle-body"><div className="vehicle-title"><div><span>{vehicle.year} {vehicle.make}</span><h3>{vehicle.model || vehicle.title}</h3><p>{vehicle.trim}</p></div>{vehicle.price && <strong>{formatPrice(vehicle.price, vehicle.currency)}</strong>}</div><dl><div><dt>VIN</dt><dd>{vehicle.vin || "Not detected"}</dd></div><div><dt>Stock</dt><dd>{vehicle.stockNumber || "Not detected"}</dd></div><div><dt>Photos</dt><dd>{vehicle.imageUrls.length}</dd></div></dl><div className="vehicle-source"><span>Captured {formatDate(vehicle.importedAt)}</span><a href={vehicle.sourceUrl} target="_blank" rel="noreferrer">View source ↗</a></div><button className="creative-next" disabled={vehicle.imageUrls.length < 2} onClick={() => startCreative(vehicle)}>{vehicle.imageUrls.length < 2 ? "At least 2 photos required" : "Create video storyboard →"}</button></div></article>)}</div>}
             </section>
+          </section>
+        ) : (
+          <section className="creative-workspace">
+            <button className="back-button" onClick={() => setView("inventory")}>← Back to My Inventory</button>
+            {!creativeVehicle ? <div className="empty-state"><h3>Select a vehicle first</h3><p>Return to My Inventory and choose a vehicle with at least two VDP photos.</p></div> : <form onSubmit={generateCreative}>
+              <div className="creative-heading"><div><p className="eyebrow">Creative studio</p><h1>{creativeVehicle.year} {creativeVehicle.make} {creativeVehicle.model || creativeVehicle.title}</h1><p>Build a source-grounded vertical-video storyboard from the dealership's VDP photos and facts.</p></div><div className="creative-vehicle-chip">{creativeVehicle.price && <strong>{formatPrice(creativeVehicle.price, creativeVehicle.currency)}</strong>}<span>VIN {creativeVehicle.vin || "not detected"}</span></div></div>
+              <div className="creative-layout">
+                <main className="creative-editor">
+                  <section className="creative-step"><div className="creative-step-title"><span>1</span><div><h2>Select the shots</h2><p>Choose 2–10 photos. Their order becomes the first storyboard sequence.</p></div><strong>{selectedCreativeImages.length} selected</strong></div><div className="creative-photo-grid">{creativeVehicle.imageUrls.map((image, index) => <button type="button" key={image} className={selectedCreativeImages.includes(image) ? "selected" : ""} onClick={() => toggleCreativeImage(image)}><img src={image} alt={`VDP photo ${index + 1}`} loading="lazy" referrerPolicy="no-referrer" /><span>{selectedCreativeImages.includes(image) ? selectedCreativeImages.indexOf(image) + 1 : "+"}</span></button>)}</div></section>
+                  <section className="creative-step"><div className="creative-step-title"><span>2</span><div><h2>Choose the pacing</h2><p>The script uses only facts captured from the source VDP.</p></div></div><div className="creative-options"><label className={creativeStyle === "energetic" ? "selected" : ""}><input type="radio" name="style" value="energetic" checked={creativeStyle === "energetic"} onChange={() => { setCreativeStyle("energetic"); setCreativeDraft(null); }} /><strong>Fast cuts</strong><p>Quick hooks and energetic pacing</p></label><label className={creativeStyle === "walkaround" ? "selected" : ""}><input type="radio" name="style" value="walkaround" checked={creativeStyle === "walkaround"} onChange={() => { setCreativeStyle("walkaround"); setCreativeDraft(null); }} /><strong>Walkaround</strong><p>Clear, conversational vehicle tour</p></label><label className={creativeStyle === "premium" ? "selected" : ""}><input type="radio" name="style" value="premium" checked={creativeStyle === "premium"} onChange={() => { setCreativeStyle("premium"); setCreativeDraft(null); }} /><strong>Premium</strong><p>Slower, polished presentation</p></label></div><div className="duration-options"><span>Target length</span>{[15,30,45].map((duration) => <button type="button" key={duration} className={creativeDuration === duration ? "active" : ""} onClick={() => { setCreativeDuration(duration); setCreativeDraft(null); }}>{duration}s</button>)}</div></section>
+                  <section className="creative-step"><div className="creative-step-title"><span>3</span><div><h2>Salesperson end card</h2><p>This becomes the final shot and call to action.</p></div></div><div className="form-grid compact"><label className="field"><span>Display name</span><input value={endCardName} onChange={(event) => { setEndCardName(event.target.value); setCreativeDraft(null); }} required /></label><label className="field"><span>Phone</span><input value={endCardPhone} onChange={(event) => { setEndCardPhone(event.target.value); setCreativeDraft(null); }} placeholder="Optional" /></label><label className="field"><span>Email</span><input type="email" value={endCardEmail} onChange={(event) => { setEndCardEmail(event.target.value); setCreativeDraft(null); }} /></label><label className="field"><span>Call to action</span><select value={endCardCta} onChange={(event) => { setEndCardCta(event.target.value); setCreativeDraft(null); }}><option>Message me for details</option><option>Schedule your test drive</option><option>Ask me for today's availability</option><option>Contact me for current pricing</option></select></label></div></section>
+                  {creativeError && <div className="form-error" role="alert">{creativeError}</div>}
+                  <button className="primary-button creative-generate" type="submit" disabled={generatingCreative || selectedCreativeImages.length < 2}>{generatingCreative ? "Building storyboard..." : creativeDraft ? "Regenerate creative draft" : "Generate creative draft"}</button>
+                </main>
+                <aside className="creative-preview"><div className="phone-preview"><div className="phone-screen">{selectedCreativeImages[0] ? <img src={selectedCreativeImages[0]} alt="First storyboard frame" referrerPolicy="no-referrer" /> : <div /> }<div className="preview-overlay"><span>{creativeStyle}</span><strong>{creativeVehicle.year} {creativeVehicle.make}<br />{creativeVehicle.model}</strong><small>{creativeVehicle.price ? `${formatPrice(creativeVehicle.price, creativeVehicle.currency)} as listed` : "Contact for pricing"}</small></div></div></div><div className="preview-sequence">{selectedCreativeImages.slice(0,6).map((image,index) => <div key={image}><img src={image} alt="" referrerPolicy="no-referrer" /><span>{index + 1}</span></div>)}<div className="end-frame"><strong>{endCardName || "Your name"}</strong><span>{endCardCta}</span></div></div><p className="preview-note">Storyboard preview · Final rendering will animate these shots and splice the end card.</p></aside>
+              </div>
+              {creativeDraft && <section className="creative-output"><div className="output-heading"><div><p className="eyebrow">Storyboard ready</p><h2>Grounded copy and production brief</h2></div><span>Saved draft</span></div><div className="output-grid"><article><div><h3>Voiceover script</h3><button type="button" onClick={() => void navigator.clipboard.writeText(creativeDraft.voiceoverScript)}>Copy</button></div><p>{creativeDraft.voiceoverScript}</p></article><article><div><h3>Social caption</h3><button type="button" onClick={() => void navigator.clipboard.writeText(creativeDraft.socialCaption)}>Copy</button></div><pre>{creativeDraft.socialCaption}</pre></article></div><div className="render-gate"><span>Next production gate</span><strong>Render vertical video, attach music/voice, and export platform-ready files.</strong><p>The storyboard, selected media, script, caption, pacing, and end card are now saved.</p></div></section>}
+            </form>}
           </section>
         )}
       </main>
