@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 export const authorizationRequests = sqliteTable("authorization_requests", {
   id: text("id").primaryKey(),
@@ -60,3 +60,29 @@ export const providerVerifications = sqliteTable("provider_verifications", {
   decidedAt: text("decided_at"),
   updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 });
+
+export const importedVehicles = sqliteTable("imported_vehicles", {
+  id: text("id").primaryKey(),
+  associateEmail: text("associate_email").notNull(),
+  sourceUrl: text("source_url").notNull(),
+  sourceHost: text("source_host").notNull(),
+  title: text("title").notNull(),
+  vin: text("vin").notNull().default(""),
+  stockNumber: text("stock_number").notNull().default(""),
+  year: text("year").notNull().default(""),
+  make: text("make").notNull().default(""),
+  model: text("model").notNull().default(""),
+  trim: text("trim").notNull().default(""),
+  price: text("price").notNull().default(""),
+  currency: text("currency").notNull().default("USD"),
+  description: text("description").notNull().default(""),
+  imageUrls: text("image_urls").notNull().default("[]"),
+  facts: text("facts").notNull().default("{}"),
+  sourceType: text("source_type").notNull().default("vdp_one_time"),
+  authorizationCertifiedAt: text("authorization_certified_at").notNull(),
+  importedAt: text("imported_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [
+  index("imported_vehicles_associate_idx").on(table.associateEmail, table.importedAt),
+  uniqueIndex("imported_vehicles_associate_source_unique").on(table.associateEmail, table.sourceUrl),
+]);

@@ -47,6 +47,27 @@ type RequestDetail = {
 
 type AuditEvent = { id: number; actorType: string; actorEmail: string; action: string; createdAt: string };
 
+type ImportedVehicle = {
+  id: string;
+  sourceUrl: string;
+  sourceHost: string;
+  title: string;
+  vin: string;
+  stockNumber: string;
+  year: string;
+  make: string;
+  model: string;
+  trim: string;
+  price: string;
+  currency: string;
+  description: string;
+  imageUrls: string[];
+  facts: Record<string, string>;
+  sourceType: string;
+  certifiedAt: string;
+  importedAt: string;
+};
+
 type FormState = {
   dealershipName: string;
   rooftopLocation: string;
@@ -65,13 +86,13 @@ type FormState = {
 
 const providers = [
   "Unknown / manager will confirm",
+  "HomeNet",
+  "vAuto",
   "DealerOn",
   "Dealer Inspire / Cars Commerce",
   "Dealer.com",
   "Dealer Alchemist",
   "Jazel",
-  "HomeNet",
-  "vAuto",
   "Dealer Specialties",
   "Other",
 ];
@@ -101,6 +122,12 @@ function formatDate(value: string | null) {
   return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" }).format(new Date(value.replace(" ", "T") + (value.includes("Z") ? "" : "Z")));
 }
 
+function formatPrice(value: string, currency: string) {
+  const amount = Number(value.replace(/[^\d.]/g, ""));
+  if (!Number.isFinite(amount)) return value;
+  return new Intl.NumberFormat("en-US", { style: "currency", currency: currency || "USD", maximumFractionDigits: 0 }).format(amount);
+}
+
 function initialForm(user: User): FormState {
   return {
     dealershipName: "",
@@ -120,7 +147,7 @@ function initialForm(user: User): FormState {
 }
 
 export function AuthorizationApp({ user }: { user: User }) {
-  const [view, setView] = useState<"dashboard" | "request">("dashboard");
+  const [view, setView] = useState<"dashboard" | "request" | "inventory">("dashboard");
   const [step, setStep] = useState(1);
   const [requests, setRequests] = useState<RequestRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -132,6 +159,13 @@ export function AuthorizationApp({ user }: { user: User }) {
   const [detailLoading, setDetailLoading] = useState(false);
   const [providerDraft, setProviderDraft] = useState({ providerName: "", contactName: "", contactEmail: "" });
   const [providerInvite, setProviderInvite] = useState<{ providerUrl: string; emailDeliveryStatus: string; emailPreview?: string } | null>(null);
+  const [vehicles, setVehicles] = useState<ImportedVehicle[]>([]);
+  const [inventoryLoading, setInventoryLoading] = useState(true);
+  const [vdpUrl, setVdpUrl] = useState("");
+  const [authorizedToMarket, setAuthorizedToMarket] = useState(false);
+  const [importingVdp, setImportingVdp] = useState(false);
+  const [inventoryError, setInventoryError] = useState("");
+  const [importNotice, setImportNotice] = useState("");
 
   async function loadRequests() {
     try {
@@ -144,6 +178,42 @@ export function AuthorizationApp({ user }: { user: User }) {
   }
 
   useEffect(() => { void loadRequests(); }, []);
+
+  async function loadVehicles() {
+    try {
+      const response = await fetch("/api/vdp-imports", { cache: "no-store" });
+      const payload = await response.json() as { vehicles?: ImportedVehicle[] };
+      setVehicles(payload.vehicles ?? []);
+    } finally {
+      setInventoryLoading(false);
+    }
+  }
+
+  useEffect(() => { void loadVehicles(); }, []);
+
+  async function importVdp(event: FormEvent) {
+    event.preventDefault();
+    setImportingVdp(true);
+    setInventoryError("");
+    setImportNotice("");
+    try {
+      const response = await fetch("/api/vdp-imports", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sourceUrl: vdpUrl, authorizedToMarket }),
+      });
+      const payload = await response.json() as { vehicle?: ImportedVehicle; error?: string };
+      if (!response.ok || !payload.vehicle) throw new Error(payload.error ?? "Unable to import that VDP.");
+      setVehicles((current) => [payload.vehicle!, ...current.filter((vehicle) => vehicle.id !== payload.vehicle!.id)]);
+      setImportNotice(`${payload.vehicle.title} was added to My Inventory.`);
+      setVdpUrl("");
+      setAuthorizedToMarket(false);
+    } catch (caught) {
+      setInventoryError(caught instanceof Error ? caught.message : "Unable to import that VDP.");
+    } finally {
+      setImportingVdp(false);
+    }
+  }
 
   async function openDetails(id: string) {
     setDetailLoading(true);
@@ -250,6 +320,10 @@ export function AuthorizationApp({ user }: { user: User }) {
           <span className="brand-mark">L</span>
           <span>LotSocial</span>
         </button>
+        <nav className="workspace-nav" aria-label="Workspace">
+          <button className={view === "inventory" ? "active" : ""} onClick={() => setView("inventory")}>My Inventory</button>
+          <button className={view !== "inventory" ? "active" : ""} onClick={() => setView("dashboard")}>Authorizations</button>
+        </nav>
         <div className="topbar-actions">
           {!user && <a className="signin-link" href="/signin-with-chatgpt?return_to=%2F">Associate sign in</a>}
           <span className="environment-chip"><span className="live-dot" /> Authorization workspace</span>
@@ -307,7 +381,7 @@ export function AuthorizationApp({ user }: { user: User }) {
               )}
             </section>
           </>
-        ) : (
+        ) : view === "request" ? (
           <section className="request-flow">
             <button className="back-button" onClick={() => setView("dashboard")}>← Back to authorizations</button>
             <div className="flow-layout">
@@ -380,6 +454,25 @@ export function AuthorizationApp({ user }: { user: User }) {
                 )}
               </div>
             </div>
+          </section>
+        ) : (
+          <section className="inventory-workspace">
+            <div className="inventory-hero">
+              <div><p className="eyebrow">Starter inventory</p><h1>Paste a VDP. Start creating.</h1><p>Import one public dealership vehicle page at a time. LotSocial captures the listed facts, available imagery, source URL, and import time.</p></div>
+              <span className="plan-chip">Starter · Manual VDP</span>
+            </div>
+            <form className="vdp-import-panel" onSubmit={importVdp}>
+              <div className="vdp-import-heading"><div className="import-icon">↗</div><div><h2>Import a vehicle detail page</h2><p>Use the exact public VDP for the vehicle you want to promote.</p></div></div>
+              <label className="vdp-url-field"><span>Vehicle detail page URL</span><div><input type="url" value={vdpUrl} onChange={(event) => setVdpUrl(event.target.value)} placeholder="https://dealer.com/inventory/vehicle..." required /><button className="primary-button" type="submit" disabled={importingVdp || !authorizedToMarket}>{importingVdp ? "Reading VDP..." : "Import vehicle"}</button></div></label>
+              <label className="vdp-certification"><input type="checkbox" checked={authorizedToMarket} onChange={(event) => setAuthorizedToMarket(event.target.checked)} /><span className="custom-check">✓</span><span>I certify that I am authorized to market this dealership's vehicle and use its approved VDP content for dealership social posts.</span></label>
+              <div className="vdp-boundary"><strong>One-time, source-stamped import</strong><span>LotSocial does not bypass logins or access controls. Automated inventory remains a Pro feed feature.</span></div>
+              {inventoryError && <div className="form-error" role="alert">{inventoryError}</div>}
+              {importNotice && <div className="management-notice" role="status">{importNotice}</div>}
+            </form>
+            <section className="inventory-section">
+              <div className="inventory-section-header"><div><p className="eyebrow">My inventory</p><h2>{vehicles.length} imported {vehicles.length === 1 ? "vehicle" : "vehicles"}</h2></div><div className="pro-callout"><span>PRO</span><p><strong>Want your entire lot here automatically?</strong><br />Connect HomeNet, vAuto, or an authorized dealership feed.</p><button onClick={() => setView("dashboard")}>Set up automation →</button></div></div>
+              {inventoryLoading ? <div className="empty-state"><span className="loader" /><p>Loading your inventory...</p></div> : vehicles.length === 0 ? <div className="empty-state inventory-empty"><div className="empty-icon">VIN</div><h3>Your first vehicle starts with a URL</h3><p>Paste one of the dealership's public VDP links above. The extracted record remains tied to its original source.</p></div> : <div className="vehicle-grid">{vehicles.map((vehicle) => <article className="vehicle-card" key={vehicle.id}><div className="vehicle-image">{vehicle.imageUrls[0] ? <img src={vehicle.imageUrls[0]} alt={vehicle.title} loading="lazy" referrerPolicy="no-referrer" /> : <div className="vehicle-placeholder">No VDP image found</div>}<span className="source-badge">{vehicle.sourceHost}</span></div><div className="vehicle-body"><div className="vehicle-title"><div><span>{vehicle.year} {vehicle.make}</span><h3>{vehicle.model || vehicle.title}</h3><p>{vehicle.trim}</p></div>{vehicle.price && <strong>{formatPrice(vehicle.price, vehicle.currency)}</strong>}</div><dl><div><dt>VIN</dt><dd>{vehicle.vin || "Not detected"}</dd></div><div><dt>Stock</dt><dd>{vehicle.stockNumber || "Not detected"}</dd></div><div><dt>Photos</dt><dd>{vehicle.imageUrls.length}</dd></div></dl><div className="vehicle-source"><span>Captured {formatDate(vehicle.importedAt)}</span><a href={vehicle.sourceUrl} target="_blank" rel="noreferrer">View source ↗</a></div><button className="creative-next" disabled>Creative studio · next build</button></div></article>)}</div>}
+            </section>
           </section>
         )}
       </main>

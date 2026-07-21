@@ -1,0 +1,255 @@
+import { env } from "cloudflare:workers";
+
+export type ImportedVehicleRecord = {
+  id: string;
+  associate_email: string;
+  source_url: string;
+  source_host: string;
+  title: string;
+  vin: string;
+  stock_number: string;
+  year: string;
+  make: string;
+  model: string;
+  trim: string;
+  price: string;
+  currency: string;
+  description: string;
+  image_urls: string;
+  facts: string;
+  source_type: string;
+  authorization_certified_at: string;
+  imported_at: string;
+  updated_at: string;
+};
+
+export type ExtractedVehicle = {
+  sourceUrl: string;
+  sourceHost: string;
+  title: string;
+  vin: string;
+  stockNumber: string;
+  year: string;
+  make: string;
+  model: string;
+  trim: string;
+  price: string;
+  currency: string;
+  description: string;
+  imageUrls: string[];
+  facts: Record<string, string>;
+};
+
+let schemaReady: Promise<void> | null = null;
+
+function database() {
+  if (!env.DB) throw new Error("The inventory database is unavailable.");
+  return env.DB;
+}
+
+async function ensureVdpSchema() {
+  if (!schemaReady) {
+    const db = database();
+    schemaReady = db.batch([
+      db.prepare(`CREATE TABLE IF NOT EXISTS imported_vehicles (
+        id TEXT PRIMARY KEY,
+        associate_email TEXT NOT NULL,
+        source_url TEXT NOT NULL,
+        source_host TEXT NOT NULL,
+        title TEXT NOT NULL,
+        vin TEXT NOT NULL DEFAULT '',
+        stock_number TEXT NOT NULL DEFAULT '',
+        year TEXT NOT NULL DEFAULT '',
+        make TEXT NOT NULL DEFAULT '',
+        model TEXT NOT NULL DEFAULT '',
+        trim TEXT NOT NULL DEFAULT '',
+        price TEXT NOT NULL DEFAULT '',
+        currency TEXT NOT NULL DEFAULT 'USD',
+        description TEXT NOT NULL DEFAULT '',
+        image_urls TEXT NOT NULL DEFAULT '[]',
+        facts TEXT NOT NULL DEFAULT '{}',
+        source_type TEXT NOT NULL DEFAULT 'vdp_one_time',
+        authorization_certified_at TEXT NOT NULL,
+        imported_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(associate_email, source_url)
+      )`),
+      db.prepare("CREATE INDEX IF NOT EXISTS imported_vehicles_associate_idx ON imported_vehicles(associate_email, imported_at DESC)"),
+    ]).then(() => undefined);
+  }
+  return schemaReady;
+}
+
+function validatePublicUrl(value: string) {
+  let url: URL;
+  try { url = new URL(value); } catch { throw new Error("Enter a complete public VDP URL."); }
+  if (!["http:", "https:"].includes(url.protocol) || (url.port && !["80", "443"].includes(url.port))) throw new Error("Only public HTTP or HTTPS vehicle pages are supported.");
+  const host = url.hostname.toLowerCase();
+  if (host === "localhost" || host.endsWith(".local") || host.endsWith(".internal") || host.includes(":")) throw new Error("Private network addresses are not supported.");
+  const ipv4 = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/)?.slice(1).map(Number);
+  if (ipv4 && (ipv4[0] === 10 || ipv4[0] === 127 || ipv4[0] === 0 || (ipv4[0] === 169 && ipv4[1] === 254) || (ipv4[0] === 172 && ipv4[1] >= 16 && ipv4[1] <= 31) || (ipv4[0] === 192 && ipv4[1] === 168))) throw new Error("Private network addresses are not supported.");
+  url.hash = "";
+  return url;
+}
+
+function textValue(value: unknown): string {
+  if (typeof value === "string" || typeof value === "number") return String(value).trim();
+  if (value && typeof value === "object" && "name" in value) return textValue((value as { name?: unknown }).name);
+  return "";
+}
+
+function flattenJsonLd(value: unknown): Record<string, unknown>[] {
+  if (Array.isArray(value)) return value.flatMap(flattenJsonLd);
+  if (!value || typeof value !== "object") return [];
+  const object = value as Record<string, unknown>;
+  return [object, ...flattenJsonLd(object["@graph"]), ...flattenJsonLd(object.itemListElement)];
+}
+
+function typesOf(node: Record<string, unknown>) {
+  const value = node["@type"];
+  return (Array.isArray(value) ? value : [value]).filter((item): item is string => typeof item === "string").map((item) => item.toLowerCase());
+}
+
+function meta(html: string, key: string) {
+  const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const patterns = [
+    new RegExp(`<meta[^>]+(?:property|name)=["']${escaped}["'][^>]+content=["']([^"']+)["'][^>]*>`, "i"),
+    new RegExp(`<meta[^>]+content=["']([^"']+)["'][^>]+(?:property|name)=["']${escaped}["'][^>]*>`, "i"),
+  ];
+  return patterns.map((pattern) => html.match(pattern)?.[1] ?? "").find(Boolean) ?? "";
+}
+
+function decodeEntities(value: string) {
+  return value.replace(/&amp;/g, "&").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/\s+/g, " ").trim();
+}
+
+function resolveImage(value: unknown, baseUrl: URL): string[] {
+  const raw = Array.isArray(value) ? value : [value];
+  return raw.flatMap((item) => {
+    if (typeof item === "string") return [item];
+    if (item && typeof item === "object") return [textValue((item as Record<string, unknown>).url) || textValue((item as Record<string, unknown>).contentUrl)];
+    return [];
+  }).filter(Boolean).map((item) => { try { return new URL(item, baseUrl).href; } catch { return ""; } }).filter(Boolean);
+}
+
+export async function extractVehicleFromVdp(value: string): Promise<ExtractedVehicle> {
+  const requestedUrl = validatePublicUrl(value);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15000);
+  let response: Response;
+  try {
+    response = await fetch(requestedUrl, { headers: { "User-Agent": "LotSocial-VDP-Importer/1.0", Accept: "text/html,application/xhtml+xml" }, redirect: "follow", signal: controller.signal });
+  } finally { clearTimeout(timeout); }
+  if (!response.ok) throw new Error(`The dealership page returned ${response.status}. Try another public VDP URL.`);
+  const finalUrl = validatePublicUrl(response.url);
+  const contentType = response.headers.get("content-type") ?? "";
+  if (!contentType.includes("text/html") && !contentType.includes("application/xhtml")) throw new Error("That URL is not a vehicle detail page.");
+  const declaredLength = Number(response.headers.get("content-length") ?? "0");
+  if (declaredLength > 3_000_000) throw new Error("That VDP is too large to import safely.");
+  const html = await response.text();
+  if (html.length > 3_000_000) throw new Error("That VDP is too large to import safely.");
+
+  const nodes: Record<string, unknown>[] = [];
+  for (const match of html.matchAll(/<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)) {
+    try { nodes.push(...flattenJsonLd(JSON.parse(match[1].trim()))); } catch { /* malformed third-party JSON-LD is ignored */ }
+  }
+  const vehicleNode = nodes.find((node) => typesOf(node).some((type) => ["vehicle", "car", "product", "individualproduct"].includes(type))) ?? {};
+  const name = textValue(vehicleNode.name) || decodeEntities(meta(html, "og:title")) || decodeEntities(html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] ?? "Imported vehicle");
+  const visibleText = decodeEntities(html.replace(/<script[\s\S]*?<\/script>/gi, " ").replace(/<style[\s\S]*?<\/style>/gi, " ").replace(/<[^>]+>/g, " "));
+  const offers = (vehicleNode.offers && typeof vehicleNode.offers === "object" ? vehicleNode.offers : {}) as Record<string, unknown>;
+  const brand = textValue(vehicleNode.brand) || textValue(vehicleNode.manufacturer);
+  const images = [
+    ...resolveImage(vehicleNode.image, finalUrl),
+    ...resolveImage(meta(html, "og:image"), finalUrl),
+    ...Array.from(html.matchAll(/<img[^>]+(?:src|data-src)=["']([^"']+)["'][^>]*>/gi)).flatMap((match) => resolveImage(match[1], finalUrl)),
+  ].filter((url) => /\.(?:jpe?g|png|webp)(?:\?|$)/i.test(url) && !/(?:logo|icon|avatar|pixel|badge|spacer)/i.test(url));
+  const uniqueImages = Array.from(new Set(images)).slice(0, 24);
+  const vin = textValue(vehicleNode.vehicleIdentificationNumber) || textValue(vehicleNode.vin) || visibleText.match(/\b[A-HJ-NPR-Z0-9]{17}\b/i)?.[0]?.toUpperCase() || "";
+  const year = textValue(vehicleNode.vehicleModelDate) || name.match(/\b(20\d{2}|19\d{2})\b/)?.[1] || "";
+  const price = textValue(offers.price) || visibleText.match(/\$\s?([\d,]{4,})/)?.[1]?.replace(/,/g, "") || "";
+  const description = decodeEntities(textValue(vehicleNode.description) || meta(html, "description")).slice(0, 3000);
+  const facts = {
+    exteriorColor: textValue(vehicleNode.color),
+    interiorColor: textValue(vehicleNode.vehicleInteriorColor),
+    transmission: textValue(vehicleNode.vehicleTransmission),
+    fuelType: textValue(vehicleNode.fuelType),
+    drivetrain: textValue(vehicleNode.driveWheelConfiguration),
+    bodyStyle: textValue(vehicleNode.bodyType),
+  };
+  const extracted: ExtractedVehicle = {
+    sourceUrl: finalUrl.href,
+    sourceHost: finalUrl.hostname,
+    title: name.slice(0, 300),
+    vin,
+    stockNumber: textValue(vehicleNode.sku) || visibleText.match(/Stock\s*(?:#|Number)?\s*[:#]?\s*([A-Z0-9-]+)/i)?.[1] || "",
+    year,
+    make: brand,
+    model: textValue(vehicleNode.model),
+    trim: textValue(vehicleNode.vehicleConfiguration) || textValue(vehicleNode.trim),
+    price,
+    currency: textValue(offers.priceCurrency) || "USD",
+    description,
+    imageUrls: uniqueImages,
+    facts: Object.fromEntries(Object.entries(facts).filter(([, item]) => item)),
+  };
+  if (!extracted.vin && !extracted.title) throw new Error("LotSocial could not identify a vehicle on that page.");
+  return extracted;
+}
+
+export async function saveImportedVehicle(associateEmail: string, vehicle: ExtractedVehicle) {
+  await ensureVdpSchema();
+  const existing = await database().prepare("SELECT id FROM imported_vehicles WHERE LOWER(associate_email) = LOWER(?) AND source_url = ? LIMIT 1").bind(associateEmail, vehicle.sourceUrl).first<{ id: string }>();
+  const id = existing?.id ?? crypto.randomUUID();
+  const certifiedAt = new Date().toISOString();
+  await database().prepare(`INSERT INTO imported_vehicles (
+    id, associate_email, source_url, source_host, title, vin, stock_number, year, make,
+    model, trim, price, currency, description, image_urls, facts, authorization_certified_at
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  ON CONFLICT(associate_email, source_url) DO UPDATE SET title = excluded.title, vin = excluded.vin,
+    stock_number = excluded.stock_number, year = excluded.year, make = excluded.make,
+    model = excluded.model, trim = excluded.trim, price = excluded.price,
+    currency = excluded.currency, description = excluded.description,
+    image_urls = excluded.image_urls, facts = excluded.facts,
+    authorization_certified_at = excluded.authorization_certified_at,
+    updated_at = CURRENT_TIMESTAMP`)
+    .bind(id, associateEmail, vehicle.sourceUrl, vehicle.sourceHost, vehicle.title, vehicle.vin,
+      vehicle.stockNumber, vehicle.year, vehicle.make, vehicle.model, vehicle.trim,
+      vehicle.price, vehicle.currency, vehicle.description, JSON.stringify(vehicle.imageUrls),
+      JSON.stringify(vehicle.facts), certifiedAt).run();
+  return getImportedVehicle(id, associateEmail);
+}
+
+export async function getImportedVehicle(id: string, associateEmail: string) {
+  await ensureVdpSchema();
+  return database().prepare("SELECT * FROM imported_vehicles WHERE id = ? AND LOWER(associate_email) = LOWER(?) LIMIT 1").bind(id, associateEmail).first<ImportedVehicleRecord>();
+}
+
+export async function listImportedVehicles(associateEmail: string) {
+  await ensureVdpSchema();
+  const result = await database().prepare("SELECT * FROM imported_vehicles WHERE LOWER(associate_email) = LOWER(?) ORDER BY imported_at DESC LIMIT 100").bind(associateEmail).all<ImportedVehicleRecord>();
+  return result.results;
+}
+
+export function serializeVehicle(record: ImportedVehicleRecord) {
+  return {
+    id: record.id,
+    sourceUrl: record.source_url,
+    sourceHost: record.source_host,
+    title: record.title,
+    vin: record.vin,
+    stockNumber: record.stock_number,
+    year: record.year,
+    make: record.make,
+    model: record.model,
+    trim: record.trim,
+    price: record.price,
+    currency: record.currency,
+    description: record.description,
+    imageUrls: JSON.parse(record.image_urls || "[]") as string[],
+    facts: JSON.parse(record.facts || "{}") as Record<string, string>,
+    sourceType: record.source_type,
+    certifiedAt: record.authorization_certified_at,
+    importedAt: record.imported_at,
+    updatedAt: record.updated_at,
+  };
+}

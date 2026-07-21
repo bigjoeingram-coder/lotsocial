@@ -22,6 +22,13 @@
       "when": 1784453899011,
       "tag": "0002_fine_ozymandias",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1784595917925,
+      "tag": "0003_optimal_catseye",
+      "breakpoints": true
     }
   ]
 }
