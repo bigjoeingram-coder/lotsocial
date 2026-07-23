@@ -28,6 +28,7 @@ export type CreativeRenderJobRecord = {
   status: string;
   render_plan: string;
   output_url: string;
+  storage_key: string;
   error_message: string;
   created_at: string;
   updated_at: string;
@@ -72,6 +73,7 @@ async function ensureCreativeSchema() {
         status TEXT NOT NULL DEFAULT 'prepared',
         render_plan TEXT NOT NULL,
         output_url TEXT NOT NULL DEFAULT '',
+        storage_key TEXT NOT NULL DEFAULT '',
         error_message TEXT NOT NULL DEFAULT '',
         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -200,15 +202,22 @@ export async function updateRenderJob(input: {
   associateEmail: string;
   status: string;
   outputUrl?: string;
+  storageKey?: string;
   errorMessage?: string;
 }) {
   await ensureCreativeSchema();
   await database().prepare(`UPDATE creative_render_jobs
-    SET status = ?, output_url = ?, error_message = ?, updated_at = CURRENT_TIMESTAMP
+    SET status = ?, output_url = ?, storage_key = ?, error_message = ?, updated_at = CURRENT_TIMESTAMP
     WHERE id = ? AND associate_email = ?`)
-    .bind(input.status, input.outputUrl ?? "", input.errorMessage ?? "", input.id, input.associateEmail).run();
+    .bind(input.status, input.outputUrl ?? "", input.storageKey ?? "", input.errorMessage ?? "", input.id, input.associateEmail).run();
   return database().prepare("SELECT * FROM creative_render_jobs WHERE id = ? AND associate_email = ? LIMIT 1")
     .bind(input.id, input.associateEmail).first<CreativeRenderJobRecord>();
+}
+
+export async function getRenderJob(id: string, associateEmail: string) {
+  await ensureCreativeSchema();
+  return database().prepare("SELECT * FROM creative_render_jobs WHERE id = ? AND associate_email = ? LIMIT 1")
+    .bind(id, associateEmail).first<CreativeRenderJobRecord>();
 }
 
 export function serializeRenderJob(record: CreativeRenderJobRecord) {
@@ -220,6 +229,7 @@ export function serializeRenderJob(record: CreativeRenderJobRecord) {
     providerRenderId: record.provider_render_id,
     status: record.status,
     outputUrl: record.output_url,
+    stored: Boolean(record.storage_key),
     errorMessage: record.error_message,
     summary: plan.summary ?? null,
     createdAt: record.created_at,

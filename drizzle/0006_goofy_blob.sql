@@ -1,0 +1,1 @@
+ALTER TABLE `creative_render_jobs` ADD `storage_key` text DEFAULT '' NOT NULL;

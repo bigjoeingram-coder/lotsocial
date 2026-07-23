@@ -1,6 +1,7 @@
 import { getChatGPTUser } from "../../../../chatgpt-auth";
 import { createRenderJob, getCreativeProject, getLatestRenderJob, serializeRenderJob, updateRenderJob } from "../../../../lib/creative";
 import { buildVerticalRenderPlan, checkRender, rendererIsConfigured, submitRender } from "../../../../lib/rendering";
+import { archiveRenderedVideo } from "../../../../lib/media";
 import { getImportedVehicle } from "../../../../lib/vdp";
 
 export async function POST(_request: Request, context: { params: Promise<{ id: string }> }) {
@@ -44,7 +45,22 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     try {
       const providerState = await checkRender(job.provider_render_id);
       if (providerState) {
-        const refreshed = await updateRenderJob({ id: job.id, associateEmail: user.email, ...providerState });
+        let storedState: { storageKey?: string; outputUrl?: string } = {};
+        let storageWarning = "";
+        if (providerState.status === "completed" && providerState.outputUrl) {
+          try {
+            storedState = await archiveRenderedVideo(job.id, user.email, providerState.outputUrl);
+          } catch (caught) {
+            storageWarning = caught instanceof Error ? caught.message : "Permanent video storage is temporarily unavailable.";
+          }
+        }
+        const refreshed = await updateRenderJob({
+          id: job.id,
+          associateEmail: user.email,
+          ...providerState,
+          ...storedState,
+          errorMessage: storageWarning,
+        });
         if (refreshed) return Response.json({ job: serializeRenderJob(refreshed) });
       }
     } catch (caught) {

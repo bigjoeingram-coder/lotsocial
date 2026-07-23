@@ -43,6 +43,13 @@
       "when": 1784598028235,
       "tag": "0005_real_tyger_tiger",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1784780706594,
+      "tag": "0006_goofy_blob",
+      "breakpoints": true
     }
   ]
 }

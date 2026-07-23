@@ -117,6 +117,7 @@ export const creativeRenderJobs = sqliteTable("creative_render_jobs", {
   status: text("status").notNull().default("prepared"),
   renderPlan: text("render_plan").notNull(),
   outputUrl: text("output_url").notNull().default(""),
+  storageKey: text("storage_key").notNull().default(""),
   errorMessage: text("error_message").notNull().default(""),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
