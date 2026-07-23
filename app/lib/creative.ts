@@ -116,7 +116,7 @@ function createCopy(vehicle: ImportedVehicleRecord, style: string, durationSecon
   const voiceoverScript = short
     ? `${opening} ${priceLine} ${endCardCta} with ${endCardName}.`
     : `${opening} ${detailLine} ${priceLine} Vehicle details can change, so confirm current information with the dealership. ${endCardCta} with ${endCardName}.`;
-  const socialCaption = `${name}${vehicle.price ? ` · ${displayPrice(vehicle.price)} as listed` : ""}\n\n${highlights.length ? `${highlights.join(" · ")}\n\n` : ""}${endCardCta}. Confirm price, availability, and eligibility with the dealership.\n\n#${vehicle.make.replace(/\s+/g, "")} #${vehicle.model.replace(/\s+/g, "")} #CarSales`;
+  const socialCaption = `${name}${vehicle.price ? ` · ${displayPrice(vehicle.price)} as listed` : ""}\n\n${highlights.length ? `${highlights.join(" · ")}\n\n` : ""}${endCardCta}. Confirm price, availability, and eligibility with the dealership.\n\nThis ad expires 7 days after posting or when the vehicle sells, whichever comes first.\n\n#${vehicle.make.replace(/\s+/g, "")} #${vehicle.model.replace(/\s+/g, "")} #CarSales`;
   return { voiceoverScript, socialCaption };
 }
 
