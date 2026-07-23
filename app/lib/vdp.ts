@@ -129,7 +129,26 @@ function resolveImage(value: unknown, baseUrl: URL): string[] {
     if (typeof item === "string") return [item];
     if (item && typeof item === "object") return [textValue((item as Record<string, unknown>).url) || textValue((item as Record<string, unknown>).contentUrl)];
     return [];
-  }).filter(Boolean).map((item) => { try { return new URL(item, baseUrl).href; } catch { return ""; } }).filter(Boolean);
+  }).filter(Boolean).map((item) => { try { return new URL(decodeEntities(item), baseUrl).href; } catch { return ""; } }).filter(Boolean);
+}
+
+function imageUrlsFromTag(tag: string, baseUrl: URL) {
+  const direct = Array.from(tag.matchAll(/(?:src|data-src|data-lazy-src)=["']([^"']+)["']/gi)).flatMap((match) => resolveImage(match[1], baseUrl));
+  const sourceSets = Array.from(tag.matchAll(/(?:srcset|data-srcset)=["']([^"']+)["']/gi)).flatMap((match) =>
+    match[1].split(",").flatMap((candidate) => resolveImage(candidate.trim().split(/\s+/)[0], baseUrl))
+  );
+  return [...direct, ...sourceSets];
+}
+
+function usableImageUrl(url: string) {
+  try {
+    const parsed = new URL(url);
+    if (!(["http:", "https:"] as string[]).includes(parsed.protocol)) return false;
+    if (/\.(?:svg|ico|gif|pdf)(?:\?|$)/i.test(parsed.pathname)) return false;
+    return !/(?:logo|icon|avatar|pixel|badge|spacer|tracking|favicon|loader|placeholder)/i.test(url);
+  } catch {
+    return false;
+  }
 }
 
 export async function extractVehicleFromVdp(value: string): Promise<ExtractedVehicle> {
@@ -158,11 +177,14 @@ export async function extractVehicleFromVdp(value: string): Promise<ExtractedVeh
   const visibleText = decodeEntities(html.replace(/<script[\s\S]*?<\/script>/gi, " ").replace(/<style[\s\S]*?<\/style>/gi, " ").replace(/<[^>]+>/g, " "));
   const offers = (vehicleNode.offers && typeof vehicleNode.offers === "object" ? vehicleNode.offers : {}) as Record<string, unknown>;
   const brand = textValue(vehicleNode.brand) || textValue(vehicleNode.manufacturer);
+  const imageTags = Array.from(html.matchAll(/<img\b[^>]*>/gi)).map((match) => match[0]);
+  const galleryTags = imageTags.filter((tag) => /(?:alt|class|id)=["'][^"']*(?:slide|vehicle|inventory|gallery|carousel|swiper)/i.test(tag));
   const images = [
     ...resolveImage(vehicleNode.image, finalUrl),
     ...resolveImage(meta(html, "og:image"), finalUrl),
-    ...Array.from(html.matchAll(/<img[^>]+(?:src|data-src)=["']([^"']+)["'][^>]*>/gi)).flatMap((match) => resolveImage(match[1], finalUrl)),
-  ].filter((url) => /\.(?:jpe?g|png|webp)(?:\?|$)/i.test(url) && !/(?:logo|icon|avatar|pixel|badge|spacer)/i.test(url));
+    ...galleryTags.flatMap((tag) => imageUrlsFromTag(tag, finalUrl)),
+    ...imageTags.flatMap((tag) => imageUrlsFromTag(tag, finalUrl)),
+  ].filter(usableImageUrl);
   const uniqueImages = Array.from(new Set(images)).slice(0, 24);
   const vin = textValue(vehicleNode.vehicleIdentificationNumber) || textValue(vehicleNode.vin) || visibleText.match(/\b[A-HJ-NPR-Z0-9]{17}\b/i)?.[0]?.toUpperCase() || "";
   const year = textValue(vehicleNode.vehicleModelDate) || name.match(/\b(20\d{2}|19\d{2})\b/)?.[1] || "";
