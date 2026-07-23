@@ -123,6 +123,20 @@ function decodeEntities(value: string) {
   return value.replace(/&amp;/g, "&").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/\s+/g, " ").trim();
 }
 
+function normalizeListedPrice(value: unknown) {
+  const raw = textValue(value);
+  const match = raw.match(/(?:USD\s*)?\$?\s*([\d,]+(?:\.\d{1,2})?)/i);
+  if (!match) return "";
+  const amount = Number(match[1].replace(/,/g, ""));
+  return Number.isFinite(amount) && amount >= 1000 ? String(amount) : "";
+}
+
+function attributeValue(html: string, attribute: string, value: string, target: string) {
+  const escaped = value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const tag = html.match(new RegExp(`<[^>]+${attribute}=["']${escaped}["'][^>]*>`, "i"))?.[0] ?? "";
+  return tag.match(new RegExp(`${target}=["']([^"']+)["']`, "i"))?.[1] ?? "";
+}
+
 function resolveImage(value: unknown, baseUrl: URL): string[] {
   const raw = Array.isArray(value) ? value : [value];
   return raw.flatMap((item) => {
@@ -175,7 +189,9 @@ export async function extractVehicleFromVdp(value: string): Promise<ExtractedVeh
   const vehicleNode = nodes.find((node) => typesOf(node).some((type) => ["vehicle", "car", "product", "individualproduct"].includes(type))) ?? {};
   const name = textValue(vehicleNode.name) || decodeEntities(meta(html, "og:title")) || decodeEntities(html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] ?? "Imported vehicle");
   const visibleText = decodeEntities(html.replace(/<script[\s\S]*?<\/script>/gi, " ").replace(/<style[\s\S]*?<\/style>/gi, " ").replace(/<[^>]+>/g, " "));
-  const offers = (vehicleNode.offers && typeof vehicleNode.offers === "object" ? vehicleNode.offers : {}) as Record<string, unknown>;
+  const offerValues = Array.isArray(vehicleNode.offers) ? vehicleNode.offers : [vehicleNode.offers];
+  const offers = (offerValues.find((offer) => offer && typeof offer === "object") ?? {}) as Record<string, unknown>;
+  const priceSpecification = (offers.priceSpecification && typeof offers.priceSpecification === "object" ? offers.priceSpecification : {}) as Record<string, unknown>;
   const brand = textValue(vehicleNode.brand) || textValue(vehicleNode.manufacturer);
   const imageTags = Array.from(html.matchAll(/<img\b[^>]*>/gi)).map((match) => match[0]);
   const galleryTags = imageTags.filter((tag) => /(?:alt|class|id)=["'][^"']*(?:slide|vehicle|inventory|gallery|carousel|swiper)/i.test(tag));
@@ -188,9 +204,21 @@ export async function extractVehicleFromVdp(value: string): Promise<ExtractedVeh
   const uniqueImages = Array.from(new Set(images)).slice(0, 24);
   const vin = textValue(vehicleNode.vehicleIdentificationNumber) || textValue(vehicleNode.vin) || visibleText.match(/\b[A-HJ-NPR-Z0-9]{17}\b/i)?.[0]?.toUpperCase() || "";
   const year = textValue(vehicleNode.vehicleModelDate) || name.match(/\b(20\d{2}|19\d{2})\b/)?.[1] || "";
-  const price = textValue(offers.price) || visibleText.match(/\$\s?([\d,]{4,})/)?.[1]?.replace(/,/g, "") || "";
+  const labeledPrice = visibleText.match(/(?:Total Price|Dealer Price|Sale Price|Selling Price|Internet Price|Today's Price|Our Price|MSRP)\s*[:\-]?\s*\$\s*([\d,]+(?:\.\d{1,2})?)/i)?.[1];
+  const price = [
+    offers.price,
+    offers.lowPrice,
+    priceSpecification.price,
+    meta(html, "product:price:amount"),
+    attributeValue(html, "itemprop", "price", "content"),
+    labeledPrice,
+  ].map(normalizeListedPrice).find(Boolean) || "";
   const description = decodeEntities(textValue(vehicleNode.description) || meta(html, "description")).slice(0, 3000);
+  const organizationNode = nodes.find((node) => typesOf(node).includes("organization") && textValue(node.name));
+  const dealershipName = textValue(offers.seller) || textValue(vehicleNode.seller) || textValue(vehicleNode.offeredBy)
+    || decodeEntities(meta(html, "og:site_name")) || textValue(organizationNode?.name);
   const facts = {
+    dealershipName,
     exteriorColor: textValue(vehicleNode.color),
     interiorColor: textValue(vehicleNode.vehicleInteriorColor),
     transmission: textValue(vehicleNode.vehicleTransmission),

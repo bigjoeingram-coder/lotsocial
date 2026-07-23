@@ -175,6 +175,20 @@ function formatPrice(value: string, currency: string) {
   return new Intl.NumberFormat("en-US", { style: "currency", currency: currency || "USD", maximumFractionDigits: 0 }).format(amount);
 }
 
+function vehicleDisplayName(vehicle: ImportedVehicle) {
+  const structured = [vehicle.year, vehicle.make, vehicle.model, vehicle.trim].filter(Boolean);
+  return vehicle.model ? structured.join(" ") : vehicle.title;
+}
+
+function vehicleModelLabel(vehicle: ImportedVehicle) {
+  if (vehicle.model) return vehicle.model;
+  let label = vehicle.title;
+  for (const prefix of [vehicle.year, vehicle.make]) {
+    if (prefix) label = label.replace(new RegExp(`^${prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*`, "i"), "");
+  }
+  return label || vehicle.title;
+}
+
 function initialForm(user: User): FormState {
   return {
     dealershipName: "",
@@ -604,14 +618,14 @@ export function AuthorizationApp({ user }: { user: User }) {
             </form>
             <section className="inventory-section">
               <div className="inventory-section-header"><div><p className="eyebrow">My inventory</p><h2>{vehicles.length} imported {vehicles.length === 1 ? "vehicle" : "vehicles"}</h2></div><div className="pro-callout"><span>PRO</span><p><strong>Want your entire lot here automatically?</strong><br />Connect HomeNet, vAuto, or an authorized dealership feed.</p><button onClick={() => setView("dashboard")}>Set up automation →</button></div></div>
-              {inventoryLoading ? <div className="empty-state"><span className="loader" /><p>Loading your inventory...</p></div> : vehicles.length === 0 ? <div className="empty-state inventory-empty"><div className="empty-icon">VIN</div><h3>Your first vehicle starts with a URL</h3><p>Paste one of the dealership's public VDP links above. The extracted record remains tied to its original source.</p></div> : <div className="vehicle-grid">{vehicles.map((vehicle) => <article className="vehicle-card" key={vehicle.id}><div className="vehicle-image">{vehicle.imageUrls[0] ? <img src={vehicle.imageUrls[0]} alt={vehicle.title} loading="lazy" referrerPolicy="no-referrer" /> : <div className="vehicle-placeholder">No VDP image found</div>}<span className="source-badge">{vehicle.sourceHost}</span></div><div className="vehicle-body"><div className="vehicle-title"><div><span>{vehicle.year} {vehicle.make}</span><h3>{vehicle.model || vehicle.title}</h3><p>{vehicle.trim}</p></div>{vehicle.price && <strong>{formatPrice(vehicle.price, vehicle.currency)}</strong>}</div><dl><div><dt>VIN</dt><dd>{vehicle.vin || "Not detected"}</dd></div><div><dt>Stock</dt><dd>{vehicle.stockNumber || "Not detected"}</dd></div><div><dt>Photos</dt><dd>{vehicle.imageUrls.length}</dd></div></dl><div className="vehicle-source"><span>Captured {formatDate(vehicle.importedAt)}</span><a href={vehicle.sourceUrl} target="_blank" rel="noreferrer">View source ↗</a></div><button className="creative-next" disabled={vehicle.imageUrls.length < 2} onClick={() => startCreative(vehicle)}>{vehicle.imageUrls.length < 2 ? "At least 2 photos required" : "Create video storyboard →"}</button></div></article>)}</div>}
+              {inventoryLoading ? <div className="empty-state"><span className="loader" /><p>Loading your inventory...</p></div> : vehicles.length === 0 ? <div className="empty-state inventory-empty"><div className="empty-icon">VIN</div><h3>Your first vehicle starts with a URL</h3><p>Paste one of the dealership's public VDP links above. The extracted record remains tied to its original source.</p></div> : <div className="vehicle-grid">{vehicles.map((vehicle) => <article className="vehicle-card" key={vehicle.id}><div className="vehicle-image">{vehicle.imageUrls[0] ? <img src={vehicle.imageUrls[0]} alt={vehicle.title} loading="lazy" referrerPolicy="no-referrer" /> : <div className="vehicle-placeholder">No VDP image found</div>}<span className="source-badge">{vehicle.sourceHost}</span></div><div className="vehicle-body"><div className="vehicle-title"><div><span>{vehicle.year} {vehicle.make}</span><h3>{vehicleModelLabel(vehicle)}</h3><p>{vehicle.trim}</p></div>{vehicle.price && <strong>{formatPrice(vehicle.price, vehicle.currency)}</strong>}</div><dl><div><dt>VIN</dt><dd>{vehicle.vin || "Not detected"}</dd></div><div><dt>Stock</dt><dd>{vehicle.stockNumber || "Not detected"}</dd></div><div><dt>Photos</dt><dd>{vehicle.imageUrls.length}</dd></div></dl><div className="vehicle-source"><span>Captured {formatDate(vehicle.importedAt)}</span><a href={vehicle.sourceUrl} target="_blank" rel="noreferrer">View source ↗</a></div><button className="creative-next" disabled={vehicle.imageUrls.length < 2} onClick={() => startCreative(vehicle)}>{vehicle.imageUrls.length < 2 ? "At least 2 photos required" : "Create video storyboard →"}</button></div></article>)}</div>}
             </section>
           </section>
         ) : (
           <section className="creative-workspace">
             <button className="back-button" onClick={() => setView("inventory")}>← Back to My Inventory</button>
             {!creativeVehicle ? <div className="empty-state"><h3>Select a vehicle first</h3><p>Return to My Inventory and choose a vehicle with at least two VDP photos.</p></div> : <form onSubmit={generateCreative}>
-              <div className="creative-heading"><div><p className="eyebrow">Creative studio</p><h1>{creativeVehicle.year} {creativeVehicle.make} {creativeVehicle.model || creativeVehicle.title}</h1><p>Build a source-grounded vertical-video storyboard from the dealership's VDP photos and facts.</p></div><div className="creative-vehicle-chip">{creativeVehicle.price && <strong>{formatPrice(creativeVehicle.price, creativeVehicle.currency)}</strong>}<span>VIN {creativeVehicle.vin || "not detected"}</span></div></div>
+              <div className="creative-heading"><div><p className="eyebrow">Creative studio</p><h1>{vehicleDisplayName(creativeVehicle)}</h1><p>Build a source-grounded vertical-video storyboard from the dealership's VDP photos and facts.</p></div><div className="creative-vehicle-chip">{creativeVehicle.price && <strong>{formatPrice(creativeVehicle.price, creativeVehicle.currency)}</strong>}<span>VIN {creativeVehicle.vin || "not detected"}</span></div></div>
               <div className="creative-layout">
                 <main className="creative-editor">
                   <section className="creative-step"><div className="creative-step-title"><span>1</span><div><h2>Select the shots</h2><p>Choose 2–10 photos. Their order becomes the first storyboard sequence.</p></div><strong>{selectedCreativeImages.length} selected</strong></div><div className="creative-photo-grid">{creativeVehicle.imageUrls.map((image, index) => <button type="button" key={image} className={selectedCreativeImages.includes(image) ? "selected" : ""} onClick={() => toggleCreativeImage(image)}><img src={image} alt={`VDP photo ${index + 1}`} loading="lazy" referrerPolicy="no-referrer" /><span>{selectedCreativeImages.includes(image) ? selectedCreativeImages.indexOf(image) + 1 : "+"}</span></button>)}</div></section>

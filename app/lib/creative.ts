@@ -96,12 +96,42 @@ function displayPrice(value: string) {
 
 function groundedHighlights(vehicle: ImportedVehicleRecord) {
   const facts = JSON.parse(vehicle.facts || "{}") as Record<string, string>;
-  return Object.values(facts).filter(Boolean).slice(0, 3);
+  const labels: Record<string, string> = {
+    exteriorColor: "Exterior",
+    interiorColor: "Interior",
+    transmission: "Transmission",
+    fuelType: "Fuel",
+    drivetrain: "Drivetrain",
+    bodyStyle: "Body style",
+  };
+  return Object.entries(facts)
+    .filter(([key, value]) => key !== "dealershipName" && Boolean(value))
+    .map(([key, value]) => `${labels[key] ?? key}: ${value}`)
+    .slice(0, 4);
+}
+
+function captionDescription(vehicle: ImportedVehicleRecord) {
+  const description = vehicle.description.replace(/\s+/g, " ").trim();
+  if (!description) return "";
+  const sentences = description.match(/[^.!?]+[.!?]+|[^.!?]+$/g) ?? [description];
+  const summary = sentences.slice(0, 2).join(" ").trim();
+  return summary.length > 320 ? `${summary.slice(0, 317).trimEnd()}...` : summary;
+}
+
+function hashtag(value: string, fallback: string) {
+  return (value || fallback).replace(/[^a-zA-Z0-9]/g, "") || fallback;
+}
+
+function dealershipName(vehicle: ImportedVehicleRecord) {
+  const facts = JSON.parse(vehicle.facts || "{}") as Record<string, string>;
+  if (facts.dealershipName) return facts.dealershipName;
+  return vehicle.source_host.replace(/^www\./i, "").split(".")[0] || "Dealership";
 }
 
 function createCopy(vehicle: ImportedVehicleRecord, style: string, durationSeconds: number, endCardName: string, endCardCta: string) {
   const name = vehicleName(vehicle);
   const highlights = groundedHighlights(vehicle);
+  const description = captionDescription(vehicle);
   const priceLine = vehicle.price ? `It was listed at ${displayPrice(vehicle.price)} when this vehicle page was captured.` : "Contact me for current pricing and availability.";
   const detailLine = highlights.length ? `Highlights listed by the dealership include ${highlights.join(", ")}.` : "Open the original dealership listing for the complete equipment and feature details.";
   const openings: Record<string, string[]> = {
@@ -116,7 +146,10 @@ function createCopy(vehicle: ImportedVehicleRecord, style: string, durationSecon
   const voiceoverScript = short
     ? `${opening} ${priceLine} ${endCardCta} with ${endCardName}.`
     : `${opening} ${detailLine} ${priceLine} Vehicle details can change, so confirm current information with the dealership. ${endCardCta} with ${endCardName}.`;
-  const socialCaption = `${name}${vehicle.price ? ` · ${displayPrice(vehicle.price)} as listed` : ""}\n\n${highlights.length ? `${highlights.join(" · ")}\n\n` : ""}${endCardCta}. Confirm price, availability, and eligibility with the dealership.\n\nThis ad expires 7 days after posting or when the vehicle sells, whichever comes first.\n\n#${vehicle.make.replace(/\s+/g, "")} #${vehicle.model.replace(/\s+/g, "")} #CarSales`;
+  const makeModelTag = hashtag(`${vehicle.make}${vehicle.model}`, "Vehicle");
+  const salespersonTag = hashtag(endCardName, "Salesperson");
+  const dealershipTag = hashtag(dealershipName(vehicle), "Dealership");
+  const socialCaption = `${name}\n\n${description ? `${description}\n\n` : ""}${highlights.length ? `${highlights.join(" · ")}\n\n` : ""}${vehicle.price ? `Total price listed on the VDP: ${displayPrice(vehicle.price)}.\n\n` : ""}${endCardCta}. Confirm current price, availability, and eligibility with the dealership.\n\nThis ad expires 7 days after posting or when the vehicle sells, whichever comes first.\n\n#${makeModelTag} #${salespersonTag} #${dealershipTag} #lotsocial`;
   return { voiceoverScript, socialCaption };
 }
 
