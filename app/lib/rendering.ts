@@ -4,6 +4,18 @@ import type { ImportedVehicleRecord } from "./vdp";
 
 type RenderEnvironment = { SHOTSTACK_API_KEY?: string; SHOTSTACK_STAGE?: string };
 
+function renderEnvironment() {
+  const runtime = env as unknown as RenderEnvironment;
+  return {
+    apiKey: runtime.SHOTSTACK_API_KEY?.trim() ?? "",
+    stage: runtime.SHOTSTACK_STAGE === "v1" ? "v1" : "stage",
+  };
+}
+
+export function rendererIsConfigured() {
+  return Boolean(renderEnvironment().apiKey);
+}
+
 function escapeHtml(value: string) {
   return value.replace(/[&<>"']/g, (character) => ({
     "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;",
@@ -63,11 +75,9 @@ export function buildVerticalRenderPlan(project: CreativeProjectRecord, vehicle:
 }
 
 export async function submitRender(plan: ReturnType<typeof buildVerticalRenderPlan>) {
-  const runtime = env as unknown as RenderEnvironment;
-  const apiKey = runtime.SHOTSTACK_API_KEY?.trim();
+  const { apiKey, stage } = renderEnvironment();
   if (!apiKey) return { status: "awaiting_provider_setup", providerRenderId: "", errorMessage: "The production renderer is not connected yet." };
 
-  const stage = runtime.SHOTSTACK_STAGE === "v1" ? "v1" : "stage";
   const response = await fetch(`https://api.shotstack.io/edit/${stage}/render`, {
     method: "POST",
     headers: { "Content-Type": "application/json", "x-api-key": apiKey },
@@ -78,4 +88,24 @@ export async function submitRender(plan: ReturnType<typeof buildVerticalRenderPl
     return { status: "provider_error", providerRenderId: "", errorMessage: payload.response?.message ?? payload.message ?? "The renderer rejected this job." };
   }
   return { status: "queued", providerRenderId: payload.response.id, errorMessage: "" };
+}
+
+export async function checkRender(providerRenderId: string) {
+  const { apiKey, stage } = renderEnvironment();
+  if (!apiKey) return null;
+  const response = await fetch(`https://api.shotstack.io/edit/${stage}/render/${encodeURIComponent(providerRenderId)}`, {
+    headers: { "x-api-key": apiKey },
+  });
+  const payload = await response.json() as {
+    response?: { status?: string; url?: string; error?: string; message?: string };
+    message?: string;
+  };
+  if (!response.ok || !payload.response?.status) throw new Error(payload.response?.message ?? payload.message ?? "Unable to check the render status.");
+  const providerStatus = payload.response.status;
+  const normalizedStatus = providerStatus === "done" ? "completed" : providerStatus === "failed" ? "failed" : providerStatus;
+  return {
+    status: normalizedStatus,
+    outputUrl: payload.response.url ?? "",
+    errorMessage: payload.response.error ?? "",
+  };
 }

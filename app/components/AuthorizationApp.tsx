@@ -152,6 +152,17 @@ function statusTone(status: string) {
   return "pending";
 }
 
+const renderStatusLabels: Record<string, string> = {
+  queued: "Queued",
+  fetching: "Collecting VDP photos",
+  rendering: "Rendering video",
+  saving: "Finalizing video",
+  completed: "Video ready",
+  failed: "Render failed",
+  provider_error: "Renderer needs attention",
+  awaiting_provider_setup: "Production plan ready",
+};
+
 function formatDate(value: string | null) {
   if (!value) return "—";
   return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" }).format(new Date(value.replace(" ", "T") + (value.includes("Z") ? "" : "Z")));
@@ -318,6 +329,23 @@ export function AuthorizationApp({ user }: { user: User }) {
       setPreparingRender(false);
     }
   }
+
+  useEffect(() => {
+    if (!creativeDraft || !renderJob || !["queued", "fetching", "rendering", "saving"].includes(renderJob.status)) return;
+    let stopped = false;
+    const poll = async () => {
+      try {
+        const response = await fetch(`/api/creative-projects/${creativeDraft.id}/render`, { cache: "no-store" });
+        const payload = await response.json() as { job?: RenderJob };
+        if (!stopped && response.ok && payload.job) setRenderJob(payload.job);
+      } catch {
+        // A later poll will retry while the current durable status remains visible.
+      }
+    };
+    const timer = window.setInterval(() => void poll(), 5000);
+    void poll();
+    return () => { stopped = true; window.clearInterval(timer); };
+  }, [creativeDraft, renderJob?.id, renderJob?.status]);
 
   async function openDetails(id: string) {
     setDetailLoading(true);
@@ -593,7 +621,7 @@ export function AuthorizationApp({ user }: { user: User }) {
                 </main>
                 <aside className="creative-preview"><div className="phone-preview"><div className="phone-screen">{selectedCreativeImages[0] ? <img src={selectedCreativeImages[0]} alt="First storyboard frame" referrerPolicy="no-referrer" /> : <div /> }<div className="preview-overlay"><span>{creativeStyle}</span><strong>{creativeVehicle.year} {creativeVehicle.make}<br />{creativeVehicle.model}</strong><small>{creativeVehicle.price ? `${formatPrice(creativeVehicle.price, creativeVehicle.currency)} as listed` : "Contact for pricing"}</small></div></div></div><div className="preview-sequence">{selectedCreativeImages.slice(0,6).map((image,index) => <div key={image}><img src={image} alt="" referrerPolicy="no-referrer" /><span>{index + 1}</span></div>)}<div className="end-frame"><strong>{endCardName || "Your name"}</strong><span>{endCardCta}</span></div></div><p className="preview-note">Storyboard preview · Final rendering will animate these shots and splice the end card.</p></aside>
               </div>
-              {creativeDraft && <section className="creative-output"><div className="output-heading"><div><p className="eyebrow">Storyboard ready</p><h2>Grounded copy and production brief</h2></div><span>Saved draft</span></div><div className="output-grid"><article><div><h3>Voiceover script</h3><button type="button" onClick={() => void navigator.clipboard.writeText(creativeDraft.voiceoverScript)}>Copy</button></div><p>{creativeDraft.voiceoverScript}</p></article><article><div><h3>Social caption</h3><button type="button" onClick={() => void navigator.clipboard.writeText(creativeDraft.socialCaption)}>Copy</button></div><pre>{creativeDraft.socialCaption}</pre></article></div><div className="render-gate"><div><span>Production render</span><strong>Prepare a source-faithful 9:16 video.</strong><p>Original VDP photos, deterministic motion, exact listing copy, and the salesperson end card.</p></div><button type="button" onClick={() => void prepareRender()} disabled={preparingRender}>{preparingRender ? "Preparing..." : renderJob ? "Prepare again" : "Prepare vertical video"}</button></div>{renderJob && <div className={`render-result ${renderJob.status}`} role="status"><div><span className="render-status-dot" /><div><strong>{renderJob.status === "queued" ? "Video queued for rendering" : renderJob.status === "awaiting_provider_setup" ? "Production plan ready" : "Renderer needs attention"}</strong><p>{renderJob.status === "queued" ? "The original vehicle photos and locked timeline were sent to the renderer." : renderJob.errorMessage}</p></div></div>{renderJob.summary && <dl><div><dt>Output</dt><dd>{renderJob.summary.format}</dd></div><div><dt>Length</dt><dd>{renderJob.summary.durationSeconds}s</dd></div><div><dt>Shots</dt><dd>{renderJob.summary.photoCount} + end card</dd></div><div><dt>Fidelity</dt><dd>VDP originals</dd></div></dl>}</div>}</section>}
+              {creativeDraft && <section className="creative-output"><div className="output-heading"><div><p className="eyebrow">Storyboard ready</p><h2>Grounded copy and production brief</h2></div><span>Saved draft</span></div><div className="output-grid"><article><div><h3>Voiceover script</h3><button type="button" onClick={() => void navigator.clipboard.writeText(creativeDraft.voiceoverScript)}>Copy</button></div><p>{creativeDraft.voiceoverScript}</p></article><article><div><h3>Social caption</h3><button type="button" onClick={() => void navigator.clipboard.writeText(creativeDraft.socialCaption)}>Copy</button></div><pre>{creativeDraft.socialCaption}</pre></article></div><div className="render-gate"><div><span>Production render</span><strong>Prepare a source-faithful 9:16 video.</strong><p>Original VDP photos, deterministic motion, exact listing copy, and the salesperson end card.</p></div><button type="button" onClick={() => void prepareRender()} disabled={preparingRender || Boolean(renderJob && ["queued", "fetching", "rendering", "saving", "completed"].includes(renderJob.status))}>{preparingRender ? "Preparing..." : renderJob?.status === "completed" ? "Video ready" : renderJob && ["queued", "fetching", "rendering", "saving"].includes(renderJob.status) ? "Rendering..." : renderJob?.status === "awaiting_provider_setup" ? "Check connection" : "Prepare vertical video"}</button></div>{renderJob && <div className={`render-result ${renderJob.status}`} role="status"><div><span className="render-status-dot" /><div><strong>{renderStatusLabels[renderJob.status] ?? "Render update"}</strong><p>{renderJob.status === "completed" ? "Your source-faithful vertical video is ready to review and download." : ["queued", "fetching", "rendering", "saving"].includes(renderJob.status) ? "This page checks progress automatically. You will not be charged for duplicate clicks." : renderJob.errorMessage}</p></div></div>{renderJob.summary && <dl><div><dt>Output</dt><dd>{renderJob.summary.format}</dd></div><div><dt>Length</dt><dd>{renderJob.summary.durationSeconds}s</dd></div><div><dt>Shots</dt><dd>{renderJob.summary.photoCount} + end card</dd></div><div><dt>Fidelity</dt><dd>VDP originals</dd></div></dl>}{renderJob.status === "completed" && renderJob.outputUrl && <div className="completed-video"><video controls playsInline preload="metadata" poster={selectedCreativeImages[0]}><source src={renderJob.outputUrl} type="video/mp4" />Your browser cannot preview this video.</video><div><strong>Final vertical video</strong><p>Review every vehicle detail before publishing.</p><a href={renderJob.outputUrl} target="_blank" rel="noreferrer">Download MP4 ↗</a></div></div>}</div>}</section>}
             </form>}
           </section>
         )}

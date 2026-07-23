@@ -187,6 +187,30 @@ export async function createRenderJob(input: {
     .bind(id).first<CreativeRenderJobRecord>();
 }
 
+export async function getLatestRenderJob(projectId: string, associateEmail: string) {
+  await ensureCreativeSchema();
+  return database().prepare(`SELECT * FROM creative_render_jobs
+    WHERE project_id = ? AND associate_email = ?
+    ORDER BY created_at DESC LIMIT 1`)
+    .bind(projectId, associateEmail).first<CreativeRenderJobRecord>();
+}
+
+export async function updateRenderJob(input: {
+  id: string;
+  associateEmail: string;
+  status: string;
+  outputUrl?: string;
+  errorMessage?: string;
+}) {
+  await ensureCreativeSchema();
+  await database().prepare(`UPDATE creative_render_jobs
+    SET status = ?, output_url = ?, error_message = ?, updated_at = CURRENT_TIMESTAMP
+    WHERE id = ? AND associate_email = ?`)
+    .bind(input.status, input.outputUrl ?? "", input.errorMessage ?? "", input.id, input.associateEmail).run();
+  return database().prepare("SELECT * FROM creative_render_jobs WHERE id = ? AND associate_email = ? LIMIT 1")
+    .bind(input.id, input.associateEmail).first<CreativeRenderJobRecord>();
+}
+
 export function serializeRenderJob(record: CreativeRenderJobRecord) {
   const plan = JSON.parse(record.render_plan || "{}") as { summary?: unknown };
   return {
