@@ -217,6 +217,10 @@ function candidateInventoryPaths(url: URL) {
   return Array.from(paths).map((path) => new URL(path, url.origin));
 }
 
+function fallbackVehicleSurfaces(url: URL) {
+  return [url, ...candidateInventoryPaths(url)];
+}
+
 function readerUrls(targetUrl: URL) {
   const hrefWithoutProtocol = targetUrl.href.replace(/^https?:\/\//i, "");
   const originPath = `${targetUrl.hostname}${targetUrl.pathname}${targetUrl.search}`;
@@ -241,7 +245,11 @@ function parseDealerInspireMarkdown(markdown: string, sourceUrl: URL): Extracted
   if (vinIndex < 0) return null;
   const before = markdown.slice(Math.max(0, vinIndex - 5000), vinIndex);
   const after = markdown.slice(vinIndex, Math.min(markdown.length, vinIndex + 5000));
-  const title = decodeEntities((before.match(/## \[([^\]]+)\]\([^)]+\)\s*$/m) ?? Array.from(before.matchAll(/## \[([^\]]+)\]\([^)]+\)/g)).at(-1))?.[1] ?? "");
+  const title = decodeEntities(
+    (before.match(/## \[([^\]]+)\]\([^)]+\)\s*$/m) ?? Array.from(before.matchAll(/## \[([^\]]+)\]\([^)]+\)/g)).at(-1))?.[1]
+    ?? markdown.match(/^Title:\s*([^\n|]+)/m)?.[1]
+    ?? ""
+  );
   const stockNumber = markdownField(after, "Stock");
   const mileage = markdownField(before, "Mileage") || markdownField(after, "Mileage");
   const exteriorColor = markdownField(before, "Exterior") || markdownField(after, "Exterior");
@@ -284,7 +292,7 @@ function parseDealerInspireMarkdown(markdown: string, sourceUrl: URL): Extracted
 
 async function extractFromDealerInspireListing(sourceUrl: URL, deadline: { expiresAt: number }): Promise<ExtractedVehicle | null> {
   let attempts = 0;
-  for (const inventoryUrl of candidateInventoryPaths(sourceUrl)) {
+  for (const inventoryUrl of fallbackVehicleSurfaces(sourceUrl)) {
     for (const readerUrl of readerUrls(inventoryUrl)) {
       if (attempts >= MAX_READER_ATTEMPTS) return null;
       attempts += 1;
