@@ -1,91 +1,66 @@
 import assert from "node:assert/strict";
-import { access, readFile, readdir } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import test from "node:test";
 
-const developmentPreviewMeta =
-  /<meta(?=[^>]*\bname=["']codex-preview["'])(?=[^>]*\bcontent=["']development["'])[^>]*>/i;
-const templateRoot = new URL("../", import.meta.url);
-const previewRoot = new URL("../app/_sites-preview/", import.meta.url);
+const projectRoot = new URL("../", import.meta.url);
 
-async function render() {
-  const workerUrl = new URL("../dist/server/index.js", import.meta.url);
-  workerUrl.searchParams.set("test", `${process.pid}-${Date.now()}`);
-  const { default: worker } = await import(workerUrl.href);
-
-  return worker.fetch(
-    new Request("http://localhost/", {
-      headers: { accept: "text/html" },
-    }),
-    {
-      ASSETS: {
-        fetch: async () => new Response("Not found", { status: 404 }),
-      },
-    },
-    {
-      waitUntil() {},
-      passThroughOnException() {},
-    },
-  );
+async function source(path) {
+  return readFile(new URL(path, projectRoot), "utf8");
 }
 
-test("server-renders the starter loading skeleton", async () => {
-  const response = await render();
-  assert.equal(response.status, 200);
-  assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
-
-  const html = await response.text();
-  assert.match(html, developmentPreviewMeta);
-  assert.match(html, /<title>Your site is taking shape<\/title>/i);
-  assert.match(html, /Building your site/);
-  assert.match(html, /Your site is taking shape/);
-  assert.match(
-    html,
-    /Your first version will appear here automatically when it’s ready\./,
-  );
-  assert.doesNotMatch(html, /Codex/);
-  assert.match(html, /react-loading-skeleton/);
-  assert.match(html, /role="status"/);
-});
-
-test("keeps the loading skeleton scoped and disposable", async () => {
-  const [preview, css, page, layout, packageJson, files] = await Promise.all([
-    readFile(new URL("SkeletonPreview.tsx", previewRoot), "utf8"),
-    readFile(new URL("preview.css", previewRoot), "utf8"),
-    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../package.json", import.meta.url), "utf8"),
-    readdir(previewRoot),
+test("ships the LotSocial product instead of the disposable starter", async () => {
+  const [page, layout, packageJson] = await Promise.all([
+    source("app/page.tsx"),
+    source("app/layout.tsx"),
+    source("package.json"),
   ]);
 
-  assert.deepEqual(files.sort(), ["SkeletonPreview.tsx", "preview.css"]);
-  assert.match(preview, /from "react-loading-skeleton"/);
-  assert.match(preview, /baseColor="#eceae7"/);
-  assert.match(preview, /highlightColor="#f9f8f6"/);
-  assert.match(preview, /duration=\{2\.8\}/);
-  assert.match(preview, /sites-skeleton-search-placeholder/);
-  assert.match(packageJson, /"react-loading-skeleton": "3\.5\.0"/);
+  assert.match(page, /AuthorizationApp/);
+  assert.match(layout, /LotSocial Inventory Authorization/);
+  assert.doesNotMatch(page, /SkeletonPreview|codex-preview/);
+  assert.doesNotMatch(packageJson, /react-loading-skeleton/);
+  assert.deepEqual(await readdir(new URL("app/_sites-preview", projectRoot)), []);
+});
 
-  const shellIndex = preview.indexOf('className="sites-skeleton-shell"');
-  const statusIndex = preview.indexOf('className="sites-skeleton-status"');
-  assert.ok(shellIndex >= 0 && statusIndex > shellIndex);
-  assert.match(css, /position:\s*fixed/);
-  assert.match(css, /inset:\s*0/);
-  assert.match(css, /opacity:\s*0\.52/);
-  assert.match(css, /prefers-reduced-motion:\s*reduce/);
-  assert.doesNotMatch(css, /#020617|canvas|pets|progress/i);
-  assert.doesNotMatch(
-    preview,
-    /loading-spinner|status-mark|status-progress|canvas|cookie|random/i,
-  );
+test("includes the mobile Add to Home Screen pilot banner", async () => {
+  const [component, css] = await Promise.all([
+    source("app/components/AuthorizationApp.tsx"),
+    source("app/globals.css"),
+  ]);
 
-  assert.match(page, /export const metadata:\s*Metadata/);
-  assert.match(page, /"codex-preview": "development"/);
-  assert.match(page, /<SkeletonPreview \/>/);
-  assert.match(layout, /title:\s*"Starter Project"/);
-  assert.doesNotMatch(layout, /codex-preview|_sites-preview|themeColor|\bViewport\b/);
-  assert.doesNotMatch(css, /(^|\s)(html|body)\s*\{/m);
+  assert.match(component, /lotsocial-install-banner-dismissed/);
+  assert.match(component, /Add LotSocial to your home screen/);
+  assert.match(component, />iPhone</);
+  assert.match(component, />Android</);
+  assert.match(component, /open this page in Safari/);
+  assert.match(component, /setInstallHelp\(installHelp === "ios" \? null : "ios"\)/);
+  assert.match(component, /setInstallHelp\(installHelp === "android" \? null : "android"\)/);
+  assert.match(css, /\.install-banner/);
+  assert.match(css, /\.install-steps/);
+});
 
-  await assert.rejects(
-    access(new URL("public/_sites-preview", templateRoot)),
-  );
+test("opens and saves a source-stamped manual vehicle fallback", async () => {
+  const [component, route, vdp] = await Promise.all([
+    source("app/components/AuthorizationApp.tsx"),
+    source("app/api/vdp-imports/route.ts"),
+    source("app/lib/vdp.ts"),
+  ]);
+
+  assert.match(component, /setManualFallbackOpen\(true\)/);
+  assert.match(component, /Add the essentials and keep going/);
+  assert.match(component, /Save manual vehicle/);
+  assert.match(route, /createManualVehicle/);
+  assert.match(route, /payload\.authorizedToMarket !== true/);
+  assert.match(vdp, /export function createManualVehicle/);
+  assert.match(vdp, /if \(!year \|\| !make \|\| !model\)/);
+  assert.match(vdp, /sourceUrl: source\.href/);
+});
+
+test("uses a browser-like request signature for public VDP reads", async () => {
+  const vdp = await source("app/lib/vdp.ts");
+
+  assert.match(vdp, /Mozilla\/5\.0/);
+  assert.match(vdp, /Accept-Language/);
+  assert.match(vdp, /Cache-Control/);
+  assert.match(vdp, /Referer: requestedUrl\.origin/);
 });
