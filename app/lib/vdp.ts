@@ -40,6 +40,17 @@ export type ExtractedVehicle = {
   facts: Record<string, string>;
 };
 
+export type ManualVehicleInput = {
+  sourceUrl: string;
+  year: string;
+  make: string;
+  model: string;
+  trim: string;
+  price: string;
+  mileage: string;
+  dealershipName: string;
+};
+
 let schemaReady: Promise<void> | null = null;
 
 function database() {
@@ -171,7 +182,18 @@ export async function extractVehicleFromVdp(value: string): Promise<ExtractedVeh
   const timeout = setTimeout(() => controller.abort(), 15000);
   let response: Response;
   try {
-    response = await fetch(requestedUrl, { headers: { "User-Agent": "LotSocial-VDP-Importer/1.0", Accept: "text/html,application/xhtml+xml" }, redirect: "follow", signal: controller.signal });
+    response = await fetch(requestedUrl, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36 LotSocial/1.0",
+        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Cache-Control": "no-cache",
+        Pragma: "no-cache",
+        Referer: requestedUrl.origin,
+      },
+      redirect: "follow",
+      signal: controller.signal,
+    });
   } finally { clearTimeout(timeout); }
   if (!response.ok) throw new Error(`The dealership page returned ${response.status}. Try another public VDP URL.`);
   const finalUrl = validatePublicUrl(response.url);
@@ -244,6 +266,35 @@ export async function extractVehicleFromVdp(value: string): Promise<ExtractedVeh
   };
   if (!extracted.vin && !extracted.title) throw new Error("LotSocial could not identify a vehicle on that page.");
   return extracted;
+}
+
+export function createManualVehicle(input: ManualVehicleInput): ExtractedVehicle {
+  const source = validatePublicUrl(input.sourceUrl);
+  const year = input.year.trim();
+  const make = input.make.trim();
+  const model = input.model.trim();
+  const trim = input.trim.trim();
+  const title = [year, make, model, trim].filter(Boolean).join(" ");
+  if (!year || !make || !model) throw new Error("Add at least year, make, and model.");
+  return {
+    sourceUrl: source.href,
+    sourceHost: source.hostname,
+    title: title || "Manual vehicle entry",
+    vin: "",
+    stockNumber: "",
+    year,
+    make,
+    model,
+    trim,
+    price: input.price.trim(),
+    currency: "USD",
+    description: "",
+    imageUrls: [],
+    facts: Object.fromEntries(Object.entries({
+      dealershipName: input.dealershipName.trim(),
+      mileage: input.mileage.trim(),
+    }).filter(([, value]) => value)),
+  };
 }
 
 export async function saveImportedVehicle(associateEmail: string, vehicle: ExtractedVehicle) {
