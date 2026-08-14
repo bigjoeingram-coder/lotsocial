@@ -176,6 +176,105 @@ function usableImageUrl(url: string) {
   }
 }
 
+function vinFromUrl(url: URL) {
+  return url.pathname.match(/\b[A-HJ-NPR-Z0-9]{17}\b/i)?.[0]?.toUpperCase() ?? "";
+}
+
+function vehicleSlugParts(url: URL) {
+  const segment = url.pathname.split("/").filter(Boolean).find((part) => part.startsWith("new-") || part.startsWith("used-")) ?? "";
+  return segment.split("-").filter(Boolean);
+}
+
+function candidateInventoryPaths(url: URL) {
+  const parts = vehicleSlugParts(url);
+  const makeIndex = parts.findIndex((part) => ["lexus", "maserati", "ford", "lincoln", "toyota", "honda", "chevrolet", "gmc", "buick", "cadillac", "bmw", "mercedes", "mercedesbenz", "audi", "porsche", "hyundai", "kia", "nissan", "mazda", "subaru", "volvo", "land", "range"].includes(part));
+  const model = makeIndex >= 0 ? parts[makeIndex + 1] : "";
+  const paths = new Set<string>([
+    "/new-vehicles/crossovers-suvs/",
+    "/new-vehicles/suvs/",
+    "/new-vehicles/",
+    "/used-vehicles/",
+  ]);
+  if (model) paths.add(`/new-vehicles/${model}/`);
+  return Array.from(paths).map((path) => new URL(path, url.origin));
+}
+
+function markdownField(block: string, label: string) {
+  const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return decodeEntities(block.match(new RegExp(`${escaped}:\\s*([^\\n]+)`, "i"))?.[1] ?? "");
+}
+
+function parseDealerInspireMarkdown(markdown: string, sourceUrl: URL): ExtractedVehicle | null {
+  const vin = vinFromUrl(sourceUrl);
+  if (!vin) return null;
+  const vinIndex = markdown.toUpperCase().indexOf(vin);
+  if (vinIndex < 0) return null;
+  const before = markdown.slice(Math.max(0, vinIndex - 5000), vinIndex);
+  const after = markdown.slice(vinIndex, Math.min(markdown.length, vinIndex + 5000));
+  const title = decodeEntities((before.match(/## \[([^\]]+)\]\([^)]+\)\s*$/m) ?? Array.from(before.matchAll(/## \[([^\]]+)\]\([^)]+\)/g)).at(-1))?.[1] ?? "");
+  const stockNumber = markdownField(after, "Stock");
+  const mileage = markdownField(before, "Mileage") || markdownField(after, "Mileage");
+  const exteriorColor = markdownField(before, "Exterior") || markdownField(after, "Exterior");
+  const interiorColor = markdownField(before, "Interior") || markdownField(after, "Interior");
+  const dealershipName = markdownField(before, "Location") || markdownField(after, "Location") || decodeEntities(markdown.match(/^Title:\s*([^\n|]+)/m)?.[1] ?? "");
+  const price = normalizeListedPrice(after.match(/Total Price\**\s*\$?([\d,]+)/i)?.[1] || after.match(/(?:Sale Price|Your Price|MSRP \+ DPH|MSRP)\**\s*\$?([\d,]+)/i)?.[1]);
+  const imageMatch = before.match(/!\[[^\]]*\]\((https?:\/\/[^)]+)\)\]\([^)]*\/inventory\/[^)]*\)/i)
+    || before.match(/!\[[^\]]*\]\((https?:\/\/[^)]+)\)/i);
+  const imageUrls = imageMatch ? resolveImage(imageMatch[1], sourceUrl).filter(usableImageUrl).slice(0, 1) : [];
+  const year = title.match(/\b(20\d{2}|19\d{2})\b/)?.[1] || "";
+  const titleParts = title.replace(/^New\s+|^Used\s+/i, "").split(/\s+/).filter(Boolean);
+  const yearIndex = titleParts.findIndex((part) => part === year);
+  const make = yearIndex >= 0 ? titleParts[yearIndex + 1] ?? "" : "";
+  const model = yearIndex >= 0 ? [titleParts[yearIndex + 2], titleParts[yearIndex + 3]?.match(/^\d/) ? titleParts[yearIndex + 3] : ""].filter(Boolean).join(" ") : "";
+  const trim = yearIndex >= 0 ? titleParts.slice(yearIndex + 2 + model.split(/\s+/).filter(Boolean).length).join(" ") : "";
+  if (!title && !vin) return null;
+  return {
+    sourceUrl: sourceUrl.href,
+    sourceHost: sourceUrl.hostname,
+    title: title || "Imported vehicle",
+    vin,
+    stockNumber,
+    year,
+    make,
+    model,
+    trim,
+    price,
+    currency: "USD",
+    description: "",
+    imageUrls,
+    facts: Object.fromEntries(Object.entries({
+      dealershipName,
+      mileage,
+      exteriorColor,
+      interiorColor,
+      scrapeSource: "Dealer Inspire inventory listing",
+    }).filter(([, value]) => value)),
+  };
+}
+
+async function extractFromDealerInspireListing(sourceUrl: URL): Promise<ExtractedVehicle | null> {
+  for (const inventoryUrl of candidateInventoryPaths(sourceUrl)) {
+    const readerUrl = `https://r.jina.ai/http://r.jina.ai/http://${inventoryUrl.href}`;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 20000);
+    try {
+      const response = await fetch(readerUrl, {
+        headers: { Accept: "text/plain,text/markdown,*/*" },
+        signal: controller.signal,
+      });
+      if (!response.ok) continue;
+      const markdown = await response.text();
+      const extracted = parseDealerInspireMarkdown(markdown, sourceUrl);
+      if (extracted) return extracted;
+    } catch {
+      // Try the next public inventory surface.
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+  return null;
+}
+
 export async function extractVehicleFromVdp(value: string): Promise<ExtractedVehicle> {
   const requestedUrl = validatePublicUrl(value);
   const controller = new AbortController();
@@ -195,7 +294,11 @@ export async function extractVehicleFromVdp(value: string): Promise<ExtractedVeh
       signal: controller.signal,
     });
   } finally { clearTimeout(timeout); }
-  if (!response.ok) throw new Error(`The dealership page returned ${response.status}. Try another public VDP URL.`);
+  if (!response.ok) {
+    const listingVehicle = await extractFromDealerInspireListing(requestedUrl);
+    if (listingVehicle) return listingVehicle;
+    throw new Error(`LotSocial could not scrape that VDP yet. This store blocks the direct page and no matching public inventory listing was found.`);
+  }
   const finalUrl = validatePublicUrl(response.url);
   const contentType = response.headers.get("content-type") ?? "";
   if (!contentType.includes("text/html") && !contentType.includes("application/xhtml")) throw new Error("That URL is not a vehicle detail page.");

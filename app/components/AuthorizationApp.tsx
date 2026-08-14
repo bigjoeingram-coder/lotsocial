@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import { PERMISSIONS, PermissionId } from "../lib/authorization-shared";
 
 type User = { name: string; email: string } | null;
@@ -237,9 +237,7 @@ export function AuthorizationApp({ user }: { user: User }) {
   const [importingVdp, setImportingVdp] = useState(false);
   const [inventoryError, setInventoryError] = useState("");
   const [importNotice, setImportNotice] = useState("");
-  const [manualFallbackOpen, setManualFallbackOpen] = useState(false);
   const [manualVehicle, setManualVehicle] = useState<ManualVehicleState>({ year: "", make: "", model: "", trim: "", price: "", mileage: "", dealershipName: "" });
-  const manualFallbackRef = useRef<HTMLDivElement | null>(null);
   const [installBannerHidden, setInstallBannerHidden] = useState(true);
   const [installHelp, setInstallHelp] = useState<"ios" | "android" | null>(null);
   const [creativeVehicle, setCreativeVehicle] = useState<ImportedVehicle | null>(null);
@@ -310,12 +308,9 @@ export function AuthorizationApp({ user }: { user: User }) {
       setImportNotice(`${payload.vehicle.title} was added to My Inventory.`);
       setVdpUrl("");
       setAuthorizedToMarket(false);
-      setManualFallbackOpen(false);
       setManualVehicle({ year: "", make: "", model: "", trim: "", price: "", mileage: "", dealershipName: "" });
-    } catch {
-      setManualFallbackOpen(true);
-      setInventoryError("This dealer page blocked automatic reading. Add the basic details below and LotSocial will still create the caption.");
-      window.setTimeout(() => manualFallbackRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
+    } catch (caught) {
+      setInventoryError(caught instanceof Error ? caught.message : "LotSocial could not scrape that VDP yet.");
     } finally {
       setImportingVdp(false);
     }
@@ -338,7 +333,6 @@ export function AuthorizationApp({ user }: { user: User }) {
       setImportNotice(`${payload.vehicle.title} was added from manual details.`);
       setVdpUrl("");
       setAuthorizedToMarket(false);
-      setManualFallbackOpen(false);
       setManualVehicle({ year: "", make: "", model: "", trim: "", price: "", mileage: "", dealershipName: "" });
     } catch (caught) {
       setInventoryError(caught instanceof Error ? caught.message : "Unable to save that vehicle.");
@@ -689,35 +683,12 @@ export function AuthorizationApp({ user }: { user: User }) {
               <div><p className="eyebrow">Starter inventory</p><h1>Paste a VDP. Start creating.</h1><p>Import one public dealership vehicle page at a time. LotSocial captures the listed facts, available imagery, source URL, and import time.</p></div>
               <span className="plan-chip">Starter · Manual VDP</span>
             </div>
-            <form className="vdp-import-panel" onSubmit={manualFallbackOpen ? saveManualVehicle : importVdp}>
+            <form className="vdp-import-panel" onSubmit={importVdp}>
               <div className="vdp-import-heading"><div className="import-icon">↗</div><div><h2>Import a vehicle detail page</h2><p>Use the exact public VDP for the vehicle you want to promote.</p></div></div>
-              <label className="vdp-url-field"><span>Vehicle detail page URL</span><div><input type="url" value={vdpUrl} onChange={(event) => setVdpUrl(event.target.value)} placeholder="https://dealer.com/inventory/vehicle..." required /><button className="primary-button" type="submit" disabled={importingVdp || !authorizedToMarket || manualFallbackOpen}>{manualFallbackOpen ? "Use manual fields below" : importingVdp ? "Reading VDP..." : "Import vehicle"}</button></div></label>
+              <label className="vdp-url-field"><span>Vehicle detail page URL</span><div><input type="url" value={vdpUrl} onChange={(event) => setVdpUrl(event.target.value)} placeholder="https://dealer.com/inventory/vehicle..." required /><button className="primary-button" type="submit" disabled={importingVdp || !authorizedToMarket}>{importingVdp ? "Scraping VDP..." : "Import vehicle"}</button></div></label>
               <label className="vdp-certification"><input type="checkbox" checked={authorizedToMarket} onChange={(event) => setAuthorizedToMarket(event.target.checked)} /><span className="custom-check">✓</span><span>I certify that I am authorized to market this dealership's vehicle and use its approved VDP content for dealership social posts.</span></label>
               <div className="vdp-boundary"><strong>One-time, source-stamped import</strong><span>LotSocial does not bypass logins or access controls. Automated inventory remains a Pro feed feature.</span></div>
               {inventoryError && <div className="form-error" role="alert">{inventoryError}</div>}
-              {manualFallbackOpen && <div className="manual-vdp-panel inline" ref={manualFallbackRef}>
-                <div className="manual-vdp-heading">
-                  <div>
-                    <p className="eyebrow">Keep going</p>
-                    <h2>Add the vehicle details manually</h2>
-                    <p>Some dealer pages block automated reading. Enter the basic facts from the same VDP and LotSocial will still create a source-stamped record.</p>
-                  </div>
-                  <button type="button" onClick={() => setManualFallbackOpen(false)}>Hide</button>
-                </div>
-                <div className="form-grid compact">
-                  <label className="field"><span>Year<em>Required</em></span><input value={manualVehicle.year} onChange={(event) => setManualVehicle((current) => ({ ...current, year: event.target.value }))} required /></label>
-                  <label className="field"><span>Make<em>Required</em></span><input value={manualVehicle.make} onChange={(event) => setManualVehicle((current) => ({ ...current, make: event.target.value }))} required /></label>
-                  <label className="field"><span>Model<em>Required</em></span><input value={manualVehicle.model} onChange={(event) => setManualVehicle((current) => ({ ...current, model: event.target.value }))} required /></label>
-                  <label className="field"><span>Trim</span><input value={manualVehicle.trim} onChange={(event) => setManualVehicle((current) => ({ ...current, trim: event.target.value }))} /></label>
-                  <label className="field"><span>Price</span><input value={manualVehicle.price} onChange={(event) => setManualVehicle((current) => ({ ...current, price: event.target.value }))} placeholder="As listed" /></label>
-                  <label className="field"><span>Mileage</span><input value={manualVehicle.mileage} onChange={(event) => setManualVehicle((current) => ({ ...current, mileage: event.target.value }))} placeholder="As listed" /></label>
-                  <label className="field field-full"><span>Dealership name</span><input value={manualVehicle.dealershipName} onChange={(event) => setManualVehicle((current) => ({ ...current, dealershipName: event.target.value }))} /></label>
-                </div>
-                <div className="manual-vdp-actions">
-                  <span>Uses the pasted VDP URL as the source link.</span>
-                  <button className="primary-button" type="submit" disabled={importingVdp || !authorizedToMarket}>{importingVdp ? "Saving..." : "Save manual vehicle"}</button>
-                </div>
-              </div>}
               {importNotice && <div className="management-notice" role="status">{importNotice}</div>}
             </form>
             <section className="inventory-section">
