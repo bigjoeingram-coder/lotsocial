@@ -681,7 +681,7 @@ export function AuthorizationApp({ user }: { user: User }) {
             </div>}
             <div className="inventory-hero">
               <div><p className="eyebrow">Starter inventory</p><h1>Paste a VDP. Start creating.</h1><p>Import one public dealership vehicle page at a time. LotSocial captures the listed facts, available imagery, source URL, and import time.</p></div>
-              <span className="plan-chip">Starter · Manual VDP</span>
+              <span className="plan-chip">Starter · VDP Scrape</span>
             </div>
             <form className="vdp-import-panel" onSubmit={importVdp}>
               <div className="vdp-import-heading"><div className="import-icon">↗</div><div><h2>Import a vehicle detail page</h2><p>Use the exact public VDP for the vehicle you want to promote.</p></div></div>

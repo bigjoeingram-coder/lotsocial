@@ -189,14 +189,23 @@ function candidateInventoryPaths(url: URL) {
   const parts = vehicleSlugParts(url);
   const makeIndex = parts.findIndex((part) => ["lexus", "maserati", "ford", "lincoln", "toyota", "honda", "chevrolet", "gmc", "buick", "cadillac", "bmw", "mercedes", "mercedesbenz", "audi", "porsche", "hyundai", "kia", "nissan", "mazda", "subaru", "volvo", "land", "range"].includes(part));
   const model = makeIndex >= 0 ? parts[makeIndex + 1] : "";
-  const paths = new Set<string>([
+  const paths = new Set<string>();
+  if (model) paths.add(`/new-vehicles/${model}/`);
+  [
     "/new-vehicles/crossovers-suvs/",
     "/new-vehicles/suvs/",
     "/new-vehicles/",
     "/used-vehicles/",
-  ]);
-  if (model) paths.add(`/new-vehicles/${model}/`);
+  ].forEach((path) => paths.add(path));
   return Array.from(paths).map((path) => new URL(path, url.origin));
+}
+
+function readerUrls(targetUrl: URL) {
+  return [
+    `https://r.jina.ai/http://r.jina.ai/http://${targetUrl.href}`,
+    `https://r.jina.ai/http://r.jina.ai/http://${targetUrl.origin}${targetUrl.pathname}`,
+    `https://r.jina.ai/http://${targetUrl.href}`,
+  ];
 }
 
 function markdownField(block: string, label: string) {
@@ -254,22 +263,26 @@ function parseDealerInspireMarkdown(markdown: string, sourceUrl: URL): Extracted
 
 async function extractFromDealerInspireListing(sourceUrl: URL): Promise<ExtractedVehicle | null> {
   for (const inventoryUrl of candidateInventoryPaths(sourceUrl)) {
-    const readerUrl = `https://r.jina.ai/http://r.jina.ai/http://${inventoryUrl.href}`;
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 20000);
-    try {
-      const response = await fetch(readerUrl, {
-        headers: { Accept: "text/plain,text/markdown,*/*" },
-        signal: controller.signal,
-      });
-      if (!response.ok) continue;
-      const markdown = await response.text();
-      const extracted = parseDealerInspireMarkdown(markdown, sourceUrl);
-      if (extracted) return extracted;
-    } catch {
-      // Try the next public inventory surface.
-    } finally {
-      clearTimeout(timeout);
+    for (const readerUrl of readerUrls(inventoryUrl)) {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 45000);
+      try {
+        const response = await fetch(readerUrl, {
+          headers: {
+            Accept: "text/plain,text/markdown,*/*",
+            "X-Timeout": "35",
+          },
+          signal: controller.signal,
+        });
+        if (!response.ok) continue;
+        const markdown = await response.text();
+        const extracted = parseDealerInspireMarkdown(markdown, sourceUrl);
+        if (extracted) return extracted;
+      } catch {
+        // Try the next reader and public inventory surface.
+      } finally {
+        clearTimeout(timeout);
+      }
     }
   }
   return null;
