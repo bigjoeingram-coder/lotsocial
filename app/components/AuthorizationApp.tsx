@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { PERMISSIONS, PermissionId } from "../lib/authorization-shared";
 
 type User = { name: string; email: string } | null;
@@ -239,6 +239,7 @@ export function AuthorizationApp({ user }: { user: User }) {
   const [importNotice, setImportNotice] = useState("");
   const [manualFallbackOpen, setManualFallbackOpen] = useState(false);
   const [manualVehicle, setManualVehicle] = useState<ManualVehicleState>({ year: "", make: "", model: "", trim: "", price: "", mileage: "", dealershipName: "" });
+  const manualFallbackRef = useRef<HTMLFormElement | null>(null);
   const [installBannerHidden, setInstallBannerHidden] = useState(true);
   const [installHelp, setInstallHelp] = useState<"ios" | "android" | null>(null);
   const [creativeVehicle, setCreativeVehicle] = useState<ImportedVehicle | null>(null);
@@ -311,9 +312,10 @@ export function AuthorizationApp({ user }: { user: User }) {
       setAuthorizedToMarket(false);
       setManualFallbackOpen(false);
       setManualVehicle({ year: "", make: "", model: "", trim: "", price: "", mileage: "", dealershipName: "" });
-    } catch (caught) {
-      setInventoryError(caught instanceof Error ? caught.message : "Unable to import that VDP.");
+    } catch {
       setManualFallbackOpen(true);
+      setInventoryError("This dealer page blocked automatic reading. Add the basic details below and LotSocial will still create the caption.");
+      window.setTimeout(() => manualFallbackRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
     } finally {
       setImportingVdp(false);
     }
@@ -695,11 +697,11 @@ export function AuthorizationApp({ user }: { user: User }) {
               {inventoryError && <div className="form-error" role="alert">{inventoryError}</div>}
               {importNotice && <div className="management-notice" role="status">{importNotice}</div>}
             </form>
-            {manualFallbackOpen && <form className="manual-vdp-panel" onSubmit={saveManualVehicle}>
+            {manualFallbackOpen && <form className="manual-vdp-panel" onSubmit={saveManualVehicle} ref={manualFallbackRef}>
               <div className="manual-vdp-heading">
                 <div>
-                  <p className="eyebrow">Manual fallback</p>
-                  <h2>Add the essentials and keep going</h2>
+                  <p className="eyebrow">Keep going</p>
+                  <h2>Add the vehicle details manually</h2>
                   <p>Some dealer pages block automated reading. Enter the basic facts from the same VDP and LotSocial will still create a source-stamped record.</p>
                 </div>
                 <button type="button" onClick={() => setManualFallbackOpen(false)}>Hide</button>
