@@ -40,9 +40,10 @@ test("includes the mobile Add to Home Screen pilot banner", async () => {
 });
 
 test("opens and saves a source-stamped manual vehicle fallback", async () => {
-  const [component, route, vdp] = await Promise.all([
+  const [component, route, creativeRoute, vdp] = await Promise.all([
     source("app/components/AuthorizationApp.tsx"),
     source("app/api/vdp-imports/route.ts"),
+    source("app/api/creative-projects/route.ts"),
     source("app/lib/vdp.ts"),
   ]);
 
@@ -54,6 +55,9 @@ test("opens and saves a source-stamped manual vehicle fallback", async () => {
   assert.match(vdp, /export function createManualVehicle/);
   assert.match(vdp, /if \(!year \|\| !make \|\| !model\)/);
   assert.match(vdp, /sourceUrl: source\.href/);
+  assert.match(component, /Create social caption/);
+  assert.match(component, /Caption-only draft/);
+  assert.doesNotMatch(creativeRoute, /selectedImages\.length < 2/);
 });
 
 test("uses a browser-like request signature for public VDP reads", async () => {

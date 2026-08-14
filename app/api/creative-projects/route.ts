@@ -21,7 +21,6 @@ export async function POST(request: Request) {
   const durationSeconds = [15, 30, 45].includes(Number(payload.durationSeconds)) ? Number(payload.durationSeconds) : 30;
   const endCardName = clean(payload.endCardName) || user.displayName;
   const endCardCta = clean(payload.endCardCta) || "Message me for details";
-  if (selectedImages.length < 2) return Response.json({ error: "Select at least two VDP photos for the storyboard." }, { status: 400 });
   const project = await saveCreativeProject({
     vehicle,
     associateEmail: user.email,
