@@ -40,18 +40,11 @@ export type ExtractedVehicle = {
   facts: Record<string, string>;
 };
 
-export type ManualVehicleInput = {
-  sourceUrl: string;
-  year: string;
-  make: string;
-  model: string;
-  trim: string;
-  price: string;
-  mileage: string;
-  dealershipName: string;
-};
-
 let schemaReady: Promise<void> | null = null;
+const IMPORT_DEADLINE_MS = 24_000;
+const DIRECT_FETCH_MS = 8_000;
+const READER_FETCH_MS = 6_000;
+const MAX_READER_ATTEMPTS = 6;
 
 function database() {
   if (!env.DB) throw new Error("The inventory database is unavailable.");
@@ -176,6 +169,28 @@ function usableImageUrl(url: string) {
   }
 }
 
+function createDeadline(durationMs = IMPORT_DEADLINE_MS) {
+  return { expiresAt: Date.now() + durationMs };
+}
+
+function timeoutFor(deadline: { expiresAt: number }, requestedMs: number) {
+  const remaining = deadline.expiresAt - Date.now();
+  if (remaining <= 0) throw new Error("LotSocial could not scrape that VDP before the dealer page timed out.");
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), Math.min(remaining, requestedMs));
+  return { signal: controller.signal, cleanup: () => clearTimeout(timeout) };
+}
+
+export function isCloudflareChallenge(html: string, headers?: Headers) {
+  const headerText = [
+    headers?.get("cf-mitigated"),
+    headers?.get("cf-ray"),
+    headers?.get("server"),
+  ].filter(Boolean).join(" ").toLowerCase();
+  if (headerText.includes("challenge") || headerText.includes("cloudflare")) return true;
+  return /(?:cf-chl|cdn-cgi\/challenge-platform|just a moment|attention required|checking if the site connection is secure|cf-ray)/i.test(html);
+}
+
 function vinFromUrl(url: URL) {
   return url.pathname.match(/\b[A-HJ-NPR-Z0-9]{17}\b/i)?.[0]?.toUpperCase() ?? "";
 }
@@ -201,10 +216,14 @@ function candidateInventoryPaths(url: URL) {
 }
 
 function readerUrls(targetUrl: URL) {
+  const hrefWithoutProtocol = targetUrl.href.replace(/^https?:\/\//i, "");
+  const originPath = `${targetUrl.hostname}${targetUrl.pathname}${targetUrl.search}`;
   return [
+    // This nested reader shape is intentionally retained because it returned real
+    // Dealer Inspire inventory markdown for Newport Lexus and Newport Beach Maserati.
     `https://r.jina.ai/http://r.jina.ai/http://${targetUrl.href}`,
-    `https://r.jina.ai/http://r.jina.ai/http://${targetUrl.origin}${targetUrl.pathname}`,
-    `https://r.jina.ai/http://${targetUrl.href}`,
+    `https://r.jina.ai/http://${hrefWithoutProtocol}`,
+    `https://r.jina.ai/http://${originPath}`,
   ];
 }
 
@@ -261,18 +280,20 @@ function parseDealerInspireMarkdown(markdown: string, sourceUrl: URL): Extracted
   };
 }
 
-async function extractFromDealerInspireListing(sourceUrl: URL): Promise<ExtractedVehicle | null> {
+async function extractFromDealerInspireListing(sourceUrl: URL, deadline: { expiresAt: number }): Promise<ExtractedVehicle | null> {
+  let attempts = 0;
   for (const inventoryUrl of candidateInventoryPaths(sourceUrl)) {
     for (const readerUrl of readerUrls(inventoryUrl)) {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 45000);
+      if (attempts >= MAX_READER_ATTEMPTS) return null;
+      attempts += 1;
+      const timeout = timeoutFor(deadline, READER_FETCH_MS);
       try {
         const response = await fetch(readerUrl, {
           headers: {
             Accept: "text/plain,text/markdown,*/*",
-            "X-Timeout": "35",
+            "X-Timeout": "5",
           },
-          signal: controller.signal,
+          signal: timeout.signal,
         });
         if (!response.ok) continue;
         const markdown = await response.text();
@@ -281,7 +302,7 @@ async function extractFromDealerInspireListing(sourceUrl: URL): Promise<Extracte
       } catch {
         // Try the next reader and public inventory surface.
       } finally {
-        clearTimeout(timeout);
+        timeout.cleanup();
       }
     }
   }
@@ -290,8 +311,8 @@ async function extractFromDealerInspireListing(sourceUrl: URL): Promise<Extracte
 
 export async function extractVehicleFromVdp(value: string): Promise<ExtractedVehicle> {
   const requestedUrl = validatePublicUrl(value);
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 15000);
+  const deadline = createDeadline();
+  const timeout = timeoutFor(deadline, DIRECT_FETCH_MS);
   let response: Response;
   try {
     response = await fetch(requestedUrl, {
@@ -304,11 +325,11 @@ export async function extractVehicleFromVdp(value: string): Promise<ExtractedVeh
         Referer: requestedUrl.origin,
       },
       redirect: "follow",
-      signal: controller.signal,
+      signal: timeout.signal,
     });
-  } finally { clearTimeout(timeout); }
+  } finally { timeout.cleanup(); }
   if (!response.ok) {
-    const listingVehicle = await extractFromDealerInspireListing(requestedUrl);
+    const listingVehicle = await extractFromDealerInspireListing(requestedUrl, deadline);
     if (listingVehicle) return listingVehicle;
     throw new Error(`LotSocial could not scrape that VDP yet. This store blocks the direct page and no matching public inventory listing was found.`);
   }
@@ -319,6 +340,11 @@ export async function extractVehicleFromVdp(value: string): Promise<ExtractedVeh
   if (declaredLength > 3_000_000) throw new Error("That VDP is too large to import safely.");
   const html = await response.text();
   if (html.length > 3_000_000) throw new Error("That VDP is too large to import safely.");
+  if (isCloudflareChallenge(html, response.headers)) {
+    const listingVehicle = await extractFromDealerInspireListing(requestedUrl, deadline);
+    if (listingVehicle) return listingVehicle;
+    throw new Error("LotSocial could not scrape that VDP yet. This store returned a Cloudflare challenge and no matching public inventory listing was found.");
+  }
 
   const nodes: Record<string, unknown>[] = [];
   for (const match of html.matchAll(/<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)) {
@@ -382,35 +408,6 @@ export async function extractVehicleFromVdp(value: string): Promise<ExtractedVeh
   };
   if (!extracted.vin && !extracted.title) throw new Error("LotSocial could not identify a vehicle on that page.");
   return extracted;
-}
-
-export function createManualVehicle(input: ManualVehicleInput): ExtractedVehicle {
-  const source = validatePublicUrl(input.sourceUrl);
-  const year = input.year.trim();
-  const make = input.make.trim();
-  const model = input.model.trim();
-  const trim = input.trim.trim();
-  const title = [year, make, model, trim].filter(Boolean).join(" ");
-  if (!year || !make || !model) throw new Error("Add at least year, make, and model.");
-  return {
-    sourceUrl: source.href,
-    sourceHost: source.hostname,
-    title: title || "Manual vehicle entry",
-    vin: "",
-    stockNumber: "",
-    year,
-    make,
-    model,
-    trim,
-    price: input.price.trim(),
-    currency: "USD",
-    description: "",
-    imageUrls: [],
-    facts: Object.fromEntries(Object.entries({
-      dealershipName: input.dealershipName.trim(),
-      mileage: input.mileage.trim(),
-    }).filter(([, value]) => value)),
-  };
 }
 
 export async function saveImportedVehicle(associateEmail: string, vehicle: ExtractedVehicle) {

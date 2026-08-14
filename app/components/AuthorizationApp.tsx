@@ -120,16 +120,6 @@ type FormState = {
   requestedPermissions: PermissionId[];
 };
 
-type ManualVehicleState = {
-  year: string;
-  make: string;
-  model: string;
-  trim: string;
-  price: string;
-  mileage: string;
-  dealershipName: string;
-};
-
 const providers = [
   "Unknown / manager will confirm",
   "HomeNet",
@@ -237,7 +227,6 @@ export function AuthorizationApp({ user }: { user: User }) {
   const [importingVdp, setImportingVdp] = useState(false);
   const [inventoryError, setInventoryError] = useState("");
   const [importNotice, setImportNotice] = useState("");
-  const [manualVehicle, setManualVehicle] = useState<ManualVehicleState>({ year: "", make: "", model: "", trim: "", price: "", mileage: "", dealershipName: "" });
   const [installBannerHidden, setInstallBannerHidden] = useState(true);
   const [installHelp, setInstallHelp] = useState<"ios" | "android" | null>(null);
   const [creativeVehicle, setCreativeVehicle] = useState<ImportedVehicle | null>(null);
@@ -308,34 +297,8 @@ export function AuthorizationApp({ user }: { user: User }) {
       setImportNotice(`${payload.vehicle.title} was added to My Inventory.`);
       setVdpUrl("");
       setAuthorizedToMarket(false);
-      setManualVehicle({ year: "", make: "", model: "", trim: "", price: "", mileage: "", dealershipName: "" });
     } catch (caught) {
       setInventoryError(caught instanceof Error ? caught.message : "LotSocial could not scrape that VDP yet.");
-    } finally {
-      setImportingVdp(false);
-    }
-  }
-
-  async function saveManualVehicle(event: FormEvent) {
-    event.preventDefault();
-    setImportingVdp(true);
-    setInventoryError("");
-    setImportNotice("");
-    try {
-      const response = await fetch("/api/vdp-imports", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sourceUrl: vdpUrl, authorizedToMarket, manualVehicle }),
-      });
-      const payload = await response.json() as { vehicle?: ImportedVehicle; error?: string };
-      if (!response.ok || !payload.vehicle) throw new Error(payload.error ?? "Unable to save that vehicle.");
-      setVehicles((current) => [payload.vehicle!, ...current.filter((vehicle) => vehicle.id !== payload.vehicle!.id)]);
-      setImportNotice(`${payload.vehicle.title} was added from manual details.`);
-      setVdpUrl("");
-      setAuthorizedToMarket(false);
-      setManualVehicle({ year: "", make: "", model: "", trim: "", price: "", mileage: "", dealershipName: "" });
-    } catch (caught) {
-      setInventoryError(caught instanceof Error ? caught.message : "Unable to save that vehicle.");
     } finally {
       setImportingVdp(false);
     }
@@ -703,7 +666,7 @@ export function AuthorizationApp({ user }: { user: User }) {
               <div className="creative-heading"><div><p className="eyebrow">Creative studio</p><h1>{vehicleDisplayName(creativeVehicle)}</h1><p>Build a source-grounded vertical-video storyboard from the dealership's VDP photos and facts.</p></div><div className="creative-vehicle-chip">{creativeVehicle.price && <strong>{formatPrice(creativeVehicle.price, creativeVehicle.currency)}</strong>}<span>VIN {creativeVehicle.vin || "not detected"}</span></div></div>
               <div className="creative-layout">
                 <main className="creative-editor">
-                  <section className="creative-step"><div className="creative-step-title"><span>1</span><div><h2>{creativeVehicle.imageUrls.length ? "Select the shots" : "Caption-only draft"}</h2><p>{creativeVehicle.imageUrls.length ? "Choose 2–10 photos. Their order becomes the first storyboard sequence." : "The dealer page could not be read automatically, so LotSocial will create the social copy from your source-stamped manual details."}</p></div><strong>{selectedCreativeImages.length} selected</strong></div>{creativeVehicle.imageUrls.length ? <div className="creative-photo-grid">{creativeVehicle.imageUrls.map((image, index) => <button type="button" key={image} className={selectedCreativeImages.includes(image) ? "selected" : ""} onClick={() => toggleCreativeImage(image)}><img src={image} alt={`VDP photo ${index + 1}`} loading="lazy" referrerPolicy="no-referrer" /><span>{selectedCreativeImages.includes(image) ? selectedCreativeImages.indexOf(image) + 1 : "+"}</span></button>)}</div> : <div className="caption-only-note">You can generate, copy, and post the caption now. A video render needs at least two vehicle photos.</div>}</section>
+                  <section className="creative-step"><div className="creative-step-title"><span>1</span><div><h2>{creativeVehicle.imageUrls.length ? "Select the shots" : "Caption-only draft"}</h2><p>{creativeVehicle.imageUrls.length ? "Choose 2–10 photos. Their order becomes the first storyboard sequence." : "LotSocial captured grounded vehicle facts but no usable VDP photos. Create copy now; video needs source imagery."}</p></div><strong>{selectedCreativeImages.length} selected</strong></div>{creativeVehicle.imageUrls.length ? <div className="creative-photo-grid">{creativeVehicle.imageUrls.map((image, index) => <button type="button" key={image} className={selectedCreativeImages.includes(image) ? "selected" : ""} onClick={() => toggleCreativeImage(image)}><img src={image} alt={`VDP photo ${index + 1}`} loading="lazy" referrerPolicy="no-referrer" /><span>{selectedCreativeImages.includes(image) ? selectedCreativeImages.indexOf(image) + 1 : "+"}</span></button>)}</div> : <div className="caption-only-note">You can generate and copy the caption now. A video render needs at least two source vehicle photos.</div>}</section>
                   <section className="creative-step"><div className="creative-step-title"><span>2</span><div><h2>Choose the pacing</h2><p>The script uses only facts captured from the source VDP.</p></div></div><div className="creative-options"><label className={creativeStyle === "energetic" ? "selected" : ""}><input type="radio" name="style" value="energetic" checked={creativeStyle === "energetic"} onChange={() => { setCreativeStyle("energetic"); setCreativeDraft(null); }} /><strong>Fast cuts</strong><p>Quick hooks and energetic pacing</p></label><label className={creativeStyle === "walkaround" ? "selected" : ""}><input type="radio" name="style" value="walkaround" checked={creativeStyle === "walkaround"} onChange={() => { setCreativeStyle("walkaround"); setCreativeDraft(null); }} /><strong>Walkaround</strong><p>Clear, conversational vehicle tour</p></label><label className={creativeStyle === "premium" ? "selected" : ""}><input type="radio" name="style" value="premium" checked={creativeStyle === "premium"} onChange={() => { setCreativeStyle("premium"); setCreativeDraft(null); }} /><strong>Premium</strong><p>Slower, polished presentation</p></label></div><div className="duration-options"><span>Target length</span>{[15,30,45].map((duration) => <button type="button" key={duration} className={creativeDuration === duration ? "active" : ""} onClick={() => { setCreativeDuration(duration); setCreativeDraft(null); }}>{duration}s</button>)}</div></section>
                   <section className="creative-step"><div className="creative-step-title"><span>3</span><div><h2>Salesperson end card</h2><p>This becomes the final shot and call to action.</p></div></div><div className="form-grid compact"><label className="field"><span>Display name</span><input value={endCardName} onChange={(event) => { setEndCardName(event.target.value); setCreativeDraft(null); }} required /></label><label className="field"><span>Phone</span><input value={endCardPhone} onChange={(event) => { setEndCardPhone(event.target.value); setCreativeDraft(null); }} placeholder="Optional" /></label><label className="field"><span>Email</span><input type="email" value={endCardEmail} onChange={(event) => { setEndCardEmail(event.target.value); setCreativeDraft(null); }} /></label><label className="field"><span>Call to action</span><select value={endCardCta} onChange={(event) => { setEndCardCta(event.target.value); setCreativeDraft(null); }}><option>Message me for details</option><option>Schedule your test drive</option><option>Ask me for today's availability</option><option>Contact me for current pricing</option></select></label></div></section>
                   {creativeError && <div className="form-error" role="alert">{creativeError}</div>}
