@@ -86,6 +86,7 @@ test("keeps reader URLs isolated and covered for public inventory surfaces", asy
   const vdp = await source("app/lib/vdp.ts");
 
   assert.match(vdp, /function readerUrls\(targetUrl: URL\)/);
+  assert.match(vdp, /\/inventory\/\?q=\$\{encodeURIComponent\(vin\)\}/);
   assert.match(vdp, /hrefWithoutProtocol/);
   assert.match(vdp, /originPath/);
   assert.match(vdp, /r\.jina\.ai\/http:\/\/r\.jina\.ai\/http:\/\//);

@@ -201,10 +201,12 @@ function vehicleSlugParts(url: URL) {
 }
 
 function candidateInventoryPaths(url: URL) {
+  const vin = vinFromUrl(url);
   const parts = vehicleSlugParts(url);
   const makeIndex = parts.findIndex((part) => ["lexus", "maserati", "ford", "lincoln", "toyota", "honda", "chevrolet", "gmc", "buick", "cadillac", "bmw", "mercedes", "mercedesbenz", "audi", "porsche", "hyundai", "kia", "nissan", "mazda", "subaru", "volvo", "land", "range"].includes(part));
   const model = makeIndex >= 0 ? parts[makeIndex + 1] : "";
   const paths = new Set<string>();
+  if (vin) paths.add(`/inventory/?q=${encodeURIComponent(vin)}`);
   if (model) paths.add(`/new-vehicles/${model}/`);
   [
     "/new-vehicles/crossovers-suvs/",
