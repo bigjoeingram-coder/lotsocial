@@ -68,6 +68,8 @@ type ImportedVehicle = {
   importedAt: string;
 };
 
+type ManualVehicleState = { year: string; make: string; model: string; trim: string; price: string; mileage: string; dealershipName: string };
+
 type CreativeProject = {
   id: string;
   vehicleId: string;
@@ -226,6 +228,8 @@ export function AuthorizationApp({ user }: { user: User }) {
   const [authorizedToMarket, setAuthorizedToMarket] = useState(false);
   const [importingVdp, setImportingVdp] = useState(false);
   const [inventoryError, setInventoryError] = useState("");
+  const [manualFallbackOpen, setManualFallbackOpen] = useState(false);
+  const [manualVehicle, setManualVehicle] = useState<ManualVehicleState>({ year: "", make: "", model: "", trim: "", price: "", mileage: "", dealershipName: "" });
   const [importNotice, setImportNotice] = useState("");
   const [installBannerHidden, setInstallBannerHidden] = useState(true);
   const [installHelp, setInstallHelp] = useState<"ios" | "android" | null>(null);
@@ -298,8 +302,36 @@ export function AuthorizationApp({ user }: { user: User }) {
       setImportNotice(`${payload.vehicle.title} was added to My Inventory.`);
       setVdpUrl("");
       setAuthorizedToMarket(false);
+      setManualFallbackOpen(false);
+      setManualVehicle({ year: "", make: "", model: "", trim: "", price: "", mileage: "", dealershipName: "" });
     } catch (caught) {
       setInventoryError(caught instanceof Error ? caught.message : "LotSocial could not scrape that VDP yet.");
+      setManualFallbackOpen(true);
+    } finally {
+      setImportingVdp(false);
+    }
+  }
+
+  async function saveManualVehicle(event: FormEvent) {
+    event.preventDefault();
+    setImportingVdp(true);
+    setInventoryError("");
+    try {
+      const response = await fetch("/api/vdp-imports", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sourceUrl: vdpUrl, authorizedToMarket, manualVehicle }),
+      });
+      const payload = await response.json() as { vehicle?: ImportedVehicle; error?: string };
+      if (!response.ok || !payload.vehicle) throw new Error(payload.error ?? "Unable to save that vehicle.");
+      setVehicles((current) => [payload.vehicle!, ...current.filter((vehicle) => vehicle.id !== payload.vehicle!.id)]);
+      setImportNotice(`${payload.vehicle.title} was added to My Inventory.`);
+      setVdpUrl("");
+      setAuthorizedToMarket(false);
+      setManualFallbackOpen(false);
+      setManualVehicle({ year: "", make: "", model: "", trim: "", price: "", mileage: "", dealershipName: "" });
+    } catch (caught) {
+      setInventoryError(caught instanceof Error ? caught.message : "Unable to save that vehicle.");
     } finally {
       setImportingVdp(false);
     }
@@ -677,6 +709,29 @@ export function AuthorizationApp({ user }: { user: User }) {
               {inventoryError && <div className="form-error" role="alert">{inventoryError}</div>}
               {importNotice && <div className="management-notice" role="status">{importNotice}</div>}
             </form>
+            {manualFallbackOpen && <form className="manual-vdp-panel" onSubmit={saveManualVehicle}>
+              <div className="manual-vdp-heading">
+                <div>
+                  <p className="eyebrow">Manual fallback</p>
+                  <h2>Add the essentials and keep going</h2>
+                  <p>Some dealer pages block automated reading. Enter the basic facts from the same VDP and LotSocial will still create a source-stamped record.</p>
+                </div>
+                <button type="button" onClick={() => setManualFallbackOpen(false)}>Hide</button>
+              </div>
+              <div className="form-grid compact">
+                <label className="field"><span>Year<em>Required</em></span><input value={manualVehicle.year} onChange={(event) => setManualVehicle((current) => ({ ...current, year: event.target.value }))} required /></label>
+                <label className="field"><span>Make<em>Required</em></span><input value={manualVehicle.make} onChange={(event) => setManualVehicle((current) => ({ ...current, make: event.target.value }))} required /></label>
+                <label className="field"><span>Model<em>Required</em></span><input value={manualVehicle.model} onChange={(event) => setManualVehicle((current) => ({ ...current, model: event.target.value }))} required /></label>
+                <label className="field"><span>Trim</span><input value={manualVehicle.trim} onChange={(event) => setManualVehicle((current) => ({ ...current, trim: event.target.value }))} /></label>
+                <label className="field"><span>Price</span><input value={manualVehicle.price} onChange={(event) => setManualVehicle((current) => ({ ...current, price: event.target.value }))} placeholder="As listed" /></label>
+                <label className="field"><span>Mileage</span><input value={manualVehicle.mileage} onChange={(event) => setManualVehicle((current) => ({ ...current, mileage: event.target.value }))} placeholder="As listed" /></label>
+                <label className="field field-full"><span>Dealership name</span><input value={manualVehicle.dealershipName} onChange={(event) => setManualVehicle((current) => ({ ...current, dealershipName: event.target.value }))} /></label>
+              </div>
+              <div className="manual-vdp-actions">
+                <span>Uses the pasted VDP URL as the source link.</span>
+                <button className="primary-button" type="submit" disabled={importingVdp || !authorizedToMarket}>{importingVdp ? "Saving..." : "Save manual vehicle"}</button>
+              </div>
+            </form>}
             <section className="inventory-section">
               <div className="inventory-section-header"><div><p className="eyebrow">My inventory</p><h2>{vehicles.length} imported {vehicles.length === 1 ? "vehicle" : "vehicles"}</h2></div><div className="pro-callout"><span>PRO</span><p><strong>Want your entire lot here automatically?</strong><br />Connect HomeNet, vAuto, or an authorized dealership feed.</p><button onClick={() => setView("dashboard")}>Set up automation →</button></div></div>
               {inventoryLoading ? <div className="empty-state"><span className="loader" /><p>Loading your inventory...</p></div> : vehicles.length === 0 ? <div className="empty-state inventory-empty"><div className="empty-icon">VIN</div><h3>Your first vehicle starts with a URL</h3><p>Paste one of the dealership's public VDP links above. The extracted record remains tied to its original source.</p></div> : <div className="vehicle-grid">{vehicles.map((vehicle) => <article className="vehicle-card" key={vehicle.id}><div className="vehicle-image">{vehicle.imageUrls[0] ? <img src={vehicle.imageUrls[0]} alt={vehicle.title} loading="lazy" referrerPolicy="no-referrer" /> : <div className="vehicle-placeholder">No VDP image found</div>}<span className="source-badge">{vehicle.sourceHost}</span></div><div className="vehicle-body"><div className="vehicle-title"><div><span>{vehicle.year} {vehicle.make}</span><h3>{vehicleModelLabel(vehicle)}</h3><p>{vehicle.trim}</p></div>{vehicle.price && <strong>{formatPrice(vehicle.price, vehicle.currency)}</strong>}</div><dl><div><dt>VIN</dt><dd>{vehicle.vin || "Not detected"}</dd></div><div><dt>Stock</dt><dd>{vehicle.stockNumber || "Not detected"}</dd></div><div><dt>Photos</dt><dd>{vehicle.imageUrls.length}</dd></div></dl><div className="vehicle-source"><span>Captured {formatDate(vehicle.importedAt)}</span><a href={vehicle.sourceUrl} target="_blank" rel="noreferrer">View source ↗</a></div><button className="creative-next" onClick={() => startCreative(vehicle)}>{vehicle.imageUrls.length < 2 ? "Create social caption →" : "Create video storyboard →"}</button></div></article>)}</div>}
