@@ -96,6 +96,19 @@ function validatePublicUrl(value: string) {
   return url;
 }
 
+function sourceUrlVariants(value: string) {
+  const url = validatePublicUrl(value);
+  const variants = new Set([url.href]);
+  const toggleTrailingSlash = new URL(url.href);
+  if (toggleTrailingSlash.pathname !== "/") {
+    toggleTrailingSlash.pathname = toggleTrailingSlash.pathname.endsWith("/")
+      ? toggleTrailingSlash.pathname.slice(0, -1)
+      : `${toggleTrailingSlash.pathname}/`;
+    variants.add(toggleTrailingSlash.href);
+  }
+  return Array.from(variants);
+}
+
 function textValue(value: unknown): string {
   if (typeof value === "string" || typeof value === "number") return String(value).trim();
   if (value && typeof value === "object" && "name" in value) return textValue((value as { name?: unknown }).name);
@@ -478,6 +491,15 @@ export async function saveImportedVehicle(associateEmail: string, vehicle: Extra
 export async function getImportedVehicle(id: string, associateEmail: string) {
   await ensureVdpSchema();
   return database().prepare("SELECT * FROM imported_vehicles WHERE id = ? AND LOWER(associate_email) = LOWER(?) LIMIT 1").bind(id, associateEmail).first<ImportedVehicleRecord>();
+}
+
+export async function getImportedVehicleBySourceUrl(associateEmail: string, sourceUrl: string) {
+  await ensureVdpSchema();
+  const variants = sourceUrlVariants(sourceUrl);
+  const placeholders = variants.map(() => "?").join(", ");
+  return database().prepare(`SELECT * FROM imported_vehicles WHERE LOWER(associate_email) = LOWER(?) AND source_url IN (${placeholders}) ORDER BY updated_at DESC LIMIT 1`)
+    .bind(associateEmail, ...variants)
+    .first<ImportedVehicleRecord>();
 }
 
 export async function listImportedVehicles(associateEmail: string) {

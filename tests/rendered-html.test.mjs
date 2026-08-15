@@ -51,6 +51,8 @@ test("keeps the inventory lane scrape-only, not manual-entry based", async () =>
   assert.doesNotMatch(route, /manualVehicle|createManualVehicle/);
   assert.doesNotMatch(vdp, /ManualVehicleInput|createManualVehicle|Manual vehicle entry/);
   assert.match(route, /payload\.authorizedToMarket !== true/);
+  assert.match(route, /getImportedVehicleBySourceUrl/);
+  assert.match(vdp, /function sourceUrlVariants/);
   assert.match(component, /Create social caption/);
   assert.match(component, /Caption-only draft/);
   assert.match(component, /markBrokenCreativeImage/);
