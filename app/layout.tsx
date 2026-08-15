@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { Geist, Geist_Mono } from "next/font/google";
 import { headers } from "next/headers";
 import "./globals.css";
@@ -23,5 +24,10 @@ export async function generateMetadata(): Promise<Metadata> {
 }
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  return <html lang="en"><body className={`${geistSans.variable} ${geistMono.variable}`}>{children}</body></html>;
+  return <html lang="en"><body className={`${geistSans.variable} ${geistMono.variable}`}>
+    {children}
+    <footer style={{ padding: "24px", textAlign: "center", fontSize: "13px", opacity: 0.72 }}>
+      <Link href="/privacy">Privacy Policy</Link><span aria-hidden="true"> · </span><Link href="/terms">Terms of Service</Link>
+    </footer>
+  </body></html>;
 }
