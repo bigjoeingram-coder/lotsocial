@@ -384,6 +384,15 @@ export async function extractVehicleFromVdp(value: string): Promise<ExtractedVeh
     throw new Error(`LotSocial could not scrape that VDP yet. This store blocks the direct page and no matching public inventory listing was found.`);
   } finally { timeout.cleanup(); }
   if (!response.ok) {
+    console.warn("LotSocial VDP direct fetch failed", {
+      url: requestedUrl.href,
+      status: response.status,
+      statusText: response.statusText,
+      cfRay: response.headers.get("cf-ray") ?? "",
+      cfMitigated: response.headers.get("cf-mitigated") ?? "",
+      server: response.headers.get("server") ?? "",
+      contentType: response.headers.get("content-type") ?? "",
+    });
     const listingVehicle = await extractFromDealerInspireListing(requestedUrl, deadline);
     if (listingVehicle) return listingVehicle;
     throw new Error(`LotSocial could not scrape that VDP yet. This store blocks the direct page and no matching public inventory listing was found.`);
