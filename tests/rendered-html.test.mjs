@@ -48,7 +48,7 @@ test("includes the mobile Add to Home Screen pilot banner", async () => {
   assert.match(css, /\.install-steps/);
 });
 
-test("keeps the inventory lane scrape-first with manual fallback safety net", async () => {
+test("keeps the inventory lane scrape-only with source reuse and image recovery", async () => {
   const [component, route, creativeRoute, vdp] = await Promise.all([
     source("app/components/AuthorizationApp.tsx"),
     source("app/api/vdp-imports/route.ts"),
@@ -56,13 +56,14 @@ test("keeps the inventory lane scrape-first with manual fallback safety net", as
     source("app/lib/vdp.ts"),
   ]);
 
-  assert.match(component, /manualFallbackOpen/);
-  assert.match(component, /Save manual vehicle/);
-  assert.match(route, /manualVehicle|createManualVehicle/);
-  assert.match(vdp, /ManualVehicleInput|createManualVehicle|Manual vehicle entry/);
+  assert.doesNotMatch(component, /manualFallbackOpen|Save manual vehicle/);
+  assert.doesNotMatch(route, /manualVehicle|createManualVehicle/);
+  assert.doesNotMatch(vdp, /ManualVehicleInput|createManualVehicle|Manual vehicle entry/);
   assert.match(route, /payload\.authorizedToMarket !== true/);
   assert.match(route, /getImportedVehicleBySourceUrl/);
   assert.match(vdp, /function sourceUrlVariants/);
+  assert.match(vdp, /fetchViaBrightData/);
+  assert.match(vdp, /BRIGHTDATA_API_KEY/);
   assert.match(component, /Create social caption/);
   assert.match(component, /Caption-only draft/);
   assert.match(component, /markBrokenCreativeImage/);
@@ -92,8 +93,10 @@ test("detects Cloudflare challenges and bounds fallback work", async () => {
   assert.match(vdp, /just a moment/);
   assert.match(vdp, /attention required/);
   assert.match(vdp, /checking if the site connection is secure/);
+  assert.match(vdp, /async function viaListingOrThrow\(reason: string\)/);
+  assert.match(vdp, /const viaBrightData = await fetchViaBrightData\(requestedUrl, deadline\)/);
   assert.match(vdp, /extractFromDealerInspireListing\(requestedUrl, deadline\)/);
-  assert.match(vdp, /catch \{\s*const listingVehicle = await extractFromDealerInspireListing\(requestedUrl, deadline\)/);
+  assert.match(vdp, /if \(listingVehicle\) throw new ResolvedVehicle\(listingVehicle\)/);
   assert.match(vdp, /LotSocial could not scrape that VDP before the dealer page timed out/);
   assert.match(vdp, /function isReaderChallengeMarkdown\(markdown: string\)/);
   assert.match(vdp, /Warning:\\s\*This page maybe requiring CAPTCHA/);
