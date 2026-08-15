@@ -364,56 +364,109 @@ async function extractFromDealerInspireListing(sourceUrl: URL, deadline: { expir
   return null;
 }
 
+async function fetchViaBrightData(url: URL, deadline: { expiresAt: number }): Promise<{ html: string; finalUrl: URL } | null> {
+  const apiKey = (env as unknown as { BRIGHTDATA_API_KEY?: string }).BRIGHTDATA_API_KEY;
+  const zone = (env as unknown as { BRIGHTDATA_ZONE?: string }).BRIGHTDATA_ZONE;
+  if (!apiKey || !zone) return null;
+  const timeout = timeoutFor(deadline, READER_FETCH_MS);
+  try {
+    const response = await fetch("https://api.brightdata.com/request", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ zone, url: url.href, format: "raw" }),
+      signal: timeout.signal,
+    });
+    if (!response.ok) {
+      console.warn("LotSocial Bright Data fetch failed", { url: url.href, status: response.status });
+      return null;
+    }
+    const html = await response.text();
+    if (!html || html.length > 3_000_000) return null;
+    return { html, finalUrl: url };
+  } catch (caught) {
+    console.warn("LotSocial Bright Data fetch threw", { url: url.href, message: caught instanceof Error ? caught.message : "unknown" });
+    return null;
+  } finally {
+    timeout.cleanup();
+  }
+}
+
 export async function extractVehicleFromVdp(value: string): Promise<ExtractedVehicle> {
   const requestedUrl = validatePublicUrl(value);
   const deadline = createDeadline();
-  const timeout = timeoutFor(deadline, DIRECT_FETCH_MS);
-  let response: Response | null = null;
-  try {
-    response = await fetch(requestedUrl, {
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36 LotSocial/1.0",
-        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.9",
-        "Cache-Control": "no-cache",
-        Pragma: "no-cache",
-        Referer: requestedUrl.origin,
-      },
-      redirect: "follow",
-      signal: timeout.signal,
-    });
-  } catch {
+
+  async function viaListingOrThrow(reason: string): Promise<{ html: string; finalUrl: URL }> {
+    const viaBrightData = await fetchViaBrightData(requestedUrl, deadline);
+    if (viaBrightData) return viaBrightData;
     const listingVehicle = await extractFromDealerInspireListing(requestedUrl, deadline);
-    if (listingVehicle) return listingVehicle;
-    throw new Error(`LotSocial could not scrape that VDP yet. This store blocks the direct page and no matching public inventory listing was found.`);
-  } finally { timeout.cleanup(); }
-  if (!response.ok) {
-    console.warn("LotSocial VDP direct fetch failed", {
-      url: requestedUrl.href,
-      status: response.status,
-      statusText: response.statusText,
-      cfRay: response.headers.get("cf-ray") ?? "",
-      cfMitigated: response.headers.get("cf-mitigated") ?? "",
-      server: response.headers.get("server") ?? "",
-      contentType: response.headers.get("content-type") ?? "",
-    });
-    const listingVehicle = await extractFromDealerInspireListing(requestedUrl, deadline);
-    if (listingVehicle) return listingVehicle;
-    throw new Error(`LotSocial could not scrape that VDP yet. This store blocks the direct page and no matching public inventory listing was found.`);
-  }
-  const finalUrl = validatePublicUrl(response.url);
-  const contentType = response.headers.get("content-type") ?? "";
-  if (!contentType.includes("text/html") && !contentType.includes("application/xhtml")) throw new Error("That URL is not a vehicle detail page.");
-  const declaredLength = Number(response.headers.get("content-length") ?? "0");
-  if (declaredLength > 3_000_000) throw new Error("That VDP is too large to import safely.");
-  const html = await response.text();
-  if (html.length > 3_000_000) throw new Error("That VDP is too large to import safely.");
-  if (isCloudflareChallenge(html, response.headers)) {
-    const listingVehicle = await extractFromDealerInspireListing(requestedUrl, deadline);
-    if (listingVehicle) return listingVehicle;
-    throw new Error("LotSocial could not scrape that VDP yet. This store returned a Cloudflare challenge and no matching public inventory listing was found.");
+    if (listingVehicle) throw new ResolvedVehicle(listingVehicle);
+    throw new Error(`LotSocial could not scrape that VDP yet. ${reason} and no matching public inventory listing was found.`);
   }
 
+  let resolved: { html: string; finalUrl: URL };
+  try {
+    const timeout = timeoutFor(deadline, DIRECT_FETCH_MS);
+    let response: Response;
+    try {
+      response = await fetch(requestedUrl, {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36 LotSocial/1.0",
+          Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+          "Accept-Language": "en-US,en;q=0.9",
+          "Cache-Control": "no-cache",
+          Pragma: "no-cache",
+          Referer: requestedUrl.origin,
+        },
+        redirect: "follow",
+        signal: timeout.signal,
+      });
+    } catch {
+      resolved = await viaListingOrThrow("This store blocks the direct page");
+      return await parseVehicleHtml(resolved.html, resolved.finalUrl);
+    } finally {
+      timeout.cleanup();
+    }
+    if (!response.ok) {
+      console.warn("LotSocial VDP direct fetch failed", {
+        url: requestedUrl.href,
+        status: response.status,
+        statusText: response.statusText,
+        cfRay: response.headers.get("cf-ray") ?? "",
+        cfMitigated: response.headers.get("cf-mitigated") ?? "",
+        server: response.headers.get("server") ?? "",
+        contentType: response.headers.get("content-type") ?? "",
+      });
+      resolved = await viaListingOrThrow("This store blocks the direct page");
+      return await parseVehicleHtml(resolved.html, resolved.finalUrl);
+    }
+    const finalUrl = validatePublicUrl(response.url);
+    const contentType = response.headers.get("content-type") ?? "";
+    if (!contentType.includes("text/html") && !contentType.includes("application/xhtml")) throw new Error("That URL is not a vehicle detail page.");
+    const declaredLength = Number(response.headers.get("content-length") ?? "0");
+    if (declaredLength > 3_000_000) throw new Error("That VDP is too large to import safely.");
+    const html = await response.text();
+    if (html.length > 3_000_000) throw new Error("That VDP is too large to import safely.");
+    if (isCloudflareChallenge(html, response.headers)) {
+      resolved = await viaListingOrThrow("This store returned a Cloudflare challenge");
+      return await parseVehicleHtml(resolved.html, resolved.finalUrl);
+    }
+    resolved = { html, finalUrl };
+  } catch (caught) {
+    if (caught instanceof ResolvedVehicle) return caught.vehicle;
+    throw caught;
+  }
+  return await parseVehicleHtml(resolved.html, resolved.finalUrl);
+}
+
+class ResolvedVehicle extends Error {
+  vehicle: ExtractedVehicle;
+  constructor(vehicle: ExtractedVehicle) {
+    super("resolved-via-listing-guess");
+    this.vehicle = vehicle;
+  }
+}
+
+async function parseVehicleHtml(html: string, finalUrl: URL): Promise<ExtractedVehicle> {
   const nodes: Record<string, unknown>[] = [];
   for (const match of html.matchAll(/<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)) {
     try { nodes.push(...flattenJsonLd(JSON.parse(match[1].trim()))); } catch { /* malformed third-party JSON-LD is ignored */ }
