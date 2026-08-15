@@ -53,6 +53,8 @@ test("keeps the inventory lane scrape-only, not manual-entry based", async () =>
   assert.match(route, /payload\.authorizedToMarket !== true/);
   assert.match(component, /Create social caption/);
   assert.match(component, /Caption-only draft/);
+  assert.match(component, /markBrokenCreativeImage/);
+  assert.match(component, /onError=\{\(\) => markBrokenCreativeImage\(image\)\}/);
   assert.doesNotMatch(creativeRoute, /selectedImages\.length < 2/);
 });
 
