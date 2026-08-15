@@ -229,6 +229,16 @@ function candidateInventoryPaths(url: URL) {
   const makeIndex = parts.findIndex((part) => ["lexus", "maserati", "ford", "lincoln", "toyota", "honda", "chevrolet", "gmc", "buick", "cadillac", "bmw", "mercedes", "mercedesbenz", "audi", "porsche", "hyundai", "kia", "nissan", "mazda", "subaru", "volvo", "land", "range"].includes(part));
   const model = makeIndex >= 0 ? parts[makeIndex + 1] : "";
   const paths = new Set<string>();
+
+  // Dealer Inspire exposes an LLM-friendly public inventory surface on many stores.
+  // Put it first so a blocked VDP does not exhaust the reader-attempt budget before
+  // LotSocial reaches the cleanest VIN-searchable source.
+  paths.add("/llm/inventory/");
+  if (/\/(?:new|new-vehicles)\b/i.test(url.pathname) || /\bnew-/i.test(url.pathname)) {
+    paths.add("/llm/inventory/?type=new");
+  } else if (/\/(?:used|pre-owned|certified)\b/i.test(url.pathname) || /\b(?:used|certified-used)-/i.test(url.pathname)) {
+    paths.add("/llm/inventory/?type=used");
+  }
   if (vin) paths.add(`/inventory/?q=${encodeURIComponent(vin)}`);
   if (model) paths.add(`/new-vehicles/${model}/`);
   [
@@ -241,7 +251,9 @@ function candidateInventoryPaths(url: URL) {
 }
 
 function fallbackVehicleSurfaces(url: URL) {
-  return [url, ...candidateInventoryPaths(url)];
+  // The direct VDP has already failed before this fallback runs. Prioritize public
+  // inventory surfaces, then retain the VDP reader as a final compatibility path.
+  return [...candidateInventoryPaths(url), url];
 }
 
 function readerUrls(targetUrl: URL) {
@@ -284,18 +296,24 @@ function parseDealerInspireMarkdown(markdown: string, sourceUrl: URL): Extracted
   if (vinIndex < 0) return null;
   const before = content.slice(Math.max(0, vinIndex - 5000), vinIndex);
   const after = content.slice(vinIndex, Math.min(content.length, vinIndex + 5000));
+  const vehicleLinks = Array.from(before.matchAll(/(?:^|\n)\s*(?:#{1,6}\s*)?(?:\*\s*)?\[([^\]]+)\]\([^)]+\)\s*$/gm));
   const title = decodeEntities(
-    (before.match(/## \[([^\]]+)\]\([^)]+\)\s*$/m) ?? Array.from(before.matchAll(/## \[([^\]]+)\]\([^)]+\)/g)).at(-1))?.[1]
+    vehicleLinks.at(-1)?.[1]
     ?? markdown.match(/^Title:\s*(?!Just a moment|Attention Required)([^\n|]+)/im)?.[1]
     ?? ""
   );
   if (!title || isInventoryPageTitle(title)) return null;
   const stockNumber = markdownField(after, "Stock");
-  const mileage = markdownField(before, "Mileage") || markdownField(after, "Mileage");
+  const mileage = markdownField(before, "Mileage") || markdownField(after, "Mileage")
+    || Array.from(before.matchAll(/\b([\d,]+)\s+miles?\b/gi)).at(-1)?.[1]?.replace(/,/g, "") || "";
   const exteriorColor = markdownField(before, "Exterior") || markdownField(after, "Exterior");
   const interiorColor = markdownField(before, "Interior") || markdownField(after, "Interior");
   const dealershipName = markdownField(before, "Location") || markdownField(after, "Location") || decodeEntities(markdown.match(/^Title:\s*([^\n|]+)/m)?.[1] ?? "");
-  const price = normalizeListedPrice(after.match(/(?:Cash|Total Price)\**\s*\$?([\d,]+)/i)?.[1] || after.match(/(?:Sale Price|Your Price|MSRP \+ DPH|MSRP)\**\s*\$?([\d,]+)/i)?.[1]);
+  const price = normalizeListedPrice(
+    after.match(/(?:Cash|Total Price)\**\s*\$?([\d,]+)/i)?.[1]
+    || after.match(/(?:Sale Price|Your Price|MSRP \+ DPH|MSRP)\**\s*\$?([\d,]+)/i)?.[1]
+    || Array.from(before.matchAll(/\$\s*([\d,]+(?:\.\d{1,2})?)/g)).at(-1)?.[1]
+  );
   const markdownImages = Array.from(`${before}\n${after}`.matchAll(/!\[[^\]]*\]\((https?:\/\/[^)]+)\)/gi))
     .flatMap((match) => resolveImage(match[1], sourceUrl))
     .filter(usableImageUrl);
