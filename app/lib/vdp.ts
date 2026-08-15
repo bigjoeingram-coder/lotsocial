@@ -351,7 +351,7 @@ export async function extractVehicleFromVdp(value: string): Promise<ExtractedVeh
   const requestedUrl = validatePublicUrl(value);
   const deadline = createDeadline();
   const timeout = timeoutFor(deadline, DIRECT_FETCH_MS);
-  let response: Response;
+  let response: Response | null = null;
   try {
     response = await fetch(requestedUrl, {
       headers: {
@@ -365,6 +365,10 @@ export async function extractVehicleFromVdp(value: string): Promise<ExtractedVeh
       redirect: "follow",
       signal: timeout.signal,
     });
+  } catch {
+    const listingVehicle = await extractFromDealerInspireListing(requestedUrl, deadline);
+    if (listingVehicle) return listingVehicle;
+    throw new Error(`LotSocial could not scrape that VDP yet. This store blocks the direct page and no matching public inventory listing was found.`);
   } finally { timeout.cleanup(); }
   if (!response.ok) {
     const listingVehicle = await extractFromDealerInspireListing(requestedUrl, deadline);

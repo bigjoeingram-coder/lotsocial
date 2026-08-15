@@ -79,6 +79,7 @@ test("detects Cloudflare challenges and bounds fallback work", async () => {
   assert.match(vdp, /attention required/);
   assert.match(vdp, /checking if the site connection is secure/);
   assert.match(vdp, /extractFromDealerInspireListing\(requestedUrl, deadline\)/);
+  assert.match(vdp, /catch \{\s*const listingVehicle = await extractFromDealerInspireListing\(requestedUrl, deadline\)/);
   assert.match(vdp, /LotSocial could not scrape that VDP before the dealer page timed out/);
   assert.match(vdp, /function isReaderChallengeMarkdown\(markdown: string\)/);
   assert.match(vdp, /Warning:\\s\*This page maybe requiring CAPTCHA/);
