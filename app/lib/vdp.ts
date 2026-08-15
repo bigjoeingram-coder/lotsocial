@@ -191,6 +191,16 @@ export function isCloudflareChallenge(html: string, headers?: Headers) {
   return /(?:cf-chl|cdn-cgi\/challenge-platform|just a moment|attention required|checking if the site connection is secure|cf-ray)/i.test(html);
 }
 
+function markdownContent(markdown: string) {
+  return markdown.match(/Markdown Content:\s*([\s\S]*)$/i)?.[1] ?? markdown;
+}
+
+function isReaderChallengeMarkdown(markdown: string) {
+  return /Title:\s*(?:Just a moment|Attention Required)/i.test(markdown)
+    || /Warning:\s*This page maybe requiring CAPTCHA/i.test(markdown)
+    || /(?:cf-chl|cdn-cgi\/challenge-platform|checking if the site connection is secure)/i.test(markdown);
+}
+
 function vinFromUrl(url: URL) {
   return url.pathname.match(/\b[A-HJ-NPR-Z0-9]{17}\b/i)?.[0]?.toUpperCase() ?? "";
 }
@@ -239,15 +249,17 @@ function markdownField(block: string, label: string) {
 }
 
 function parseDealerInspireMarkdown(markdown: string, sourceUrl: URL): ExtractedVehicle | null {
+  if (isReaderChallengeMarkdown(markdown)) return null;
   const vin = vinFromUrl(sourceUrl);
   if (!vin) return null;
-  const vinIndex = markdown.toUpperCase().indexOf(vin);
+  const content = markdownContent(markdown);
+  const vinIndex = content.toUpperCase().indexOf(vin);
   if (vinIndex < 0) return null;
-  const before = markdown.slice(Math.max(0, vinIndex - 5000), vinIndex);
-  const after = markdown.slice(vinIndex, Math.min(markdown.length, vinIndex + 5000));
+  const before = content.slice(Math.max(0, vinIndex - 5000), vinIndex);
+  const after = content.slice(vinIndex, Math.min(content.length, vinIndex + 5000));
   const title = decodeEntities(
     (before.match(/## \[([^\]]+)\]\([^)]+\)\s*$/m) ?? Array.from(before.matchAll(/## \[([^\]]+)\]\([^)]+\)/g)).at(-1))?.[1]
-    ?? markdown.match(/^Title:\s*([^\n|]+)/m)?.[1]
+    ?? markdown.match(/^Title:\s*(?!Just a moment|Attention Required)([^\n|]+)/im)?.[1]
     ?? ""
   );
   const stockNumber = markdownField(after, "Stock");

@@ -80,6 +80,9 @@ test("detects Cloudflare challenges and bounds fallback work", async () => {
   assert.match(vdp, /checking if the site connection is secure/);
   assert.match(vdp, /extractFromDealerInspireListing\(requestedUrl, deadline\)/);
   assert.match(vdp, /LotSocial could not scrape that VDP before the dealer page timed out/);
+  assert.match(vdp, /function isReaderChallengeMarkdown\(markdown: string\)/);
+  assert.match(vdp, /Warning:\\s\*This page maybe requiring CAPTCHA/);
+  assert.match(vdp, /Title:\\s\*\(\?:Just a moment\|Attention Required\)/);
 });
 
 test("keeps reader URLs isolated and covered for public inventory surfaces", async () => {
@@ -89,6 +92,9 @@ test("keeps reader URLs isolated and covered for public inventory surfaces", asy
   assert.match(vdp, /function fallbackVehicleSurfaces\(url: URL\)/);
   assert.match(vdp, /return \[url, \.\.\.candidateInventoryPaths\(url\)\]/);
   assert.match(vdp, /fallbackVehicleSurfaces\(sourceUrl\)/);
+  assert.match(vdp, /function markdownContent\(markdown: string\)/);
+  assert.match(vdp, /const content = markdownContent\(markdown\)/);
+  assert.match(vdp, /content\.toUpperCase\(\)\.indexOf\(vin\)/);
   assert.match(vdp, /markdown\.match\(\/\^Title:/);
   assert.match(vdp, /\/inventory\/\?q=\$\{encodeURIComponent\(vin\)\}/);
   assert.match(vdp, /hrefWithoutProtocol/);
