@@ -1,4 +1,3 @@
-dangerouslyAllowAllBuilds: true
 onlyBuiltDependencies:
   - '@next/swc-darwin-arm64'
   - '@next/swc-darwin-x64'
