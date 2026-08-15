@@ -230,6 +230,7 @@ function candidateInventoryPaths(url: URL) {
   const model = makeIndex >= 0 ? parts[makeIndex + 1] : "";
   const paths = new Set<string>();
   if (vin) paths.add(`/inventory/?q=${encodeURIComponent(vin)}`);
+  paths.add("/llm/inventory/");
   if (model) paths.add(`/new-vehicles/${model}/`);
   [
     "/new-vehicles/crossovers-suvs/",
@@ -284,8 +285,11 @@ function parseDealerInspireMarkdown(markdown: string, sourceUrl: URL): Extracted
   if (vinIndex < 0) return null;
   const before = content.slice(Math.max(0, vinIndex - 5000), vinIndex);
   const after = content.slice(vinIndex, Math.min(content.length, vinIndex + 5000));
+  const linkedTitle = (before.match(/## \[([^\]]+)\]\([^)]+\)\s*$/m) ?? Array.from(before.matchAll(/## \[([^\]]+)\]\([^)]+\)/g)).at(-1))?.[1];
+  const plainHeadingTitle = Array.from(before.matchAll(/^##\s+(?!Visit our Store|Vehicle Information|Highlighted Features|Dealer Comments|Eligible Benefits|Package & Accessories|All Features)([^\n#][^\n]+)$/gim)).at(-1)?.[1];
   const title = decodeEntities(
-    (before.match(/## \[([^\]]+)\]\([^)]+\)\s*$/m) ?? Array.from(before.matchAll(/## \[([^\]]+)\]\([^)]+\)/g)).at(-1))?.[1]
+    linkedTitle
+    ?? plainHeadingTitle
     ?? markdown.match(/^Title:\s*(?!Just a moment|Attention Required)([^\n|]+)/im)?.[1]
     ?? ""
   );
@@ -295,7 +299,7 @@ function parseDealerInspireMarkdown(markdown: string, sourceUrl: URL): Extracted
   const exteriorColor = markdownField(before, "Exterior") || markdownField(after, "Exterior");
   const interiorColor = markdownField(before, "Interior") || markdownField(after, "Interior");
   const dealershipName = markdownField(before, "Location") || markdownField(after, "Location") || decodeEntities(markdown.match(/^Title:\s*([^\n|]+)/m)?.[1] ?? "");
-  const price = normalizeListedPrice(after.match(/(?:Cash|Total Price)\**\s*\$?([\d,]+)/i)?.[1] || after.match(/(?:Sale Price|Your Price|MSRP \+ DPH|MSRP)\**\s*\$?([\d,]+)/i)?.[1]);
+  const price = normalizeListedPrice(after.match(/(?:Cash|Total Price|Total SRP|Price excl\. tax, gov\. fees)\**\s*:?\s*\$?([\d,]+)/i)?.[1] || after.match(/(?:Sale Price|Your Price|MSRP \+ DPH|MSRP)\**\s*:?\s*\$?([\d,]+)/i)?.[1]);
   const markdownImages = Array.from(`${before}\n${after}`.matchAll(/!\[[^\]]*\]\((https?:\/\/[^)]+)\)/gi))
     .flatMap((match) => resolveImage(match[1], sourceUrl))
     .filter(usableImageUrl);

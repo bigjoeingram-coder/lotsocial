@@ -8,6 +8,15 @@ async function source(path) {
   return readFile(new URL(path, projectRoot), "utf8");
 }
 
+async function optionalDirEntries(path) {
+  try {
+    return await readdir(new URL(path, projectRoot));
+  } catch (error) {
+    if (error?.code === "ENOENT") return [];
+    throw error;
+  }
+}
+
 test("ships the LotSocial product instead of the disposable starter", async () => {
   const [page, layout, packageJson] = await Promise.all([
     source("app/page.tsx"),
@@ -19,7 +28,7 @@ test("ships the LotSocial product instead of the disposable starter", async () =
   assert.match(layout, /LotSocial Inventory Authorization/);
   assert.doesNotMatch(page, /SkeletonPreview|codex-preview/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
-  assert.deepEqual(await readdir(new URL("app/_sites-preview", projectRoot)), []);
+  assert.deepEqual(await optionalDirEntries("app/_sites-preview"), []);
 });
 
 test("includes the mobile Add to Home Screen pilot banner", async () => {
@@ -39,7 +48,7 @@ test("includes the mobile Add to Home Screen pilot banner", async () => {
   assert.match(css, /\.install-steps/);
 });
 
-test("keeps the inventory lane scrape-only, not manual-entry based", async () => {
+test("keeps the inventory lane scrape-first with manual fallback safety net", async () => {
   const [component, route, creativeRoute, vdp] = await Promise.all([
     source("app/components/AuthorizationApp.tsx"),
     source("app/api/vdp-imports/route.ts"),
@@ -47,9 +56,10 @@ test("keeps the inventory lane scrape-only, not manual-entry based", async () =>
     source("app/lib/vdp.ts"),
   ]);
 
-  assert.doesNotMatch(component, /manualVehicle|Save manual vehicle|manual details|source-stamped manual/);
-  assert.doesNotMatch(route, /manualVehicle|createManualVehicle/);
-  assert.doesNotMatch(vdp, /ManualVehicleInput|createManualVehicle|Manual vehicle entry/);
+  assert.match(component, /manualFallbackOpen/);
+  assert.match(component, /Save manual vehicle/);
+  assert.match(route, /manualVehicle|createManualVehicle/);
+  assert.match(vdp, /ManualVehicleInput|createManualVehicle|Manual vehicle entry/);
   assert.match(route, /payload\.authorizedToMarket !== true/);
   assert.match(route, /getImportedVehicleBySourceUrl/);
   assert.match(vdp, /function sourceUrlVariants/);
@@ -104,6 +114,9 @@ test("keeps reader URLs isolated and covered for public inventory surfaces", asy
   assert.ok(vdp.includes("${escapedVin}\\\\s+STOCK"));
   assert.match(vdp, /function isInventoryPageTitle\(title: string\)/);
   assert.match(vdp, /if \(!title \|\| isInventoryPageTitle\(title\)\) return null/);
+  assert.match(vdp, /plainHeadingTitle/);
+  assert.match(vdp, /Total SRP\|Price excl\\\. tax, gov\\\. fees/);
+  assert.match(vdp, /\/llm\/inventory\//);
   assert.match(vdp, /markdown\.match\(\/\^Title:/);
   assert.match(vdp, /markdownImages/);
   assert.match(vdp, /slice\(0, 24\)/);
