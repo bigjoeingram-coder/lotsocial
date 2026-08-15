@@ -94,7 +94,11 @@ test("keeps reader URLs isolated and covered for public inventory surfaces", asy
   assert.match(vdp, /fallbackVehicleSurfaces\(sourceUrl\)/);
   assert.match(vdp, /function markdownContent\(markdown: string\)/);
   assert.match(vdp, /const content = markdownContent\(markdown\)/);
-  assert.match(vdp, /content\.toUpperCase\(\)\.indexOf\(vin\)/);
+  assert.match(vdp, /function vehicleEvidenceIndex\(content: string, vin: string\)/);
+  assert.ok(vdp.includes("VIN\\\\s*:?\\\\s*${escapedVin}"));
+  assert.ok(vdp.includes("${escapedVin}\\\\s+STOCK"));
+  assert.match(vdp, /function isInventoryPageTitle\(title: string\)/);
+  assert.match(vdp, /if \(!title \|\| isInventoryPageTitle\(title\)\) return null/);
   assert.match(vdp, /markdown\.match\(\/\^Title:/);
   assert.match(vdp, /markdownImages/);
   assert.match(vdp, /slice\(0, 24\)/);

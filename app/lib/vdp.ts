@@ -248,12 +248,26 @@ function markdownField(block: string, label: string) {
   return decodeEntities(block.match(new RegExp(`${escaped}:\\s*([^\\n]+)`, "i"))?.[1] ?? "");
 }
 
+function vehicleEvidenceIndex(content: string, vin: string) {
+  const escapedVin = vin.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const patterns = [
+    new RegExp(`\\bVIN\\s*:?\\s*${escapedVin}\\b`, "i"),
+    new RegExp(`\\b${escapedVin}\\s+STOCK\\s*:`, "i"),
+    new RegExp(`/ ${escapedVin} /`.replace(/\s/g, ""), "i"),
+  ];
+  return patterns.map((pattern) => content.search(pattern)).filter((index) => index >= 0).sort((a, b) => a - b)[0] ?? -1;
+}
+
+function isInventoryPageTitle(title: string) {
+  return /(?:pre-owned|used|new)?\s*(?:cars|vehicles|inventory)\s+for\s+sale|view\s+\d+\s+matches/i.test(title);
+}
+
 function parseDealerInspireMarkdown(markdown: string, sourceUrl: URL): ExtractedVehicle | null {
   if (isReaderChallengeMarkdown(markdown)) return null;
   const vin = vinFromUrl(sourceUrl);
   if (!vin) return null;
   const content = markdownContent(markdown);
-  const vinIndex = content.toUpperCase().indexOf(vin);
+  const vinIndex = vehicleEvidenceIndex(content, vin);
   if (vinIndex < 0) return null;
   const before = content.slice(Math.max(0, vinIndex - 5000), vinIndex);
   const after = content.slice(vinIndex, Math.min(content.length, vinIndex + 5000));
@@ -262,6 +276,7 @@ function parseDealerInspireMarkdown(markdown: string, sourceUrl: URL): Extracted
     ?? markdown.match(/^Title:\s*(?!Just a moment|Attention Required)([^\n|]+)/im)?.[1]
     ?? ""
   );
+  if (!title || isInventoryPageTitle(title)) return null;
   const stockNumber = markdownField(after, "Stock");
   const mileage = markdownField(before, "Mileage") || markdownField(after, "Mileage");
   const exteriorColor = markdownField(before, "Exterior") || markdownField(after, "Exterior");
