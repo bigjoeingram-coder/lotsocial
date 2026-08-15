@@ -41,9 +41,9 @@ export type ExtractedVehicle = {
 };
 
 let schemaReady: Promise<void> | null = null;
-const IMPORT_DEADLINE_MS = 24_000;
+const IMPORT_DEADLINE_MS = 36_000;
 const DIRECT_FETCH_MS = 8_000;
-const READER_FETCH_MS = 6_000;
+const READER_FETCH_MS = 14_000;
 const MAX_READER_ATTEMPTS = 6;
 
 function database() {
@@ -235,11 +235,11 @@ function readerUrls(targetUrl: URL) {
   const hrefWithoutProtocol = targetUrl.href.replace(/^https?:\/\//i, "");
   const originPath = `${targetUrl.hostname}${targetUrl.pathname}${targetUrl.search}`;
   return [
+    `https://r.jina.ai/http://${hrefWithoutProtocol}`,
+    `https://r.jina.ai/http://${originPath}`,
     // This nested reader shape is intentionally retained because it returned real
     // Dealer Inspire inventory markdown for Newport Lexus and Newport Beach Maserati.
     `https://r.jina.ai/http://r.jina.ai/http://${targetUrl.href}`,
-    `https://r.jina.ai/http://${hrefWithoutProtocol}`,
-    `https://r.jina.ai/http://${originPath}`,
   ];
 }
 
@@ -267,10 +267,11 @@ function parseDealerInspireMarkdown(markdown: string, sourceUrl: URL): Extracted
   const exteriorColor = markdownField(before, "Exterior") || markdownField(after, "Exterior");
   const interiorColor = markdownField(before, "Interior") || markdownField(after, "Interior");
   const dealershipName = markdownField(before, "Location") || markdownField(after, "Location") || decodeEntities(markdown.match(/^Title:\s*([^\n|]+)/m)?.[1] ?? "");
-  const price = normalizeListedPrice(after.match(/Total Price\**\s*\$?([\d,]+)/i)?.[1] || after.match(/(?:Sale Price|Your Price|MSRP \+ DPH|MSRP)\**\s*\$?([\d,]+)/i)?.[1]);
-  const imageMatch = before.match(/!\[[^\]]*\]\((https?:\/\/[^)]+)\)\]\([^)]*\/inventory\/[^)]*\)/i)
-    || before.match(/!\[[^\]]*\]\((https?:\/\/[^)]+)\)/i);
-  const imageUrls = imageMatch ? resolveImage(imageMatch[1], sourceUrl).filter(usableImageUrl).slice(0, 1) : [];
+  const price = normalizeListedPrice(after.match(/(?:Cash|Total Price)\**\s*\$?([\d,]+)/i)?.[1] || after.match(/(?:Sale Price|Your Price|MSRP \+ DPH|MSRP)\**\s*\$?([\d,]+)/i)?.[1]);
+  const markdownImages = Array.from(`${before}\n${after}`.matchAll(/!\[[^\]]*\]\((https?:\/\/[^)]+)\)/gi))
+    .flatMap((match) => resolveImage(match[1], sourceUrl))
+    .filter(usableImageUrl);
+  const imageUrls = Array.from(new Set(markdownImages)).slice(0, 24);
   const year = title.match(/\b(20\d{2}|19\d{2})\b/)?.[1] || "";
   const titleParts = title.replace(/^New\s+|^Used\s+/i, "").split(/\s+/).filter(Boolean);
   const yearIndex = titleParts.findIndex((part) => part === year);

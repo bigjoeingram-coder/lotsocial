@@ -68,9 +68,9 @@ test("uses a browser-like request signature for public VDP reads", async () => {
 test("detects Cloudflare challenges and bounds fallback work", async () => {
   const vdp = await source("app/lib/vdp.ts");
 
-  assert.match(vdp, /const IMPORT_DEADLINE_MS = 24_000/);
+  assert.match(vdp, /const IMPORT_DEADLINE_MS = 36_000/);
   assert.match(vdp, /const DIRECT_FETCH_MS = 8_000/);
-  assert.match(vdp, /const READER_FETCH_MS = 6_000/);
+  assert.match(vdp, /const READER_FETCH_MS = 14_000/);
   assert.match(vdp, /const MAX_READER_ATTEMPTS = 6/);
   assert.match(vdp, /export function isCloudflareChallenge/);
   assert.match(vdp, /cf-chl/);
@@ -96,6 +96,8 @@ test("keeps reader URLs isolated and covered for public inventory surfaces", asy
   assert.match(vdp, /const content = markdownContent\(markdown\)/);
   assert.match(vdp, /content\.toUpperCase\(\)\.indexOf\(vin\)/);
   assert.match(vdp, /markdown\.match\(\/\^Title:/);
+  assert.match(vdp, /markdownImages/);
+  assert.match(vdp, /slice\(0, 24\)/);
   assert.match(vdp, /\/inventory\/\?q=\$\{encodeURIComponent\(vin\)\}/);
   assert.match(vdp, /hrefWithoutProtocol/);
   assert.match(vdp, /originPath/);
