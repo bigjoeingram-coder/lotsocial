@@ -44,7 +44,18 @@ let schemaReady: Promise<void> | null = null;
 const IMPORT_DEADLINE_MS = 36_000;
 const DIRECT_FETCH_MS = 8_000;
 const READER_FETCH_MS = 14_000;
+const BRIGHTDATA_FETCH_MS = 25_000;
 const MAX_READER_ATTEMPTS = 6;
+
+type ResolvedHtml = {
+  html: string;
+  finalUrl: URL;
+  viaBrightData?: {
+    elapsedMs: number;
+    envPresent: boolean;
+    zonePresent: boolean;
+  };
+};
 
 function database() {
   if (!env.DB) throw new Error("The inventory database is unavailable.");
@@ -364,11 +375,29 @@ async function extractFromDealerInspireListing(sourceUrl: URL, deadline: { expir
   return null;
 }
 
-async function fetchViaBrightData(url: URL, deadline: { expiresAt: number }): Promise<{ html: string; finalUrl: URL } | null> {
+function logBrightDataBranch(url: URL, details: Record<string, unknown>) {
+  console.warn("LotSocial Bright Data branch", {
+    url: url.href,
+    ...details,
+  });
+}
+
+async function fetchViaBrightData(url: URL, deadline: { expiresAt: number }): Promise<ResolvedHtml | null> {
   const apiKey = (env as unknown as { BRIGHTDATA_API_KEY?: string }).BRIGHTDATA_API_KEY;
   const zone = (env as unknown as { BRIGHTDATA_ZONE?: string }).BRIGHTDATA_ZONE;
-  if (!apiKey || !zone) return null;
-  const timeout = timeoutFor(deadline, READER_FETCH_MS);
+  const startedAt = Date.now();
+  const envPresent = Boolean(apiKey);
+  const zonePresent = Boolean(zone);
+  if (!apiKey || !zone) {
+    logBrightDataBranch(url, {
+      branch: "missing_env",
+      env_present: envPresent,
+      zone_present: zonePresent,
+      elapsedMs: Date.now() - startedAt,
+    });
+    return null;
+  }
+  const timeout = timeoutFor(deadline, BRIGHTDATA_FETCH_MS);
   try {
     const response = await fetch("https://api.brightdata.com/request", {
       method: "POST",
@@ -377,17 +406,64 @@ async function fetchViaBrightData(url: URL, deadline: { expiresAt: number }): Pr
       signal: timeout.signal,
     });
     if (!response.ok) {
-      console.warn("LotSocial Bright Data fetch failed", { url: url.href, status: response.status });
+      logBrightDataBranch(url, {
+        branch: "non_2xx",
+        env_present: envPresent,
+        zone_present: zonePresent,
+        elapsedMs: Date.now() - startedAt,
+        status: response.status,
+      });
       return null;
     }
     const html = await response.text();
-    if (!html || html.length > 3_000_000) return null;
-    return { html, finalUrl: url };
+    if (!html || html.length > 3_000_000) {
+      logBrightDataBranch(url, {
+        branch: "success_unparseable",
+        env_present: envPresent,
+        zone_present: zonePresent,
+        elapsedMs: Date.now() - startedAt,
+        htmlLength: html.length,
+      });
+      return null;
+    }
+    return { html, finalUrl: url, viaBrightData: { elapsedMs: Date.now() - startedAt, envPresent, zonePresent } };
   } catch (caught) {
-    console.warn("LotSocial Bright Data fetch threw", { url: url.href, message: caught instanceof Error ? caught.message : "unknown" });
+    logBrightDataBranch(url, {
+      branch: caught instanceof Error && caught.name === "AbortError" ? "timeout_abort" : "fetch_error",
+      env_present: envPresent,
+      zone_present: zonePresent,
+      elapsedMs: Date.now() - startedAt,
+      message: caught instanceof Error ? caught.message : "unknown",
+    });
     return null;
   } finally {
     timeout.cleanup();
+  }
+}
+
+async function parseResolvedHtml(resolved: ResolvedHtml): Promise<ExtractedVehicle> {
+  try {
+    const vehicle = await parseVehicleHtml(resolved.html, resolved.finalUrl);
+    if (resolved.viaBrightData) {
+      logBrightDataBranch(resolved.finalUrl, {
+        branch: "success_parsed",
+        env_present: resolved.viaBrightData.envPresent,
+        zone_present: resolved.viaBrightData.zonePresent,
+        elapsedMs: resolved.viaBrightData.elapsedMs,
+      });
+    }
+    return vehicle;
+  } catch (caught) {
+    if (resolved.viaBrightData) {
+      logBrightDataBranch(resolved.finalUrl, {
+        branch: "success_unparseable",
+        env_present: resolved.viaBrightData.envPresent,
+        zone_present: resolved.viaBrightData.zonePresent,
+        elapsedMs: resolved.viaBrightData.elapsedMs,
+        message: caught instanceof Error ? caught.message : "unknown",
+      });
+    }
+    throw caught;
   }
 }
 
@@ -395,7 +471,7 @@ export async function extractVehicleFromVdp(value: string): Promise<ExtractedVeh
   const requestedUrl = validatePublicUrl(value);
   const deadline = createDeadline();
 
-  async function viaListingOrThrow(reason: string): Promise<{ html: string; finalUrl: URL }> {
+  async function viaListingOrThrow(reason: string): Promise<ResolvedHtml> {
     const viaBrightData = await fetchViaBrightData(requestedUrl, deadline);
     if (viaBrightData) return viaBrightData;
     const listingVehicle = await extractFromDealerInspireListing(requestedUrl, deadline);
@@ -403,7 +479,7 @@ export async function extractVehicleFromVdp(value: string): Promise<ExtractedVeh
     throw new Error(`LotSocial could not scrape that VDP yet. ${reason} and no matching public inventory listing was found.`);
   }
 
-  let resolved: { html: string; finalUrl: URL };
+  let resolved: ResolvedHtml;
   try {
     const timeout = timeoutFor(deadline, DIRECT_FETCH_MS);
     let response: Response;
@@ -422,7 +498,7 @@ export async function extractVehicleFromVdp(value: string): Promise<ExtractedVeh
       });
     } catch {
       resolved = await viaListingOrThrow("This store blocks the direct page");
-      return await parseVehicleHtml(resolved.html, resolved.finalUrl);
+      return await parseResolvedHtml(resolved);
     } finally {
       timeout.cleanup();
     }
@@ -437,7 +513,7 @@ export async function extractVehicleFromVdp(value: string): Promise<ExtractedVeh
         contentType: response.headers.get("content-type") ?? "",
       });
       resolved = await viaListingOrThrow("This store blocks the direct page");
-      return await parseVehicleHtml(resolved.html, resolved.finalUrl);
+      return await parseResolvedHtml(resolved);
     }
     const finalUrl = validatePublicUrl(response.url);
     const contentType = response.headers.get("content-type") ?? "";
@@ -448,14 +524,14 @@ export async function extractVehicleFromVdp(value: string): Promise<ExtractedVeh
     if (html.length > 3_000_000) throw new Error("That VDP is too large to import safely.");
     if (isCloudflareChallenge(html, response.headers)) {
       resolved = await viaListingOrThrow("This store returned a Cloudflare challenge");
-      return await parseVehicleHtml(resolved.html, resolved.finalUrl);
+      return await parseResolvedHtml(resolved);
     }
     resolved = { html, finalUrl };
   } catch (caught) {
     if (caught instanceof ResolvedVehicle) return caught.vehicle;
     throw caught;
   }
-  return await parseVehicleHtml(resolved.html, resolved.finalUrl);
+  return await parseResolvedHtml(resolved);
 }
 
 class ResolvedVehicle extends Error {
