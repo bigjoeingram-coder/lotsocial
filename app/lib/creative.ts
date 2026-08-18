@@ -96,7 +96,12 @@ function displayPrice(value: string) {
 
 function groundedHighlights(vehicle: ImportedVehicleRecord) {
   const facts = JSON.parse(vehicle.facts || "{}") as Record<string, string>;
+  // ALLOWLIST — not a blocklist. Any key absent from this map is internal
+  // provenance (scrapeSource, sourceType, importedAt, ...) and must never reach
+  // customer-facing copy. A blocklist here previously leaked
+  // "scrapeSource: Dealer Inspire inventory listing" into published captions.
   const labels: Record<string, string> = {
+    mileage: "Mileage",
     exteriorColor: "Exterior",
     interiorColor: "Interior",
     transmission: "Transmission",
@@ -105,8 +110,8 @@ function groundedHighlights(vehicle: ImportedVehicleRecord) {
     bodyStyle: "Body style",
   };
   return Object.entries(facts)
-    .filter(([key, value]) => key !== "dealershipName" && Boolean(value))
-    .map(([key, value]) => `${labels[key] ?? key}: ${value}`)
+    .filter(([key, value]) => Object.hasOwn(labels, key) && typeof value === "string" && Boolean(value.trim()))
+    .map(([key, value]) => `${labels[key]}: ${value.trim()}`)
     .slice(0, 4);
 }
 
