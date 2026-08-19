@@ -96,6 +96,9 @@ function displayPrice(value: string) {
 
 function groundedHighlights(vehicle: ImportedVehicleRecord) {
   const facts = JSON.parse(vehicle.facts || "{}") as Record<string, string>;
+  // ALLOWLIST: only these keys may ever reach public-facing copy.
+  // Anything not listed here (internal fields such as scrapeSource, dealershipName,
+  // or any future diagnostic key) is excluded by default rather than by exception.
   const labels: Record<string, string> = {
     exteriorColor: "Exterior",
     interiorColor: "Interior",
@@ -105,8 +108,8 @@ function groundedHighlights(vehicle: ImportedVehicleRecord) {
     bodyStyle: "Body style",
   };
   return Object.entries(facts)
-    .filter(([key, value]) => key !== "dealershipName" && Boolean(value))
-    .map(([key, value]) => `${labels[key] ?? key}: ${value}`)
+    .filter(([key, value]) => Object.prototype.hasOwnProperty.call(labels, key) && Boolean(value))
+    .map(([key, value]) => `${labels[key]}: ${value}`)
     .slice(0, 4);
 }
 

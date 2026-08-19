@@ -44,6 +44,7 @@ let schemaReady: Promise<void> | null = null;
 const IMPORT_DEADLINE_MS = 36_000;
 const DIRECT_FETCH_MS = 8_000;
 const READER_FETCH_MS = 14_000;
+const BRIGHTDATA_FETCH_MS = 25_000;
 const MAX_READER_ATTEMPTS = 6;
 
 function database() {
@@ -367,8 +368,25 @@ async function extractFromDealerInspireListing(sourceUrl: URL, deadline: { expir
 async function fetchViaBrightData(url: URL, deadline: { expiresAt: number }): Promise<{ html: string; finalUrl: URL } | null> {
   const apiKey = (env as unknown as { BRIGHTDATA_API_KEY?: string }).BRIGHTDATA_API_KEY;
   const zone = (env as unknown as { BRIGHTDATA_ZONE?: string }).BRIGHTDATA_ZONE;
-  if (!apiKey || !zone) return null;
-  const timeout = timeoutFor(deadline, READER_FETCH_MS);
+  const envPresent = Boolean(apiKey);
+  const zonePresent = Boolean(zone);
+  const startedAt = Date.now();
+  function logBranch(branch: string, extra: Record<string, unknown> = {}) {
+    // Redacted: never logs apiKey/zone values, only presence booleans.
+    console.warn("LotSocial Bright Data branch", {
+      url: url.href,
+      envPresent,
+      zonePresent,
+      elapsedMs: Date.now() - startedAt,
+      branch,
+      ...extra,
+    });
+  }
+  if (!apiKey || !zone) {
+    logBranch("skipped_no_credentials");
+    return null;
+  }
+  const timeout = timeoutFor(deadline, BRIGHTDATA_FETCH_MS);
   try {
     const response = await fetch("https://api.brightdata.com/request", {
       method: "POST",
@@ -377,14 +395,19 @@ async function fetchViaBrightData(url: URL, deadline: { expiresAt: number }): Pr
       signal: timeout.signal,
     });
     if (!response.ok) {
-      console.warn("LotSocial Bright Data fetch failed", { url: url.href, status: response.status });
+      logBranch("non_2xx", { status: response.status });
       return null;
     }
     const html = await response.text();
-    if (!html || html.length > 3_000_000) return null;
+    if (!html || html.length > 3_000_000) {
+      logBranch("success_unparseable", { length: html?.length ?? 0 });
+      return null;
+    }
+    logBranch("success_parsed", { length: html.length });
     return { html, finalUrl: url };
   } catch (caught) {
-    console.warn("LotSocial Bright Data fetch threw", { url: url.href, message: caught instanceof Error ? caught.message : "unknown" });
+    const isAbort = caught instanceof Error && caught.name === "AbortError";
+    logBranch(isAbort ? "timeout_abort" : "fetch_error", { message: caught instanceof Error ? caught.message : "unknown" });
     return null;
   } finally {
     timeout.cleanup();
@@ -527,7 +550,13 @@ async function parseVehicleHtml(html: string, finalUrl: URL): Promise<ExtractedV
     imageUrls: uniqueImages,
     facts: Object.fromEntries(Object.entries(facts).filter(([, item]) => item)),
   };
-  if (!extracted.vin && !extracted.title) throw new Error("LotSocial could not identify a vehicle on that page.");
+  if (isInventoryPageTitle(extracted.title)) {
+    throw new Error("LotSocial landed on an inventory listing page, not a single vehicle page. Open the exact VDP for the vehicle and paste that URL.");
+  }
+  const hasVehicleEvidence = Boolean(extracted.vin) || Boolean(extracted.year && (extracted.make || extracted.model));
+  if (!hasVehicleEvidence) {
+    throw new Error("LotSocial could not confirm a specific vehicle on that page. Nothing was saved.");
+  }
   return extracted;
 }
 
