@@ -232,6 +232,7 @@ export function AuthorizationApp({ user }: { user: User }) {
   const [creativeVehicle, setCreativeVehicle] = useState<ImportedVehicle | null>(null);
   const [selectedCreativeImages, setSelectedCreativeImages] = useState<string[]>([]);
   const [brokenCreativeImages, setBrokenCreativeImages] = useState<string[]>([]);
+  const [brokenInventoryImages, setBrokenInventoryImages] = useState<Record<string, string[]>>({});
   const [creativeStyle, setCreativeStyle] = useState("walkaround");
   const [creativeDuration, setCreativeDuration] = useState(30);
   const [endCardName, setEndCardName] = useState(user?.name ?? "");
@@ -338,6 +339,19 @@ export function AuthorizationApp({ user }: { user: User }) {
     });
     setCreativeDraft(null);
     setRenderJob(null);
+  }
+
+  function inventoryPreviewImage(vehicle: ImportedVehicle) {
+    const broken = new Set(brokenInventoryImages[vehicle.id] ?? []);
+    return vehicle.imageUrls.find((image) => !broken.has(image)) ?? "";
+  }
+
+  function markBrokenInventoryImage(vehicleId: string, url: string) {
+    setBrokenInventoryImages((current) => {
+      const broken = current[vehicleId] ?? [];
+      if (broken.includes(url)) return current;
+      return { ...current, [vehicleId]: [...broken, url] };
+    });
   }
 
   async function generateCreative(event: FormEvent) {
@@ -679,7 +693,7 @@ export function AuthorizationApp({ user }: { user: User }) {
             </form>
             <section className="inventory-section">
               <div className="inventory-section-header"><div><p className="eyebrow">My inventory</p><h2>{vehicles.length} imported {vehicles.length === 1 ? "vehicle" : "vehicles"}</h2></div><div className="pro-callout"><span>PRO</span><p><strong>Want your entire lot here automatically?</strong><br />Connect HomeNet, vAuto, or an authorized dealership feed.</p><button onClick={() => setView("dashboard")}>Set up automation →</button></div></div>
-              {inventoryLoading ? <div className="empty-state"><span className="loader" /><p>Loading your inventory...</p></div> : vehicles.length === 0 ? <div className="empty-state inventory-empty"><div className="empty-icon">VIN</div><h3>Your first vehicle starts with a URL</h3><p>Paste one of the dealership's public VDP links above. The extracted record remains tied to its original source.</p></div> : <div className="vehicle-grid">{vehicles.map((vehicle) => <article className="vehicle-card" key={vehicle.id}><div className="vehicle-image">{vehicle.imageUrls[0] ? <img src={vehicle.imageUrls[0]} alt={vehicle.title} loading="lazy" referrerPolicy="no-referrer" /> : <div className="vehicle-placeholder">No VDP image found</div>}<span className="source-badge">{vehicle.sourceHost}</span></div><div className="vehicle-body"><div className="vehicle-title"><div><span>{vehicle.year} {vehicle.make}</span><h3>{vehicleModelLabel(vehicle)}</h3><p>{vehicle.trim}</p></div>{vehicle.price && <strong>{formatPrice(vehicle.price, vehicle.currency)}</strong>}</div><dl><div><dt>VIN</dt><dd>{vehicle.vin || "Not detected"}</dd></div><div><dt>Stock</dt><dd>{vehicle.stockNumber || "Not detected"}</dd></div><div><dt>Photos</dt><dd>{vehicle.imageUrls.length}</dd></div></dl><div className="vehicle-source"><span>Captured {formatDate(vehicle.importedAt)}</span><a href={vehicle.sourceUrl} target="_blank" rel="noreferrer">View source ↗</a></div><button className="creative-next" onClick={() => startCreative(vehicle)}>{vehicle.imageUrls.length < 2 ? "Create social caption →" : "Create video storyboard →"}</button></div></article>)}</div>}
+              {inventoryLoading ? <div className="empty-state"><span className="loader" /><p>Loading your inventory...</p></div> : vehicles.length === 0 ? <div className="empty-state inventory-empty"><div className="empty-icon">VIN</div><h3>Your first vehicle starts with a URL</h3><p>Paste one of the dealership's public VDP links above. The extracted record remains tied to its original source.</p></div> : <div className="vehicle-grid">{vehicles.map((vehicle) => { const previewImage = inventoryPreviewImage(vehicle); return <article className="vehicle-card" key={vehicle.id}><div className="vehicle-image">{previewImage ? <img src={previewImage} alt={vehicle.title} loading="lazy" referrerPolicy="no-referrer" onError={() => markBrokenInventoryImage(vehicle.id, previewImage)} /> : <div className="vehicle-placeholder">No VDP image found</div>}<span className="source-badge">{vehicle.sourceHost}</span></div><div className="vehicle-body"><div className="vehicle-title"><div><span>{vehicle.year} {vehicle.make}</span><h3>{vehicleModelLabel(vehicle)}</h3><p>{vehicle.trim}</p></div>{vehicle.price && <strong>{formatPrice(vehicle.price, vehicle.currency)}</strong>}</div><dl><div><dt>VIN</dt><dd>{vehicle.vin || "Not detected"}</dd></div><div><dt>Stock</dt><dd>{vehicle.stockNumber || "Not detected"}</dd></div><div><dt>Photos</dt><dd>{vehicle.imageUrls.length}</dd></div></dl><div className="vehicle-source"><span>Captured {formatDate(vehicle.importedAt)}</span><a href={vehicle.sourceUrl} target="_blank" rel="noreferrer">View source ↗</a></div><button className="creative-next" onClick={() => startCreative(vehicle)}>{vehicle.imageUrls.length < 2 ? "Create social caption →" : "Create video storyboard →"}</button></div></article>; })}</div>}
             </section>
           </section>
         ) : (

@@ -64,10 +64,19 @@ test("keeps the inventory lane scrape-only with source reuse and image recovery"
   assert.match(vdp, /function sourceUrlVariants/);
   assert.match(vdp, /fetchViaBrightData/);
   assert.match(vdp, /BRIGHTDATA_API_KEY/);
+  assert.match(vdp, /BRIGHTDATA_FETCH_MS = 25_000/);
+  assert.match(vdp, /timeout_abort/);
+  assert.match(vdp, /branch: "success_unparseable"/);
+  assert.match(vdp, /branch: "success_parsed"/);
   assert.match(component, /Create social caption/);
   assert.match(component, /Caption-only draft/);
   assert.match(component, /markBrokenCreativeImage/);
   assert.match(component, /onError=\{\(\) => markBrokenCreativeImage\(image\)\}/);
+  assert.match(component, /brokenInventoryImages/);
+  assert.match(component, /inventoryPreviewImage/);
+  assert.match(component, /markBrokenInventoryImage/);
+  assert.match(component, /onError=\{\(\) => markBrokenInventoryImage\(vehicle\.id, previewImage\)\}/);
+  assert.doesNotMatch(component, /vehicle\.imageUrls\[0\] \? <img/);
   assert.doesNotMatch(creativeRoute, /selectedImages\.length < 2/);
 });
 
@@ -86,6 +95,7 @@ test("detects Cloudflare challenges and bounds fallback work", async () => {
   assert.match(vdp, /const IMPORT_DEADLINE_MS = 36_000/);
   assert.match(vdp, /const DIRECT_FETCH_MS = 8_000/);
   assert.match(vdp, /const READER_FETCH_MS = 14_000/);
+  assert.match(vdp, /const BRIGHTDATA_FETCH_MS = 25_000/);
   assert.match(vdp, /const MAX_READER_ATTEMPTS = 6/);
   assert.match(vdp, /export function isCloudflareChallenge/);
   assert.match(vdp, /cf-chl/);
@@ -95,6 +105,7 @@ test("detects Cloudflare challenges and bounds fallback work", async () => {
   assert.match(vdp, /checking if the site connection is secure/);
   assert.match(vdp, /async function viaListingOrThrow\(reason: string\)/);
   assert.match(vdp, /const viaBrightData = await fetchViaBrightData\(requestedUrl, deadline\)/);
+  assert.match(vdp, /timeoutFor\(deadline, BRIGHTDATA_FETCH_MS\)/);
   assert.match(vdp, /extractFromDealerInspireListing\(requestedUrl, deadline\)/);
   assert.match(vdp, /if \(listingVehicle\) throw new ResolvedVehicle\(listingVehicle\)/);
   assert.match(vdp, /LotSocial could not scrape that VDP before the dealer page timed out/);
