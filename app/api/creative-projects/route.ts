@@ -21,6 +21,7 @@ export async function POST(request: Request) {
   const durationSeconds = [15, 30, 45].includes(Number(payload.durationSeconds)) ? Number(payload.durationSeconds) : 30;
   const endCardName = clean(payload.endCardName) || user.displayName;
   const endCardCta = clean(payload.endCardCta) || "Message me for details";
+  const flavor = payload.flavor === true;
   const project = await saveCreativeProject({
     vehicle,
     associateEmail: user.email,
@@ -31,6 +32,7 @@ export async function POST(request: Request) {
     endCardPhone: clean(payload.endCardPhone),
     endCardEmail: clean(payload.endCardEmail) || user.email,
     endCardCta,
+    flavor,
   });
   if (!project) return Response.json({ error: "The creative draft could not be saved." }, { status: 500 });
   return Response.json({ project: serializeCreativeProject(project) }, { status: 201 });

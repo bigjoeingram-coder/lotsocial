@@ -114,7 +114,7 @@ function groundedHighlights(vehicle: ImportedVehicleRecord) {
 }
 
 function captionDescription(vehicle: ImportedVehicleRecord) {
-  const description = vehicle.description.replace(/\s+/g, " ").trim();
+  const description = vehicle.description.replace(/<br\s*\/?>/gi, " ").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
   if (!description) return "";
   const sentences = description.match(/[^.!?]+[.!?]+|[^.!?]+$/g) ?? [description];
   const summary = sentences.slice(0, 2).join(" ").trim();
@@ -131,13 +131,23 @@ function dealershipName(vehicle: ImportedVehicleRecord) {
   return vehicle.source_host.replace(/^www\./i, "").split(".")[0] || "Dealership";
 }
 
-function createCopy(vehicle: ImportedVehicleRecord, style: string, durationSeconds: number, endCardName: string, endCardCta: string) {
+function createCopy(vehicle: ImportedVehicleRecord, style: string, durationSeconds: number, endCardName: string, endCardCta: string, flavor = false) {
   const name = vehicleName(vehicle);
   const highlights = groundedHighlights(vehicle);
   const description = captionDescription(vehicle);
   const priceLine = vehicle.price ? `It was listed at ${displayPrice(vehicle.price)} when this vehicle page was captured.` : "Contact me for current pricing and availability.";
-  const detailLine = highlights.length ? `Highlights listed by the dealership include ${highlights.join(", ")}.` : "Open the original dealership listing for the complete equipment and feature details.";
-  const openings: Record<string, string[]> = {
+  const detailLine = highlights.length
+    ? flavor
+      ? `And it comes dressed to impress - ${highlights.join(", ")}.`
+      : `Highlights listed by the dealership include ${highlights.join(", ")}.`
+    : "Open the original dealership listing for the complete equipment and feature details.";
+  const openings: Record<string, string[]> = flavor ? {
+    // Flavor mode: subjective sizzle only (opinion/puffery). Never adds facts,
+    // specs, availability, or condition claims beyond what the VDP captured.
+    energetic: [`Stop the scroll - this ${name} is a serious head-turner.`, `This ${name} just hit the lot and it is not shy.`, `You are going to want a closer look at this ${name}.`],
+    walkaround: [`Let me walk you around one sharp ${name}.`, `Up close, this ${name} makes a real impression.`, `Take the full tour of this standout ${name}.`],
+    premium: [`Some vehicles simply command attention. Meet the ${name}.`, `Refined, composed, confident - this ${name}.`, `An elevated look at a truly striking ${name}.`],
+  } : {
     energetic: [`Take a look at this ${name}.`, `Fresh on the lot: this ${name}.`, `Here is a quick look at this ${name}.`],
     walkaround: [`Let me show you this ${name}.`, `Here is a closer look at this ${name}.`, `Walk around this ${name} with me.`],
     premium: [`Meet the ${name}.`, `A refined look at this ${name}.`, `Presenting this ${name}.`],
@@ -152,7 +162,53 @@ function createCopy(vehicle: ImportedVehicleRecord, style: string, durationSecon
   const makeModelTag = hashtag(`${vehicle.make}${vehicle.model}`, "Vehicle");
   const salespersonTag = hashtag(endCardName, "Salesperson");
   const dealershipTag = hashtag(dealershipName(vehicle), "Dealership");
-  const socialCaption = `${name}\n\n${description ? `${description}\n\n` : ""}${highlights.length ? `${highlights.join(" · ")}\n\n` : ""}${vehicle.price ? `Total price listed on the VDP: ${displayPrice(vehicle.price)}.\n\n` : ""}${endCardCta}. Confirm current price, availability, and eligibility with the dealership.\n\nThis ad expires 7 days after posting or when the vehicle sells, whichever comes first.\n\n#${makeModelTag} #${salespersonTag} #${dealershipTag} #lotsocial`;
+  const facts = JSON.parse(vehicle.facts || "{}") as Record<string, string>;
+  const bodyHint = `${facts.bodyStyle ?? ""} ${vehicle.model}`.toLowerCase();
+  const vibeOpeners: Record<string, string[]> = {
+    truck: [
+      "Big truck energy, factory-built to turn heads and back it up.",
+      "Some trucks haul. This one makes a statement doing it.",
+      "Work-ready, weekend-approved, and impossible to miss in a parking lot.",
+      "This is what showing up looks like when the truck does the talking.",
+      "Built for the job site, styled for everywhere else.",
+    ],
+    suv: [
+      "All the presence, none of the compromise.",
+      "Room for everyone, and an entrance everywhere it goes.",
+      "The family hauler that never got the memo about being boring.",
+      "Practical on paper. Anything but practical-looking in person.",
+      "Everyday capability with a stance that stops the scroll.",
+    ],
+    coupe: [
+      "Built to be looked at twice - and driven off once.",
+      "Some cars get parked. This one gets photographed.",
+      "The commute just became the best part of the day.",
+      "Low, loud presence - even standing still.",
+      "This is the one people ask about at every stoplight.",
+    ],
+    generic: [
+      "The kind of vehicle that makes the walkaround worth filming.",
+      "One look and you understand why it does not sit long.",
+      "Sharp in photos. Sharper in person.",
+      "The listing does not do it justice - but here it is anyway.",
+      "This one earns the double-take.",
+    ],
+  };
+  const vibeKey = /truck|pickup|f-150|f-250|f-350|silverado|sierra|ram |tundra|tacoma|raptor|maverick|ranger|colorado|frontier|titan/.test(bodyHint)
+    ? "truck"
+    : /suv|crossover|4runner|explorer|expedition|tahoe|suburban|grecale|levante|highlander|rav4|pilot|palisade|telluride|bronco|wrangler|grand cherokee|rx |ux |nx |gx |lx /.test(bodyHint)
+      ? "suv"
+      : /coupe|convertible|roadster|mustang|corvette|gt500|challenger|charger|supra|brz|gr86|miata|911|cayman/.test(bodyHint)
+        ? "coupe"
+        : "generic";
+  const vibeSeed = Array.from(vehicle.vin || vehicle.id).reduce((sum, character) => sum + character.charCodeAt(0), 0);
+  const vibePool = vibeOpeners[vibeKey];
+  const vibeOpener = vibePool[vibeSeed % vibePool.length];
+  const flavorBridge = `This ${[vehicle.year, vehicle.make, vehicle.model].filter(Boolean).join(" ")} brings the look, the stance, and the hardware.`;
+  const captionHeadline = flavor ? [facts.exteriorColor, name].filter(Boolean).join(" ") : name;
+  const flavorIntro = flavor ? `${vibeOpener} ${flavorBridge}\n\n` : "";
+  const flavorClose = flavor ? `Come see why this one stands out in person.\n\n` : "";
+  const socialCaption = `${captionHeadline}\n\n${flavorIntro}${description ? `${description}\n\n` : ""}${highlights.length ? `${highlights.join(" · ")}\n\n` : ""}${vehicle.price ? `Total price listed on the VDP: ${displayPrice(vehicle.price)}.\n\n` : ""}${flavorClose}${endCardCta}. Confirm current price, availability, equipment, and eligibility with the dealership.\n\nThis ad expires 7 days after posting or when the vehicle sells, whichever comes first.\n\n#${makeModelTag} #${salespersonTag} #${dealershipTag} #lotsocial`;
   return { voiceoverScript, socialCaption };
 }
 
@@ -166,10 +222,11 @@ export async function saveCreativeProject(input: {
   endCardPhone: string;
   endCardEmail: string;
   endCardCta: string;
+  flavor?: boolean;
 }) {
   await ensureCreativeSchema();
   const id = crypto.randomUUID();
-  const copy = createCopy(input.vehicle, input.style, input.durationSeconds, input.endCardName, input.endCardCta);
+  const copy = createCopy(input.vehicle, input.style, input.durationSeconds, input.endCardName, input.endCardCta, input.flavor === true);
   await database().prepare(`INSERT INTO creative_projects (
     id, vehicle_id, associate_email, selected_images, style, duration_seconds,
     voiceover_script, social_caption, end_card_name, end_card_phone, end_card_email,
