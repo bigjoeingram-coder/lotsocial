@@ -114,7 +114,7 @@ function groundedHighlights(vehicle: ImportedVehicleRecord) {
 }
 
 function captionDescription(vehicle: ImportedVehicleRecord) {
-  const description = vehicle.description.replace(/\s+/g, " ").trim();
+  const description = vehicle.description.replace(/<br\s*\/?>/gi, " ").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
   if (!description) return "";
   const sentences = description.match(/[^.!?]+[.!?]+|[^.!?]+$/g) ?? [description];
   const summary = sentences.slice(0, 2).join(" ").trim();
@@ -162,9 +162,20 @@ function createCopy(vehicle: ImportedVehicleRecord, style: string, durationSecon
   const makeModelTag = hashtag(`${vehicle.make}${vehicle.model}`, "Vehicle");
   const salespersonTag = hashtag(endCardName, "Salesperson");
   const dealershipTag = hashtag(dealershipName(vehicle), "Dealership");
-  const captionHeadline = flavor ? `🔥 ${name} — this one photographs well and drives better.` : name;
+  const facts = JSON.parse(vehicle.facts || "{}") as Record<string, string>;
+  const bodyHint = `${facts.bodyStyle ?? ""} ${vehicle.model}`.toLowerCase();
+  const vibeOpener = /truck|pickup|f-150|f-250|f-350|silverado|ram|tundra|tacoma|raptor|maverick/.test(bodyHint)
+    ? "Big truck energy, factory-built to turn heads and back it up."
+    : /suv|crossover|4runner|explorer|tahoe|grecale|rx |ux |nx /.test(bodyHint)
+      ? "All the presence, none of the compromise."
+      : /coupe|convertible|mustang|corvette|gt500|roadster/.test(bodyHint)
+        ? "Built to be looked at twice — and driven off once."
+        : "The kind of vehicle that makes the walkaround worth filming.";
+  const flavorBridge = `This ${[vehicle.year, vehicle.make, vehicle.model].filter(Boolean).join(" ")} brings the look, the stance, and the hardware.`;
+  const captionHeadline = flavor ? [facts.exteriorColor, name].filter(Boolean).join(" ") : name;
+  const flavorIntro = flavor ? `${vibeOpener} ${flavorBridge}\n\n` : "";
   const flavorClose = flavor ? `Come see why this one stands out in person.\n\n` : "";
-  const socialCaption = `${captionHeadline}\n\n${description ? `${description}\n\n` : ""}${highlights.length ? `${highlights.join(" · ")}\n\n` : ""}${vehicle.price ? `Total price listed on the VDP: ${displayPrice(vehicle.price)}.\n\n` : ""}${flavorClose}${endCardCta}. Confirm current price, availability, and eligibility with the dealership.\n\nThis ad expires 7 days after posting or when the vehicle sells, whichever comes first.\n\n#${makeModelTag} #${salespersonTag} #${dealershipTag} #lotsocial`;
+  const socialCaption = `${captionHeadline}\n\n${flavorIntro}${description ? `${description}\n\n` : ""}${highlights.length ? `${highlights.join(" · ")}\n\n` : ""}${vehicle.price ? `Total price listed on the VDP: ${displayPrice(vehicle.price)}.\n\n` : ""}${flavorClose}${endCardCta}. Confirm current price, availability, equipment, and eligibility with the dealership.\n\nThis ad expires 7 days after posting or when the vehicle sells, whichever comes first.\n\n#${makeModelTag} #${salespersonTag} #${dealershipTag} #lotsocial`;
   return { voiceoverScript, socialCaption };
 }
 
