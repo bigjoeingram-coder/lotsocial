@@ -164,13 +164,46 @@ function createCopy(vehicle: ImportedVehicleRecord, style: string, durationSecon
   const dealershipTag = hashtag(dealershipName(vehicle), "Dealership");
   const facts = JSON.parse(vehicle.facts || "{}") as Record<string, string>;
   const bodyHint = `${facts.bodyStyle ?? ""} ${vehicle.model}`.toLowerCase();
-  const vibeOpener = /truck|pickup|f-150|f-250|f-350|silverado|ram|tundra|tacoma|raptor|maverick/.test(bodyHint)
-    ? "Big truck energy, factory-built to turn heads and back it up."
-    : /suv|crossover|4runner|explorer|tahoe|grecale|rx |ux |nx /.test(bodyHint)
-      ? "All the presence, none of the compromise."
-      : /coupe|convertible|mustang|corvette|gt500|roadster/.test(bodyHint)
-        ? "Built to be looked at twice — and driven off once."
-        : "The kind of vehicle that makes the walkaround worth filming.";
+  const vibeOpeners: Record<string, string[]> = {
+    truck: [
+      "Big truck energy, factory-built to turn heads and back it up.",
+      "Some trucks haul. This one makes a statement doing it.",
+      "Work-ready, weekend-approved, and impossible to miss in a parking lot.",
+      "This is what showing up looks like when the truck does the talking.",
+      "Built for the job site, styled for everywhere else.",
+    ],
+    suv: [
+      "All the presence, none of the compromise.",
+      "Room for everyone, and an entrance everywhere it goes.",
+      "The family hauler that never got the memo about being boring.",
+      "Practical on paper. Anything but practical-looking in person.",
+      "Everyday capability with a stance that stops the scroll.",
+    ],
+    coupe: [
+      "Built to be looked at twice — and driven off once.",
+      "Some cars get parked. This one gets photographed.",
+      "The commute just became the best part of the day.",
+      "Low, loud presence — even standing still.",
+      "This is the one people ask about at every stoplight.",
+    ],
+    generic: [
+      "The kind of vehicle that makes the walkaround worth filming.",
+      "One look and you understand why it does not sit long.",
+      "Sharp in photos. Sharper in person.",
+      "The listing does not do it justice — but here it is anyway.",
+      "This one earns the double-take.",
+    ],
+  };
+  const vibeKey = /truck|pickup|f-150|f-250|f-350|silverado|sierra|ram |tundra|tacoma|raptor|maverick|ranger|colorado|frontier|titan/.test(bodyHint)
+    ? "truck"
+    : /suv|crossover|4runner|explorer|expedition|tahoe|suburban|grecale|levante|highlander|rav4|pilot|palisade|telluride|bronco|wrangler|grand cherokee|rx |ux |nx |gx |lx /.test(bodyHint)
+      ? "suv"
+      : /coupe|convertible|roadster|mustang|corvette|gt500|challenger|charger|supra|brz|gr86|miata|911|cayman/.test(bodyHint)
+        ? "coupe"
+        : "generic";
+  const vibeSeed = Array.from(vehicle.vin || vehicle.id).reduce((sum, character) => sum + character.charCodeAt(0), 0);
+  const vibePool = vibeOpeners[vibeKey];
+  const vibeOpener = vibePool[vibeSeed % vibePool.length];
   const flavorBridge = `This ${[vehicle.year, vehicle.make, vehicle.model].filter(Boolean).join(" ")} brings the look, the stance, and the hardware.`;
   const captionHeadline = flavor ? [facts.exteriorColor, name].filter(Boolean).join(" ") : name;
   const flavorIntro = flavor ? `${vibeOpener} ${flavorBridge}\n\n` : "";
