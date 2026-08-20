@@ -1,0 +1,23 @@
+name: LotSocial hardening regression
+
+on:
+  push:
+    branches:
+      - build/delete-and-draft-revalidation
+  pull_request:
+    paths:
+      - 'app/api/vdp-imports/delete/route.ts'
+      - 'app/api/creative-projects/[id]/render/route.ts'
+      - 'app/components/InventoryHardeningClient.tsx'
+      - 'app/layout.tsx'
+      - 'tests/inventory-hardening.test.mjs'
+
+jobs:
+  source-regression:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node --test tests/inventory-hardening.test.mjs tests/rendered-html.test.mjs
