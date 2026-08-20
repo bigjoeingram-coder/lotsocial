@@ -271,6 +271,12 @@ export function AuthorizationApp({ user }: { user: User }) {
   useEffect(() => { void loadVehicles(); }, []);
 
   useEffect(() => {
+    if (window.sessionStorage.getItem("lotsocial-return-view") !== "inventory") return;
+    window.sessionStorage.removeItem("lotsocial-return-view");
+    setView("inventory");
+  }, []);
+
+  useEffect(() => {
     setInstallBannerHidden(window.localStorage.getItem("lotsocial-install-banner-dismissed") === "yes");
   }, []);
 

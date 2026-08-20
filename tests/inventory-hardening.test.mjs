@@ -6,6 +6,7 @@ const deleteRoute = await readFile(new URL("../app/api/vdp-imports/delete/route.
 const hardeningClient = await readFile(new URL("../app/components/InventoryHardeningClient.tsx", import.meta.url), "utf8");
 const renderRoute = await readFile(new URL("../app/api/creative-projects/[id]/render/route.ts", import.meta.url), "utf8");
 const layout = await readFile(new URL("../app/layout.tsx", import.meta.url), "utf8");
+const app = await readFile(new URL("../app/components/AuthorizationApp.tsx", import.meta.url), "utf8");
 
 test("inventory deletion is scoped to the signed-in associate", () => {
   assert.match(deleteRoute, /LOWER\(associate_email\) = LOWER\(\?\)/);
@@ -20,6 +21,9 @@ test("delete control is mounted globally and calls the scoped endpoint", () => {
   assert.match(hardeningClient, /\/api\/vdp-imports\/delete/);
   assert.match(hardeningClient, /Delete vehicle/);
   assert.match(hardeningClient, /window\.confirm/);
+  assert.match(hardeningClient, /sessionStorage\.setItem\("lotsocial-return-view", "inventory"\)/);
+  assert.match(app, /sessionStorage\.getItem\("lotsocial-return-view"\)/);
+  assert.match(app, /setView\("inventory"\)/);
 });
 
 test("unsafe stale drafts lose copy and render actions", () => {

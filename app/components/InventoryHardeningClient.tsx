@@ -59,6 +59,7 @@ function installDeleteAction(card: Element) {
       });
       const payload = await response.json() as { deleted?: boolean; error?: string };
       if (!response.ok || !payload.deleted) throw new Error(payload.error ?? "Vehicle deletion failed.");
+      window.sessionStorage.setItem("lotsocial-return-view", "inventory");
       window.location.reload();
     } catch (error) {
       button.disabled = false;
