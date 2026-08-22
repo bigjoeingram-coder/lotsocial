@@ -3,12 +3,14 @@ import type { CreativeProjectRecord } from "./creative";
 import type { ImportedVehicleRecord } from "./vdp";
 
 type RenderEnvironment = { SHOTSTACK_API_KEY?: string; SHOTSTACK_STAGE?: string };
+type ShotstackStage = "stage" | "v1";
 
 function renderEnvironment() {
   const runtime = env as unknown as RenderEnvironment;
+  const stage: ShotstackStage = runtime.SHOTSTACK_STAGE === "v1" ? "v1" : "stage";
   return {
     apiKey: runtime.SHOTSTACK_API_KEY?.trim() ?? "",
-    stage: runtime.SHOTSTACK_STAGE === "v1" ? "v1" : "stage",
+    stage,
   };
 }
 
@@ -78,22 +80,37 @@ export async function submitRender(plan: ReturnType<typeof buildVerticalRenderPl
   const { apiKey, stage } = renderEnvironment();
   if (!apiKey) return { status: "awaiting_provider_setup", providerRenderId: "", errorMessage: "The production renderer is not connected yet." };
 
-  const response = await fetch(`https://api.shotstack.io/edit/${stage}/render`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "x-api-key": apiKey },
-    body: JSON.stringify(plan.render),
-  });
-  const payload = await response.json() as { response?: { id?: string; message?: string }; message?: string };
-  if (!response.ok || !payload.response?.id) {
-    return { status: "provider_error", providerRenderId: "", errorMessage: payload.response?.message ?? payload.message ?? "The renderer rejected this job." };
+  const stages: ShotstackStage[] = stage === "v1" ? ["v1", "stage"] : ["stage", "v1"];
+  let latestMessage = "The renderer rejected this job.";
+  for (const candidateStage of stages) {
+    const response = await fetch(`https://api.shotstack.io/edit/${candidateStage}/render`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-api-key": apiKey },
+      body: JSON.stringify(plan.render),
+    });
+    const payload = await response.json() as { response?: { id?: string; message?: string }; message?: string };
+    if (response.ok && payload.response?.id) {
+      return { status: "queued", providerRenderId: `${candidateStage}:${payload.response.id}`, errorMessage: "" };
+    }
+    latestMessage = payload.response?.message ?? payload.message ?? latestMessage;
+    if (response.status !== 401 && response.status !== 403) break;
   }
-  return { status: "queued", providerRenderId: payload.response.id, errorMessage: "" };
+  return { status: "provider_error", providerRenderId: "", errorMessage: latestMessage };
+}
+
+function parseProviderRenderId(providerRenderId: string) {
+  const [maybeStage, ...rest] = providerRenderId.split(":");
+  if ((maybeStage === "stage" || maybeStage === "v1") && rest.length) {
+    return { stage: maybeStage, id: rest.join(":") };
+  }
+  return { stage: renderEnvironment().stage, id: providerRenderId };
 }
 
 export async function checkRender(providerRenderId: string) {
-  const { apiKey, stage } = renderEnvironment();
+  const { apiKey } = renderEnvironment();
   if (!apiKey) return null;
-  const response = await fetch(`https://api.shotstack.io/edit/${stage}/render/${encodeURIComponent(providerRenderId)}`, {
+  const provider = parseProviderRenderId(providerRenderId);
+  const response = await fetch(`https://api.shotstack.io/edit/${provider.stage}/render/${encodeURIComponent(provider.id)}`, {
     headers: { "x-api-key": apiKey },
   });
   const payload = await response.json() as {

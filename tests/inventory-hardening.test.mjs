@@ -5,6 +5,7 @@ import { readFile } from "node:fs/promises";
 const deleteRoute = await readFile(new URL("../app/api/vdp-imports/delete/route.ts", import.meta.url), "utf8");
 const hardeningClient = await readFile(new URL("../app/components/InventoryHardeningClient.tsx", import.meta.url), "utf8");
 const renderRoute = await readFile(new URL("../app/api/creative-projects/[id]/render/route.ts", import.meta.url), "utf8");
+const renderer = await readFile(new URL("../app/lib/rendering.ts", import.meta.url), "utf8");
 const layout = await readFile(new URL("../app/layout.tsx", import.meta.url), "utf8");
 const app = await readFile(new URL("../app/components/AuthorizationApp.tsx", import.meta.url), "utf8");
 
@@ -34,4 +35,11 @@ test("unsafe stale drafts lose copy and render actions", () => {
   assert.match(renderRoute, /requiresRegeneration/);
   assert.match(renderRoute, /regenerationRequired: true/);
   assert.match(renderRoute, /status: 409/);
+});
+
+test("renderer retries alternate Shotstack stage after auth rejection", () => {
+  assert.match(renderer, /const stages: ShotstackStage\[\]/);
+  assert.match(renderer, /response\.status !== 401 && response\.status !== 403/);
+  assert.match(renderer, /providerRenderId: `\$\{candidateStage\}:\$\{payload\.response\.id\}`/);
+  assert.match(renderer, /parseProviderRenderId/);
 });
