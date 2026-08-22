@@ -82,6 +82,7 @@ export async function submitRender(plan: ReturnType<typeof buildVerticalRenderPl
 
   const stages: ShotstackStage[] = stage === "v1" ? ["v1", "stage"] : ["stage", "v1"];
   let latestMessage = "The renderer rejected this job.";
+  let rendererAuthRejected = false;
   for (const candidateStage of stages) {
     const response = await fetch(`https://api.shotstack.io/edit/${candidateStage}/render`, {
       method: "POST",
@@ -93,7 +94,11 @@ export async function submitRender(plan: ReturnType<typeof buildVerticalRenderPl
       return { status: "queued", providerRenderId: `${candidateStage}:${payload.response.id}`, errorMessage: "" };
     }
     latestMessage = payload.response?.message ?? payload.message ?? latestMessage;
-    if (response.status !== 401 && response.status !== 403) break;
+    rendererAuthRejected = response.status === 401 || response.status === 403;
+    if (!rendererAuthRejected) break;
+  }
+  if (rendererAuthRejected) {
+    latestMessage = "The video renderer rejected the current provider credentials. Import and captions still work, but production video rendering needs the renderer connection updated.";
   }
   return { status: "provider_error", providerRenderId: "", errorMessage: latestMessage };
 }

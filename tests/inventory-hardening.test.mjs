@@ -39,7 +39,8 @@ test("unsafe stale drafts lose copy and render actions", () => {
 
 test("renderer retries alternate Shotstack stage after auth rejection", () => {
   assert.match(renderer, /const stages: ShotstackStage\[\]/);
-  assert.match(renderer, /response\.status !== 401 && response\.status !== 403/);
+  assert.match(renderer, /response\.status === 401 \|\| response\.status === 403/);
   assert.match(renderer, /providerRenderId: `\$\{candidateStage\}:\$\{payload\.response\.id\}`/);
+  assert.match(renderer, /video renderer rejected the current provider credentials/i);
   assert.match(renderer, /parseProviderRenderId/);
 });
