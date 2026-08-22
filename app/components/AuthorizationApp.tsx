@@ -3,7 +3,7 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { PERMISSIONS, PermissionId } from "../lib/authorization-shared";
 
-type User = { name: string; email: string } | null;
+type User = { id: string; name: string; email: string } | null;
 const TESTER_STORAGE_KEY = "lotsocial-public-tester";
 
 type RequestRow = {
@@ -260,7 +260,7 @@ export function AuthorizationApp({ user }: { user: User }) {
     if (stored) {
       try {
         const parsed = JSON.parse(stored) as User;
-        if (parsed?.name && parsed.email) {
+        if (parsed?.id && parsed.name && parsed.email) {
           setCurrentUser(parsed);
           setTesterName(parsed.name);
           setTesterEmail(parsed.email);
@@ -278,8 +278,8 @@ export function AuthorizationApp({ user }: { user: User }) {
   function apiHeaders(extra?: HeadersInit): HeadersInit {
     const headers: Record<string, string> = { ...(extra as Record<string, string> | undefined) };
     if (currentUser) {
+      headers["X-LotSocial-Tester-Id"] = currentUser.id;
       headers["X-LotSocial-Tester-Name"] = currentUser.name;
-      headers["X-LotSocial-Tester-Email"] = currentUser.email;
     }
     return headers;
   }
@@ -292,7 +292,7 @@ export function AuthorizationApp({ user }: { user: User }) {
       setError("Enter your name and a valid email to start testing.");
       return;
     }
-    const tester = { name, email };
+    const tester = { id: crypto.randomUUID(), name, email };
     window.localStorage.setItem(TESTER_STORAGE_KEY, JSON.stringify(tester));
     setCurrentUser(tester);
     setForm(initialForm(tester));

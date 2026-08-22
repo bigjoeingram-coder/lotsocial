@@ -95,7 +95,7 @@ export async function POST(request: Request) {
       rooftopLocation: clean(payload.rooftopLocation),
       dealershipDomain: clean(payload.dealershipDomain),
       associateName: user.fullName ?? (clean(payload.associateName) || user.displayName),
-      associateEmail: user.email.toLowerCase(),
+      associateEmail: (clean(payload.associateEmail) || user.email).toLowerCase(),
       managerName: clean(payload.managerName),
       managerTitle: clean(payload.managerTitle),
       managerEmail: clean(payload.managerEmail).toLowerCase(),

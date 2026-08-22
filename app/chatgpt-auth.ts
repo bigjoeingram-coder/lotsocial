@@ -9,7 +9,7 @@ export type ChatGPTUser = {
 
 const USER_EMAIL_HEADER = "oai-authenticated-user-email";
 const USER_FULL_NAME_HEADER = "oai-authenticated-user-full-name";
-const TESTER_EMAIL_HEADER = "x-lotsocial-tester-email";
+const TESTER_ID_HEADER = "x-lotsocial-tester-id";
 const TESTER_NAME_HEADER = "x-lotsocial-tester-name";
 const USER_FULL_NAME_ENCODING_HEADER =
   "oai-authenticated-user-full-name-encoding";
@@ -38,21 +38,21 @@ export async function getChatGPTUser(): Promise<ChatGPTUser | null> {
 }
 
 function getPublicTester(requestHeaders: Headers): ChatGPTUser | null {
-  const email = normalizeEmail(requestHeaders.get(TESTER_EMAIL_HEADER));
-  if (!email) return null;
+  const testerId = normalizeTesterId(requestHeaders.get(TESTER_ID_HEADER));
+  if (!testerId) return null;
 
   const name = cleanName(requestHeaders.get(TESTER_NAME_HEADER));
   return {
-    displayName: name || email,
-    email,
+    displayName: name || "LotSocial Tester",
+    email: `tester-${testerId}@lotsocial.local`,
     fullName: name || null,
   };
 }
 
-function normalizeEmail(value: string | null): string | null {
-  const email = value?.trim().toLowerCase() ?? "";
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return null;
-  return email.slice(0, 254);
+function normalizeTesterId(value: string | null): string | null {
+  const testerId = value?.trim().toLowerCase() ?? "";
+  if (!/^[a-f0-9-]{32,64}$/.test(testerId)) return null;
+  return testerId.slice(0, 64);
 }
 
 function cleanName(value: string | null): string {
