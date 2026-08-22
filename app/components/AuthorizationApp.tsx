@@ -213,7 +213,7 @@ export function AuthorizationApp({ user }: { user: User }) {
   const [identityLoaded, setIdentityLoaded] = useState(Boolean(user));
   const [testerName, setTesterName] = useState("");
   const [testerEmail, setTesterEmail] = useState("");
-  const [view, setView] = useState<"dashboard" | "request" | "inventory" | "creative">("dashboard");
+  const [view, setView] = useState<"dashboard" | "request" | "inventory" | "creative">("inventory");
   const [step, setStep] = useState(1);
   const [requests, setRequests] = useState<RequestRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -301,6 +301,7 @@ export function AuthorizationApp({ user }: { user: User }) {
     setLoading(true);
     setInventoryLoading(true);
     setError("");
+    setView("inventory");
   }
 
   function switchTester() {
