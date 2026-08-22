@@ -9,6 +9,8 @@ export type ChatGPTUser = {
 
 const USER_EMAIL_HEADER = "oai-authenticated-user-email";
 const USER_FULL_NAME_HEADER = "oai-authenticated-user-full-name";
+const TESTER_EMAIL_HEADER = "x-lotsocial-tester-email";
+const TESTER_NAME_HEADER = "x-lotsocial-tester-name";
 const USER_FULL_NAME_ENCODING_HEADER =
   "oai-authenticated-user-full-name-encoding";
 const PERCENT_ENCODED_UTF8 = "percent-encoded-utf-8";
@@ -19,7 +21,7 @@ const CALLBACK_PATH = "/callback";
 export async function getChatGPTUser(): Promise<ChatGPTUser | null> {
   const requestHeaders = await headers();
   const email = requestHeaders.get(USER_EMAIL_HEADER);
-  if (!email) return null;
+  if (!email) return getPublicTester(requestHeaders);
 
   const encodedFullName = requestHeaders.get(USER_FULL_NAME_HEADER);
   const fullName =
@@ -33,6 +35,28 @@ export async function getChatGPTUser(): Promise<ChatGPTUser | null> {
     email,
     fullName,
   };
+}
+
+function getPublicTester(requestHeaders: Headers): ChatGPTUser | null {
+  const email = normalizeEmail(requestHeaders.get(TESTER_EMAIL_HEADER));
+  if (!email) return null;
+
+  const name = cleanName(requestHeaders.get(TESTER_NAME_HEADER));
+  return {
+    displayName: name || email,
+    email,
+    fullName: name || null,
+  };
+}
+
+function normalizeEmail(value: string | null): string | null {
+  const email = value?.trim().toLowerCase() ?? "";
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return null;
+  return email.slice(0, 254);
+}
+
+function cleanName(value: string | null): string {
+  return (value ?? "").replace(/[<>]/g, "").replace(/\s+/g, " ").trim().slice(0, 80);
 }
 
 export async function requireChatGPTUser(

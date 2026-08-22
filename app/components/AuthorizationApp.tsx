@@ -4,6 +4,7 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import { PERMISSIONS, PermissionId } from "../lib/authorization-shared";
 
 type User = { name: string; email: string } | null;
+const TESTER_STORAGE_KEY = "lotsocial-public-tester";
 
 type RequestRow = {
   id: string;
@@ -208,6 +209,10 @@ function initialForm(user: User): FormState {
 }
 
 export function AuthorizationApp({ user }: { user: User }) {
+  const [currentUser, setCurrentUser] = useState<User>(user);
+  const [identityLoaded, setIdentityLoaded] = useState(Boolean(user));
+  const [testerName, setTesterName] = useState("");
+  const [testerEmail, setTesterEmail] = useState("");
   const [view, setView] = useState<"dashboard" | "request" | "inventory" | "creative">("dashboard");
   const [step, setStep] = useState(1);
   const [requests, setRequests] = useState<RequestRow[]>([]);
@@ -246,9 +251,79 @@ export function AuthorizationApp({ user }: { user: User }) {
   const [renderJob, setRenderJob] = useState<RenderJob | null>(null);
   const [preparingRender, setPreparingRender] = useState(false);
 
+  useEffect(() => {
+    if (user) {
+      setIdentityLoaded(true);
+      return;
+    }
+    const stored = window.localStorage.getItem(TESTER_STORAGE_KEY);
+    if (stored) {
+      try {
+        const parsed = JSON.parse(stored) as User;
+        if (parsed?.name && parsed.email) {
+          setCurrentUser(parsed);
+          setTesterName(parsed.name);
+          setTesterEmail(parsed.email);
+          setForm(initialForm(parsed));
+          setEndCardName(parsed.name);
+          setEndCardEmail(parsed.email);
+        }
+      } catch {
+        window.localStorage.removeItem(TESTER_STORAGE_KEY);
+      }
+    }
+    setIdentityLoaded(true);
+  }, [user]);
+
+  function apiHeaders(extra?: HeadersInit): HeadersInit {
+    const headers: Record<string, string> = { ...(extra as Record<string, string> | undefined) };
+    if (currentUser) {
+      headers["X-LotSocial-Tester-Name"] = currentUser.name;
+      headers["X-LotSocial-Tester-Email"] = currentUser.email;
+    }
+    return headers;
+  }
+
+  function saveTesterIdentity(event: FormEvent) {
+    event.preventDefault();
+    const name = testerName.replace(/[<>]/g, "").replace(/\s+/g, " ").trim();
+    const email = testerEmail.trim().toLowerCase();
+    if (!name || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      setError("Enter your name and a valid email to start testing.");
+      return;
+    }
+    const tester = { name, email };
+    window.localStorage.setItem(TESTER_STORAGE_KEY, JSON.stringify(tester));
+    setCurrentUser(tester);
+    setForm(initialForm(tester));
+    setEndCardName(name);
+    setEndCardEmail(email);
+    setLoading(true);
+    setInventoryLoading(true);
+    setError("");
+  }
+
+  function switchTester() {
+    window.localStorage.removeItem(TESTER_STORAGE_KEY);
+    setCurrentUser(null);
+    setRequests([]);
+    setVehicles([]);
+    setForm(initialForm(null));
+    setEndCardName("");
+    setEndCardEmail("");
+    setCreativeVehicle(null);
+    setCreativeDraft(null);
+    setRenderJob(null);
+    setView("dashboard");
+  }
+
   async function loadRequests() {
+    if (!currentUser) {
+      setLoading(false);
+      return;
+    }
     try {
-      const response = await fetch("/api/authorization-requests", { cache: "no-store" });
+      const response = await fetch("/api/authorization-requests", { cache: "no-store", headers: apiHeaders() });
       const payload = await response.json() as { requests?: RequestRow[] };
       setRequests(payload.requests ?? []);
     } finally {
@@ -256,11 +331,15 @@ export function AuthorizationApp({ user }: { user: User }) {
     }
   }
 
-  useEffect(() => { void loadRequests(); }, []);
+  useEffect(() => { void loadRequests(); }, [currentUser?.email]);
 
   async function loadVehicles() {
+    if (!currentUser) {
+      setInventoryLoading(false);
+      return;
+    }
     try {
-      const response = await fetch("/api/vdp-imports", { cache: "no-store" });
+      const response = await fetch("/api/vdp-imports", { cache: "no-store", headers: apiHeaders() });
       const payload = await response.json() as { vehicles?: ImportedVehicle[] };
       setVehicles(payload.vehicles ?? []);
     } finally {
@@ -268,7 +347,7 @@ export function AuthorizationApp({ user }: { user: User }) {
     }
   }
 
-  useEffect(() => { void loadVehicles(); }, []);
+  useEffect(() => { void loadVehicles(); }, [currentUser?.email]);
 
   useEffect(() => {
     if (window.sessionStorage.getItem("lotsocial-return-view") !== "inventory") return;
@@ -297,7 +376,7 @@ export function AuthorizationApp({ user }: { user: User }) {
     try {
       const response = await fetch("/api/vdp-imports", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: apiHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({ sourceUrl: vdpUrl, authorizedToMarket }),
       });
       const payload = await response.json() as { vehicle?: ImportedVehicle; error?: string };
@@ -371,7 +450,7 @@ export function AuthorizationApp({ user }: { user: User }) {
     try {
       const response = await fetch("/api/creative-projects", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: apiHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({ vehicleId: creativeVehicle.id, selectedImages: selectedCreativeImages, style: creativeStyle, durationSeconds: creativeDuration, endCardName, endCardPhone, endCardEmail, endCardCta, flavor }),
       });
       const payload = await response.json() as { project?: CreativeProject; error?: string };
@@ -390,7 +469,7 @@ export function AuthorizationApp({ user }: { user: User }) {
     setPreparingRender(true);
     setCreativeError("");
     try {
-      const response = await fetch(`/api/creative-projects/${creativeDraft.id}/render`, { method: "POST" });
+      const response = await fetch(`/api/creative-projects/${creativeDraft.id}/render`, { method: "POST", headers: apiHeaders() });
       const payload = await response.json() as { job?: RenderJob; error?: string };
       if ((!response.ok && response.status !== 502) || !payload.job) throw new Error(payload.error ?? "Unable to prepare the production render.");
       setRenderJob(payload.job);
@@ -406,7 +485,7 @@ export function AuthorizationApp({ user }: { user: User }) {
     let stopped = false;
     const poll = async () => {
       try {
-        const response = await fetch(`/api/creative-projects/${creativeDraft.id}/render`, { cache: "no-store" });
+        const response = await fetch(`/api/creative-projects/${creativeDraft.id}/render`, { cache: "no-store", headers: apiHeaders() });
         const payload = await response.json() as { job?: RenderJob };
         if (!stopped && response.ok && payload.job) setRenderJob(payload.job);
       } catch {
@@ -422,7 +501,7 @@ export function AuthorizationApp({ user }: { user: User }) {
     setDetailLoading(true);
     setError("");
     try {
-      const response = await fetch(`/api/authorization-details/${id}`, { cache: "no-store" });
+      const response = await fetch(`/api/authorization-details/${id}`, { cache: "no-store", headers: apiHeaders() });
       const payload = await response.json() as { request?: RequestDetail; auditEvents?: AuditEvent[]; error?: string };
       if (!response.ok || !payload.request) throw new Error(payload.error ?? "Unable to load authorization details.");
       setDetail({ request: payload.request, auditEvents: payload.auditEvents ?? [] });
@@ -442,7 +521,7 @@ export function AuthorizationApp({ user }: { user: User }) {
     try {
       const response = await fetch(`/api/authorization-details/${detail.request.id}/provider-invite`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: apiHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify(providerDraft),
       });
       const payload = await response.json() as { error?: string; providerUrl?: string; emailDeliveryStatus?: string; emailPreview?: string };
@@ -494,7 +573,7 @@ export function AuthorizationApp({ user }: { user: User }) {
     try {
       const response = await fetch("/api/authorization-requests", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: apiHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({ ...form, providerName: form.providerName.replace("Unknown / manager will confirm", "Unknown") }),
       });
       const payload = await response.json() as { error?: string; approvalUrl?: string; emailDeliveryStatus?: string; emailPreview?: string };
@@ -513,13 +592,38 @@ export function AuthorizationApp({ user }: { user: User }) {
     setStep(1);
     setResult(null);
     setError("");
-    setForm(initialForm(user));
+    setForm(initialForm(currentUser));
   }
 
   const usableCreativeImages = creativeVehicle
     ? creativeVehicle.imageUrls.filter((image) => !brokenCreativeImages.includes(image))
     : [];
   const hasCreativeImages = usableCreativeImages.length > 0;
+
+  if (!identityLoaded) {
+    return <div className="app-shell"><main className="main-shell"><div className="empty-state"><span className="loader" /><p>Preparing LotSocial...</p></div></main></div>;
+  }
+
+  if (!currentUser) {
+    return (
+      <div className="app-shell public-entry-shell">
+        <main className="public-entry">
+          <section className="public-entry-card">
+            <span className="brand-mark">L</span>
+            <p className="eyebrow">LotSocial public test</p>
+            <h1>Enter your name and email to start.</h1>
+            <p>Your test inventory and creative drafts stay tied to this email on this device.</p>
+            <form className="tester-form" onSubmit={saveTesterIdentity}>
+              <label className="field"><span>Name</span><input value={testerName} onChange={(event) => setTesterName(event.target.value)} placeholder="Jane Salesperson" autoComplete="name" /></label>
+              <label className="field"><span>Email</span><input type="email" value={testerEmail} onChange={(event) => setTesterEmail(event.target.value)} placeholder="jane@dealership.com" autoComplete="email" /></label>
+              {error && <div className="error-banner">{error}</div>}
+              <button className="primary-button" type="submit">Start testing</button>
+            </form>
+          </section>
+        </main>
+      </div>
+    );
+  }
 
   return (
     <div className="app-shell">
@@ -533,9 +637,9 @@ export function AuthorizationApp({ user }: { user: User }) {
           <button className={view !== "inventory" ? "active" : ""} onClick={() => setView("dashboard")}>Authorizations</button>
         </nav>
         <div className="topbar-actions">
-          {!user && <a className="signin-link" href="/signin-with-chatgpt?return_to=%2F">Associate sign in</a>}
+          <button className="signin-link" type="button" onClick={switchTester}>Switch tester</button>
           <span className="environment-chip"><span className="live-dot" /> Authorization workspace</span>
-          <div className="avatar" title={user?.email ?? "Demo associate"}>{(user?.name ?? "DA").slice(0, 2).toUpperCase()}</div>
+          <div className="avatar" title={currentUser.email}>{currentUser.name.slice(0, 2).toUpperCase()}</div>
         </div>
       </header>
 
