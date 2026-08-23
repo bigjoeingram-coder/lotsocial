@@ -46,6 +46,15 @@ test("renderer retries alternate Shotstack stage after auth rejection", () => {
   assert.match(renderer, /parseProviderRenderId/);
 });
 
+test("rendered vehicle media uses inspection-fit framing", () => {
+  assert.match(renderer, /const INSPECTION_IMAGE_SCALE = 0\.92/);
+  assert.match(renderer, /fit: "contain"/);
+  assert.match(renderer, /scale: INSPECTION_IMAGE_SCALE/);
+  assert.match(renderer, /position: "center"/);
+  assert.doesNotMatch(renderer, /fit: "crop"/);
+  assert.doesNotMatch(renderer, /effect: pace/);
+});
+
 test("creative copy normalizes escaped VDP HTML before captions", () => {
   assert.match(creative, /function decodeHtmlEntities/);
   assert.match(creative, /function cleanCopyLine/);
