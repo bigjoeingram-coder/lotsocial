@@ -74,14 +74,16 @@ test("rendered vehicle media fills dead space with same-image wallpaper and star
 });
 
 test("rendered video ends with branded salesperson end card", () => {
-  assert.match(renderer, /const endCardPhone = project\.end_card_phone \? `<strong>\$\{escapeHtml\(project\.end_card_phone\)\}<\/strong>` : ""/);
-  assert.match(renderer, /const endCardEmail = project\.end_card_email \? `<strong>\$\{escapeHtml\(project\.end_card_email\)\}<\/strong>` : ""/);
+  assert.match(renderer, /const endCardPhone = project\.end_card_phone \? `<div class="phone">\$\{escapeHtml\(project\.end_card_phone\)\}<\/div>` : ""/);
+  assert.match(renderer, /const endCardEmail = project\.end_card_email \? `<div class="email">\$\{escapeHtml\(project\.end_card_email\)\}<\/div>` : ""/);
   assert.match(renderer, /class="end-card"/);
   assert.match(renderer, /class="content"/);
   assert.match(renderer, /class="contact"/);
   assert.match(renderer, /<b>LotSocial<\/b>/);
   assert.match(renderer, /html,body\{margin:0\}/);
-  assert.match(renderer, /left:150px;right:150px;top:545px/);
+  assert.match(renderer, /left:190px;right:190px;top:560px/);
+  assert.match(renderer, /\.phone\{display:block;margin:8px auto 0;color:#e8f1eb;font-size:29px;line-height:1\.22;font-weight:900/);
+  assert.match(renderer, /\.email\{display:block;margin:10px auto 0;color:#e8f1eb;font-size:24px;line-height:1\.22;font-weight:650/);
   assert.match(renderer, /text-align:center/);
   assert.match(renderer, /overflow-wrap:anywhere/);
   assert.match(renderer, /escapeHtml\(project\.end_card_cta\)/);
