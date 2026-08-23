@@ -9,6 +9,7 @@ const renderer = await readFile(new URL("../app/lib/rendering.ts", import.meta.u
 const creative = await readFile(new URL("../app/lib/creative.ts", import.meta.url), "utf8");
 const layout = await readFile(new URL("../app/layout.tsx", import.meta.url), "utf8");
 const app = await readFile(new URL("../app/components/AuthorizationApp.tsx", import.meta.url), "utf8");
+const css = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
 
 test("inventory deletion is scoped to the signed-in associate", () => {
   assert.match(deleteRoute, /LOWER\(associate_email\) = LOWER\(\?\)/);
@@ -70,6 +71,13 @@ test("rendered vehicle media fills dead space with same-image wallpaper and star
   assert.match(renderer, /\{ clips: wallpaperTintClips \}/);
   assert.match(renderer, /\{ clips: wallpaperClips \}/);
   assert.match(renderer, /dark same-image wallpaper fill/);
+});
+
+test("creative shot picker keeps VDP photos readable on mobile", () => {
+  assert.match(css, /\.creative-photo-grid \{ display: grid; grid-template-columns: repeat\(4,minmax\(0,1fr\)\)/);
+  assert.match(css, /\.creative-photo-grid button \{ position: relative; aspect-ratio: 4 \/ 3/);
+  assert.match(css, /\.creative-photo-grid img \{ width: 100%; height: 100%; object-fit: contain/);
+  assert.match(css, /\.creative-photo-grid \{ grid-template-columns: repeat\(2,minmax\(0,1fr\)\); gap: 10px; max-height: 620px; \}/);
 });
 
 test("completed render offers iOS photo-saving share path", () => {
