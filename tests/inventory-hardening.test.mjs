@@ -51,19 +51,23 @@ test("rendered vehicle media uses inspection-fit framing", () => {
   assert.match(renderer, /fit: "contain"/);
   assert.match(renderer, /scale: INSPECTION_IMAGE_SCALE/);
   assert.match(renderer, /position: "center"/);
-  assert.doesNotMatch(renderer, /fit: "crop"/);
   assert.doesNotMatch(renderer, /effect: pace/);
 });
 
 test("rendered vehicle media fills dead space with same-image wallpaper and starts on vehicle pixels", () => {
-  assert.match(renderer, /const WALLPAPER_BACKGROUND_OPACITY = 0\.42/);
+  assert.match(renderer, /const WALLPAPER_BACKGROUND_SCALE = 1\.08/);
+  assert.match(renderer, /const WALLPAPER_TINT_OPACITY = 0\.62/);
   assert.match(renderer, /const wallpaperClips = timedImages\.map/);
-  assert.match(renderer, /fit: "cover"/);
-  assert.match(renderer, /opacity: WALLPAPER_BACKGROUND_OPACITY/);
-  assert.match(renderer, /filter: "muted"/);
+  assert.match(renderer, /const wallpaperTintClips = timedImages\.map/);
+  assert.match(renderer, /fit: "crop"/);
+  assert.match(renderer, /scale: WALLPAPER_BACKGROUND_SCALE/);
+  assert.match(renderer, /filter: "darken"/);
+  assert.match(renderer, /background:#071116/);
+  assert.match(renderer, /opacity: WALLPAPER_TINT_OPACITY/);
   assert.match(renderer, /transition: index === 0 \? \{ out: "fade" \} : \{ in: "fade", out: "fade" \}/);
+  assert.match(renderer, /\{ clips: wallpaperTintClips \}/);
   assert.match(renderer, /\{ clips: wallpaperClips \}/);
-  assert.match(renderer, /same-image wallpaper fill/);
+  assert.match(renderer, /dark same-image wallpaper fill/);
 });
 
 test("completed render offers iOS photo-saving share path", () => {

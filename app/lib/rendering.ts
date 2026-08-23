@@ -5,7 +5,8 @@ import type { ImportedVehicleRecord } from "./vdp";
 type RenderEnvironment = { SHOTSTACK_API_KEY?: string; SHOTSTACK_STAGE?: string };
 type ShotstackStage = "stage" | "v1";
 const INSPECTION_IMAGE_SCALE = 0.92;
-const WALLPAPER_BACKGROUND_OPACITY = 0.42;
+const WALLPAPER_BACKGROUND_SCALE = 1.08;
+const WALLPAPER_TINT_OPACITY = 0.62;
 
 function renderEnvironment() {
   const runtime = env as unknown as RenderEnvironment;
@@ -40,10 +41,17 @@ export function buildVerticalRenderPlan(project: CreativeProjectRecord, vehicle:
     asset: { type: "image", src },
     start,
     length,
-    fit: "cover",
+    fit: "crop",
+    scale: WALLPAPER_BACKGROUND_SCALE,
     position: "center",
-    opacity: WALLPAPER_BACKGROUND_OPACITY,
-    filter: "muted",
+    filter: "darken",
+    transition: index === 0 ? { out: "fade" } : { in: "fade", out: "fade" },
+  }));
+  const wallpaperTintClips = timedImages.map(({ start, length }, index) => ({
+    asset: { type: "html", html: "<div></div>", css: "div{width:1080px;height:1920px;background:#071116}", width: 1080, height: 1920 },
+    start,
+    length,
+    opacity: WALLPAPER_TINT_OPACITY,
     transition: index === 0 ? { out: "fade" } : { in: "fade", out: "fade" },
   }));
   const clips = timedImages.map(({ src, start, length }, index) => ({
@@ -62,6 +70,7 @@ export function buildVerticalRenderPlan(project: CreativeProjectRecord, vehicle:
       tracks: [
         { clips: [{ asset: { type: "html", html: endCardHtml, css: "div{font-family:Arial;color:#17242a;text-align:center;padding:560px 70px 0}p{font-size:38px}h1{font-size:80px;margin:18px 0}strong{font-size:28px}", width: 1080, height: 1920 }, start: Number((total - endCardLength).toFixed(2)), length: endCardLength }] },
         { clips },
+        { clips: wallpaperTintClips },
         { clips: wallpaperClips },
       ],
     },
@@ -75,7 +84,7 @@ export function buildVerticalRenderPlan(project: CreativeProjectRecord, vehicle:
       photoCount: images.length,
       endCardSeconds: endCardLength,
       style: project.style,
-      fidelity: "Original dealership VDP photos only, inspection-fit framing with same-image wallpaper fill",
+      fidelity: "Original dealership VDP photos only, inspection-fit framing with dark same-image wallpaper fill",
     },
   };
 }
