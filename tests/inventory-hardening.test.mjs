@@ -58,7 +58,7 @@ test("rendered vehicle media uses inspection-fit framing", () => {
 test("rendered vehicle media fills dead space with same-image wallpaper and starts on vehicle pixels", () => {
   assert.match(renderer, /const WALLPAPER_BACKGROUND_SCALE = 1\.18/);
   assert.match(renderer, /const WALLPAPER_BACKGROUND_OPACITY = 0\.62/);
-  assert.match(renderer, /const WALLPAPER_TINT_OPACITY = 0\.72/);
+  assert.match(renderer, /const WALLPAPER_TINT_OPACITY = 0\.86/);
   assert.match(renderer, /const wallpaperClips = timedImages\.map/);
   assert.match(renderer, /const wallpaperTintClips = timedImages\.map/);
   assert.match(renderer, /fit: "crop"/);
@@ -70,7 +70,19 @@ test("rendered vehicle media fills dead space with same-image wallpaper and star
   assert.match(renderer, /transition: index === 0 \? \{ out: "fade" \} : \{ in: "fade", out: "fade" \}/);
   assert.match(renderer, /\{ clips: wallpaperTintClips \}/);
   assert.match(renderer, /\{ clips: wallpaperClips \}/);
-  assert.match(renderer, /dark same-image wallpaper fill/);
+  assert.match(renderer, /darker same-image wallpaper fill/);
+});
+
+test("rendered video ends with branded salesperson end card", () => {
+  assert.match(renderer, /const endCardContact = \[project\.end_card_phone, project\.end_card_email\]\.filter\(Boolean\)\.join\("  \|  "\)/);
+  assert.match(renderer, /class="end-card"/);
+  assert.match(renderer, /<b>LotSocial<\/b>/);
+  assert.match(renderer, /escapeHtml\(project\.end_card_cta\)/);
+  assert.match(renderer, /escapeHtml\(project\.end_card_name\)/);
+  assert.match(renderer, /escapeHtml\(endCardContact\)/);
+  assert.match(renderer, /escapeHtml\(vehicleLine\(vehicle\)\)/);
+  assert.match(renderer, /css: endCardCss/);
+  assert.match(renderer, /branded salesperson end card/);
 });
 
 test("creative shot picker uses swipeable four-photo pages on mobile", () => {

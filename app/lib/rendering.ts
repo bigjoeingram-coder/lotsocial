@@ -7,7 +7,7 @@ type ShotstackStage = "stage" | "v1";
 const INSPECTION_IMAGE_SCALE = 0.92;
 const WALLPAPER_BACKGROUND_SCALE = 1.18;
 const WALLPAPER_BACKGROUND_OPACITY = 0.62;
-const WALLPAPER_TINT_OPACITY = 0.72;
+const WALLPAPER_TINT_OPACITY = 0.86;
 
 function renderEnvironment() {
   const runtime = env as unknown as RenderEnvironment;
@@ -26,6 +26,10 @@ function escapeHtml(value: string) {
   return value.replace(/[&<>"']/g, (character) => ({
     "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;",
   })[character] ?? character);
+}
+
+function vehicleLine(vehicle: ImportedVehicleRecord) {
+  return [vehicle.year, vehicle.make, vehicle.model, vehicle.trim].filter(Boolean).join(" ") || vehicle.title;
 }
 
 export function buildVerticalRenderPlan(project: CreativeProjectRecord, vehicle: ImportedVehicleRecord) {
@@ -65,12 +69,14 @@ export function buildVerticalRenderPlan(project: CreativeProjectRecord, vehicle:
     position: "center",
     transition: index === 0 ? { out: "fade" } : { in: "fade", out: "fade" },
   }));
-  const endCardHtml = `<div><p>${escapeHtml(project.end_card_cta)}</p><h1>${escapeHtml(project.end_card_name)}</h1><strong>${escapeHtml([project.end_card_phone, project.end_card_email].filter(Boolean).join("  ·  "))}</strong></div>`;
+  const endCardContact = [project.end_card_phone, project.end_card_email].filter(Boolean).join("  |  ");
+  const endCardHtml = `<div class="end-card"><div class="brand"><span>L</span><b>LotSocial</b></div><p>${escapeHtml(project.end_card_cta)}</p><h1>${escapeHtml(project.end_card_name)}</h1><strong>${escapeHtml(endCardContact)}</strong><small>${escapeHtml(vehicleLine(vehicle))}</small></div>`;
+  const endCardCss = ".end-card{box-sizing:border-box;width:1080px;height:1920px;padding:250px 84px 0;font-family:Arial,Helvetica,sans-serif;color:white;text-align:left;background:linear-gradient(180deg,#101f24 0%,#17242a 62%,#0b1418 100%)}.brand{display:inline-flex;align-items:center;gap:22px;margin-bottom:310px}.brand span{width:90px;height:90px;display:grid;place-items:center;border-radius:24px;background:#c8ff43;color:#17242a;font-size:56px;font-weight:900;transform:rotate(-4deg)}.brand b{color:#c8ff43;font-size:34px;letter-spacing:.08em;text-transform:uppercase}.end-card p{margin:0 0 34px;color:#c8ff43;font-size:52px;font-weight:900;letter-spacing:.02em;text-transform:uppercase}.end-card h1{margin:0 0 36px;font-size:116px;line-height:.94;letter-spacing:-.05em}.end-card strong{display:block;max-width:900px;color:#e8f1eb;font-size:38px;line-height:1.25}.end-card small{position:absolute;left:84px;right:84px;bottom:165px;color:#9fb0a7;font-size:30px;line-height:1.35}";
   const render = {
     timeline: {
       background: "#17242a",
       tracks: [
-        { clips: [{ asset: { type: "html", html: endCardHtml, css: "div{font-family:Arial;color:#17242a;text-align:center;padding:560px 70px 0}p{font-size:38px}h1{font-size:80px;margin:18px 0}strong{font-size:28px}", width: 1080, height: 1920 }, start: Number((total - endCardLength).toFixed(2)), length: endCardLength }] },
+        { clips: [{ asset: { type: "html", html: endCardHtml, css: endCardCss, width: 1080, height: 1920 }, start: Number((total - endCardLength).toFixed(2)), length: endCardLength }] },
         { clips },
         { clips: wallpaperTintClips },
         { clips: wallpaperClips },
@@ -86,7 +92,7 @@ export function buildVerticalRenderPlan(project: CreativeProjectRecord, vehicle:
       photoCount: images.length,
       endCardSeconds: endCardLength,
       style: project.style,
-      fidelity: "Original dealership VDP photos only, inspection-fit framing with dark same-image wallpaper fill",
+      fidelity: "Original dealership VDP photos only, inspection-fit framing with darker same-image wallpaper fill and branded salesperson end card",
     },
   };
 }
