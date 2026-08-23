@@ -6,8 +6,8 @@ type RenderEnvironment = { SHOTSTACK_API_KEY?: string; SHOTSTACK_STAGE?: string 
 type ShotstackStage = "stage" | "v1";
 const INSPECTION_IMAGE_SCALE = 0.92;
 const WALLPAPER_BACKGROUND_SCALE = 1.18;
-const WALLPAPER_BACKGROUND_OPACITY = 0.62;
-const WALLPAPER_TINT_OPACITY = 0.86;
+const WALLPAPER_BACKGROUND_OPACITY = 0.38;
+const WALLPAPER_TINT_OPACITY = 0.94;
 
 function renderEnvironment() {
   const runtime = env as unknown as RenderEnvironment;
@@ -71,7 +71,7 @@ export function buildVerticalRenderPlan(project: CreativeProjectRecord, vehicle:
   }));
   const endCardContact = [project.end_card_phone, project.end_card_email].filter(Boolean).join("  |  ");
   const endCardHtml = `<div class="end-card"><div class="brand"><span>L</span><b>LotSocial</b></div><p>${escapeHtml(project.end_card_cta)}</p><h1>${escapeHtml(project.end_card_name)}</h1><strong>${escapeHtml(endCardContact)}</strong><small>${escapeHtml(vehicleLine(vehicle))}</small></div>`;
-  const endCardCss = ".end-card{box-sizing:border-box;width:1080px;height:1920px;padding:250px 84px 0;font-family:Arial,Helvetica,sans-serif;color:white;text-align:left;background:linear-gradient(180deg,#101f24 0%,#17242a 62%,#0b1418 100%)}.brand{display:inline-flex;align-items:center;gap:22px;margin-bottom:310px}.brand span{width:90px;height:90px;display:grid;place-items:center;border-radius:24px;background:#c8ff43;color:#17242a;font-size:56px;font-weight:900;transform:rotate(-4deg)}.brand b{color:#c8ff43;font-size:34px;letter-spacing:.08em;text-transform:uppercase}.end-card p{margin:0 0 34px;color:#c8ff43;font-size:52px;font-weight:900;letter-spacing:.02em;text-transform:uppercase}.end-card h1{margin:0 0 36px;font-size:116px;line-height:.94;letter-spacing:-.05em}.end-card strong{display:block;max-width:900px;color:#e8f1eb;font-size:38px;line-height:1.25}.end-card small{position:absolute;left:84px;right:84px;bottom:165px;color:#9fb0a7;font-size:30px;line-height:1.35}";
+  const endCardCss = "html,body{margin:0}.end-card{box-sizing:border-box;width:1080px;height:1920px;padding:190px 135px 160px;font-family:Arial,Helvetica,sans-serif;color:white;text-align:center;background:linear-gradient(180deg,#071116 0%,#101f24 58%,#05090b 100%);display:flex;flex-direction:column;align-items:center;justify-content:center;overflow:hidden}.brand{display:inline-flex;align-items:center;justify-content:center;gap:20px;margin-bottom:190px}.brand span{width:82px;height:82px;display:grid;place-items:center;border-radius:22px;background:#c8ff43;color:#17242a;font-size:50px;font-weight:900;transform:rotate(-4deg)}.brand b{color:#c8ff43;font-size:31px;letter-spacing:.08em;text-transform:uppercase}.end-card p{max-width:760px;margin:0 0 34px;color:#c8ff43;font-size:42px;line-height:1.08;font-weight:900;letter-spacing:.02em;text-transform:uppercase;overflow-wrap:anywhere}.end-card h1{max-width:800px;margin:0 0 30px;font-size:76px;line-height:.98;letter-spacing:-.04em;overflow-wrap:anywhere}.end-card strong{display:block;max-width:760px;color:#e8f1eb;font-size:30px;line-height:1.28;overflow-wrap:anywhere}.end-card small{display:block;max-width:760px;margin-top:120px;color:#9fb0a7;font-size:24px;line-height:1.3;overflow-wrap:anywhere}";
   const render = {
     timeline: {
       background: "#17242a",

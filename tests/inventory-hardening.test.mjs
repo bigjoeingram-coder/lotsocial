@@ -57,8 +57,8 @@ test("rendered vehicle media uses inspection-fit framing", () => {
 
 test("rendered vehicle media fills dead space with same-image wallpaper and starts on vehicle pixels", () => {
   assert.match(renderer, /const WALLPAPER_BACKGROUND_SCALE = 1\.18/);
-  assert.match(renderer, /const WALLPAPER_BACKGROUND_OPACITY = 0\.62/);
-  assert.match(renderer, /const WALLPAPER_TINT_OPACITY = 0\.86/);
+  assert.match(renderer, /const WALLPAPER_BACKGROUND_OPACITY = 0\.38/);
+  assert.match(renderer, /const WALLPAPER_TINT_OPACITY = 0\.94/);
   assert.match(renderer, /const wallpaperClips = timedImages\.map/);
   assert.match(renderer, /const wallpaperTintClips = timedImages\.map/);
   assert.match(renderer, /fit: "crop"/);
@@ -77,6 +77,10 @@ test("rendered video ends with branded salesperson end card", () => {
   assert.match(renderer, /const endCardContact = \[project\.end_card_phone, project\.end_card_email\]\.filter\(Boolean\)\.join\("  \|  "\)/);
   assert.match(renderer, /class="end-card"/);
   assert.match(renderer, /<b>LotSocial<\/b>/);
+  assert.match(renderer, /html,body\{margin:0\}/);
+  assert.match(renderer, /padding:190px 135px 160px/);
+  assert.match(renderer, /text-align:center/);
+  assert.match(renderer, /overflow-wrap:anywhere/);
   assert.match(renderer, /escapeHtml\(project\.end_card_cta\)/);
   assert.match(renderer, /escapeHtml\(project\.end_card_name\)/);
   assert.match(renderer, /escapeHtml\(endCardContact\)/);
