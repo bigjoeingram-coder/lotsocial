@@ -73,11 +73,15 @@ test("rendered vehicle media fills dead space with same-image wallpaper and star
   assert.match(renderer, /dark same-image wallpaper fill/);
 });
 
-test("creative shot picker keeps VDP photos readable on mobile", () => {
-  assert.match(css, /\.creative-photo-grid \{ display: grid; grid-template-columns: repeat\(4,minmax\(0,1fr\)\)/);
+test("creative shot picker uses swipeable four-photo pages on mobile", () => {
+  assert.match(app, /function chunkImages\(images: string\[\], size = 4\)/);
+  assert.match(app, /Swipe groups of four/);
+  assert.match(app, /className="creative-photo-page"/);
+  assert.match(app, /pageIndex \* 4 \+ imageIndex/);
+  assert.match(css, /\.creative-photo-grid \{ display: flex; gap: 12px; overflow-x: auto; overflow-y: hidden; scroll-snap-type: x mandatory/);
+  assert.match(css, /\.creative-photo-page \{ flex: 0 0 100%; display: grid; grid-template-columns: repeat\(2,minmax\(0,1fr\)\); gap: 10px; scroll-snap-align: start; \}/);
   assert.match(css, /\.creative-photo-grid button \{ position: relative; aspect-ratio: 4 \/ 3/);
   assert.match(css, /\.creative-photo-grid img \{ width: 100%; height: 100%; object-fit: contain/);
-  assert.match(css, /\.creative-photo-grid \{ grid-template-columns: repeat\(2,minmax\(0,1fr\)\); gap: 10px; max-height: 620px; \}/);
 });
 
 test("completed render offers iOS photo-saving share path", () => {
