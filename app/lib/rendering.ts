@@ -5,8 +5,9 @@ import type { ImportedVehicleRecord } from "./vdp";
 type RenderEnvironment = { SHOTSTACK_API_KEY?: string; SHOTSTACK_STAGE?: string };
 type ShotstackStage = "stage" | "v1";
 const INSPECTION_IMAGE_SCALE = 0.92;
-const WALLPAPER_BACKGROUND_SCALE = 1.08;
-const WALLPAPER_TINT_OPACITY = 0.62;
+const WALLPAPER_BACKGROUND_SCALE = 1.18;
+const WALLPAPER_BACKGROUND_OPACITY = 0.62;
+const WALLPAPER_TINT_OPACITY = 0.72;
 
 function renderEnvironment() {
   const runtime = env as unknown as RenderEnvironment;
@@ -44,6 +45,7 @@ export function buildVerticalRenderPlan(project: CreativeProjectRecord, vehicle:
     fit: "crop",
     scale: WALLPAPER_BACKGROUND_SCALE,
     position: "center",
+    opacity: WALLPAPER_BACKGROUND_OPACITY,
     filter: "darken",
     transition: index === 0 ? { out: "fade" } : { in: "fade", out: "fade" },
   }));

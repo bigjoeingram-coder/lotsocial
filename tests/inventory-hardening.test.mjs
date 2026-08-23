@@ -55,12 +55,14 @@ test("rendered vehicle media uses inspection-fit framing", () => {
 });
 
 test("rendered vehicle media fills dead space with same-image wallpaper and starts on vehicle pixels", () => {
-  assert.match(renderer, /const WALLPAPER_BACKGROUND_SCALE = 1\.08/);
-  assert.match(renderer, /const WALLPAPER_TINT_OPACITY = 0\.62/);
+  assert.match(renderer, /const WALLPAPER_BACKGROUND_SCALE = 1\.18/);
+  assert.match(renderer, /const WALLPAPER_BACKGROUND_OPACITY = 0\.62/);
+  assert.match(renderer, /const WALLPAPER_TINT_OPACITY = 0\.72/);
   assert.match(renderer, /const wallpaperClips = timedImages\.map/);
   assert.match(renderer, /const wallpaperTintClips = timedImages\.map/);
   assert.match(renderer, /fit: "crop"/);
   assert.match(renderer, /scale: WALLPAPER_BACKGROUND_SCALE/);
+  assert.match(renderer, /opacity: WALLPAPER_BACKGROUND_OPACITY/);
   assert.match(renderer, /filter: "darken"/);
   assert.match(renderer, /background:#071116/);
   assert.match(renderer, /opacity: WALLPAPER_TINT_OPACITY/);
