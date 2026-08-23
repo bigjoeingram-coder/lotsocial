@@ -55,6 +55,14 @@ test("rendered vehicle media uses inspection-fit framing", () => {
   assert.doesNotMatch(renderer, /effect: pace/);
 });
 
+test("completed render offers iOS photo-saving share path", () => {
+  assert.match(app, /saveRenderedVideoToPhotos/);
+  assert.match(app, /navigator\.canShare\?\.\(\{ files: \[file\] \}\)/);
+  assert.match(app, /navigator\.share\(\{ files: \[file\]/);
+  assert.match(app, /Save to Photos/);
+  assert.match(app, /Download MP4/);
+});
+
 test("creative copy normalizes escaped VDP HTML before captions", () => {
   assert.match(creative, /function decodeHtmlEntities/);
   assert.match(creative, /function cleanCopyLine/);
