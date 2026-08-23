@@ -5,6 +5,7 @@ import type { ImportedVehicleRecord } from "./vdp";
 type RenderEnvironment = { SHOTSTACK_API_KEY?: string; SHOTSTACK_STAGE?: string };
 type ShotstackStage = "stage" | "v1";
 const INSPECTION_IMAGE_SCALE = 0.92;
+const WALLPAPER_BACKGROUND_OPACITY = 0.42;
 
 function renderEnvironment() {
   const runtime = env as unknown as RenderEnvironment;
@@ -30,14 +31,29 @@ export function buildVerticalRenderPlan(project: CreativeProjectRecord, vehicle:
   const total = Math.max(15, project.duration_seconds);
   const endCardLength = Math.min(4, Math.max(3, total * 0.15));
   const imageLength = (total - endCardLength) / images.length;
-  const clips = images.map((src, index) => ({
-    asset: { type: "image", src },
+  const timedImages = images.map((src, index) => ({
+    src,
     start: Number((index * imageLength).toFixed(2)),
     length: Number((imageLength + (index < images.length - 1 ? 0.25 : 0)).toFixed(2)),
+  }));
+  const wallpaperClips = timedImages.map(({ src, start, length }, index) => ({
+    asset: { type: "image", src },
+    start,
+    length,
+    fit: "cover",
+    position: "center",
+    opacity: WALLPAPER_BACKGROUND_OPACITY,
+    filter: "muted",
+    transition: index === 0 ? { out: "fade" } : { in: "fade", out: "fade" },
+  }));
+  const clips = timedImages.map(({ src, start, length }, index) => ({
+    asset: { type: "image", src },
+    start,
+    length,
     fit: "contain",
     scale: INSPECTION_IMAGE_SCALE,
     position: "center",
-    transition: { in: "fade", out: "fade" },
+    transition: index === 0 ? { out: "fade" } : { in: "fade", out: "fade" },
   }));
   const endCardHtml = `<div><p>${escapeHtml(project.end_card_cta)}</p><h1>${escapeHtml(project.end_card_name)}</h1><strong>${escapeHtml([project.end_card_phone, project.end_card_email].filter(Boolean).join("  ·  "))}</strong></div>`;
   const render = {
@@ -46,6 +62,7 @@ export function buildVerticalRenderPlan(project: CreativeProjectRecord, vehicle:
       tracks: [
         { clips: [{ asset: { type: "html", html: endCardHtml, css: "div{font-family:Arial;color:#17242a;text-align:center;padding:560px 70px 0}p{font-size:38px}h1{font-size:80px;margin:18px 0}strong{font-size:28px}", width: 1080, height: 1920 }, start: Number((total - endCardLength).toFixed(2)), length: endCardLength }] },
         { clips },
+        { clips: wallpaperClips },
       ],
     },
     output: { format: "mp4", resolution: "hd", aspectRatio: "9:16", fps: 30 },
@@ -58,7 +75,7 @@ export function buildVerticalRenderPlan(project: CreativeProjectRecord, vehicle:
       photoCount: images.length,
       endCardSeconds: endCardLength,
       style: project.style,
-      fidelity: "Original dealership VDP photos only, inspection-fit framing",
+      fidelity: "Original dealership VDP photos only, inspection-fit framing with same-image wallpaper fill",
     },
   };
 }

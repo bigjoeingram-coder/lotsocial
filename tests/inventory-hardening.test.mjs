@@ -55,6 +55,17 @@ test("rendered vehicle media uses inspection-fit framing", () => {
   assert.doesNotMatch(renderer, /effect: pace/);
 });
 
+test("rendered vehicle media fills dead space with same-image wallpaper and starts on vehicle pixels", () => {
+  assert.match(renderer, /const WALLPAPER_BACKGROUND_OPACITY = 0\.42/);
+  assert.match(renderer, /const wallpaperClips = timedImages\.map/);
+  assert.match(renderer, /fit: "cover"/);
+  assert.match(renderer, /opacity: WALLPAPER_BACKGROUND_OPACITY/);
+  assert.match(renderer, /filter: "muted"/);
+  assert.match(renderer, /transition: index === 0 \? \{ out: "fade" \} : \{ in: "fade", out: "fade" \}/);
+  assert.match(renderer, /\{ clips: wallpaperClips \}/);
+  assert.match(renderer, /same-image wallpaper fill/);
+});
+
 test("completed render offers iOS photo-saving share path", () => {
   assert.match(app, /saveRenderedVideoToPhotos/);
   assert.match(app, /navigator\.canShare\?\.\(\{ files: \[file\] \}\)/);
