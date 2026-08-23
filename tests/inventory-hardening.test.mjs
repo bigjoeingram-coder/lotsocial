@@ -6,6 +6,7 @@ const deleteRoute = await readFile(new URL("../app/api/vdp-imports/delete/route.
 const hardeningClient = await readFile(new URL("../app/components/InventoryHardeningClient.tsx", import.meta.url), "utf8");
 const renderRoute = await readFile(new URL("../app/api/creative-projects/[id]/render/route.ts", import.meta.url), "utf8");
 const renderer = await readFile(new URL("../app/lib/rendering.ts", import.meta.url), "utf8");
+const creative = await readFile(new URL("../app/lib/creative.ts", import.meta.url), "utf8");
 const layout = await readFile(new URL("../app/layout.tsx", import.meta.url), "utf8");
 const app = await readFile(new URL("../app/components/AuthorizationApp.tsx", import.meta.url), "utf8");
 
@@ -43,4 +44,14 @@ test("renderer retries alternate Shotstack stage after auth rejection", () => {
   assert.match(renderer, /providerRenderId: `\$\{candidateStage\}:\$\{payload\.response\.id\}`/);
   assert.match(renderer, /video renderer rejected the current provider credentials/i);
   assert.match(renderer, /parseProviderRenderId/);
+});
+
+test("creative copy normalizes escaped VDP HTML before captions", () => {
+  assert.match(creative, /function decodeHtmlEntities/);
+  assert.match(creative, /function cleanCopyLine/);
+  assert.match(creative, /function cleanCopyBlock/);
+  assert.match(creative, /&lt;/);
+  assert.match(creative, /&gt;/);
+  assert.match(creative, /&#0\*39;/);
+  assert.match(creative, /return \{ voiceoverScript: cleanCopyBlock\(voiceoverScript\), socialCaption: cleanCopyBlock\(socialCaption\) \}/);
 });
