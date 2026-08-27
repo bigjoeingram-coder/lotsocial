@@ -14,6 +14,7 @@ export type CreativeProjectRecord = {
   end_card_phone: string;
   end_card_email: string;
   end_card_cta: string;
+  end_card_photo_url: string;
   status: string;
   created_at: string;
   updated_at: string;
@@ -44,43 +45,51 @@ function database() {
 async function ensureCreativeSchema() {
   if (!schemaReady) {
     const db = database();
-    schemaReady = db.batch([
-      db.prepare(`CREATE TABLE IF NOT EXISTS creative_projects (
-        id TEXT PRIMARY KEY,
-        vehicle_id TEXT NOT NULL,
-        associate_email TEXT NOT NULL,
-        selected_images TEXT NOT NULL DEFAULT '[]',
-        style TEXT NOT NULL,
-        duration_seconds INTEGER NOT NULL DEFAULT 30,
-        voiceover_script TEXT NOT NULL,
-        social_caption TEXT NOT NULL,
-        end_card_name TEXT NOT NULL,
-        end_card_phone TEXT NOT NULL DEFAULT '',
-        end_card_email TEXT NOT NULL DEFAULT '',
-        end_card_cta TEXT NOT NULL DEFAULT 'Message me for details',
-        status TEXT NOT NULL DEFAULT 'draft',
-        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-      )`),
-      db.prepare("CREATE INDEX IF NOT EXISTS creative_projects_associate_idx ON creative_projects(associate_email, created_at DESC)"),
-      db.prepare("CREATE INDEX IF NOT EXISTS creative_projects_vehicle_idx ON creative_projects(vehicle_id, created_at DESC)"),
-      db.prepare(`CREATE TABLE IF NOT EXISTS creative_render_jobs (
-        id TEXT PRIMARY KEY,
-        project_id TEXT NOT NULL,
-        associate_email TEXT NOT NULL,
-        provider TEXT NOT NULL DEFAULT 'shotstack',
-        provider_render_id TEXT NOT NULL DEFAULT '',
-        status TEXT NOT NULL DEFAULT 'prepared',
-        render_plan TEXT NOT NULL,
-        output_url TEXT NOT NULL DEFAULT '',
-        storage_key TEXT NOT NULL DEFAULT '',
-        error_message TEXT NOT NULL DEFAULT '',
-        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-      )`),
-      db.prepare("CREATE INDEX IF NOT EXISTS creative_render_jobs_project_idx ON creative_render_jobs(project_id, created_at DESC)"),
-      db.prepare("CREATE INDEX IF NOT EXISTS creative_render_jobs_associate_idx ON creative_render_jobs(associate_email, created_at DESC)"),
-    ]).then(() => undefined);
+    schemaReady = (async () => {
+      await db.batch([
+        db.prepare(`CREATE TABLE IF NOT EXISTS creative_projects (
+          id TEXT PRIMARY KEY,
+          vehicle_id TEXT NOT NULL,
+          associate_email TEXT NOT NULL,
+          selected_images TEXT NOT NULL DEFAULT '[]',
+          style TEXT NOT NULL,
+          duration_seconds INTEGER NOT NULL DEFAULT 30,
+          voiceover_script TEXT NOT NULL,
+          social_caption TEXT NOT NULL,
+          end_card_name TEXT NOT NULL,
+          end_card_phone TEXT NOT NULL DEFAULT '',
+          end_card_email TEXT NOT NULL DEFAULT '',
+          end_card_cta TEXT NOT NULL DEFAULT 'Message me for details',
+          end_card_photo_url TEXT NOT NULL DEFAULT '',
+          status TEXT NOT NULL DEFAULT 'draft',
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )`),
+        db.prepare("CREATE INDEX IF NOT EXISTS creative_projects_associate_idx ON creative_projects(associate_email, created_at DESC)"),
+        db.prepare("CREATE INDEX IF NOT EXISTS creative_projects_vehicle_idx ON creative_projects(vehicle_id, created_at DESC)"),
+        db.prepare(`CREATE TABLE IF NOT EXISTS creative_render_jobs (
+          id TEXT PRIMARY KEY,
+          project_id TEXT NOT NULL,
+          associate_email TEXT NOT NULL,
+          provider TEXT NOT NULL DEFAULT 'shotstack',
+          provider_render_id TEXT NOT NULL DEFAULT '',
+          status TEXT NOT NULL DEFAULT 'prepared',
+          render_plan TEXT NOT NULL,
+          output_url TEXT NOT NULL DEFAULT '',
+          storage_key TEXT NOT NULL DEFAULT '',
+          error_message TEXT NOT NULL DEFAULT '',
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )`),
+        db.prepare("CREATE INDEX IF NOT EXISTS creative_render_jobs_project_idx ON creative_render_jobs(project_id, created_at DESC)"),
+        db.prepare("CREATE INDEX IF NOT EXISTS creative_render_jobs_associate_idx ON creative_render_jobs(associate_email, created_at DESC)"),
+      ]);
+      try {
+        await db.prepare("ALTER TABLE creative_projects ADD COLUMN end_card_photo_url TEXT NOT NULL DEFAULT ''").run();
+      } catch (caught) {
+        if (!String(caught).toLowerCase().includes("duplicate column")) throw caught;
+      }
+    })();
   }
   return schemaReady;
 }
@@ -266,6 +275,7 @@ export async function saveCreativeProject(input: {
   endCardPhone: string;
   endCardEmail: string;
   endCardCta: string;
+  endCardPhotoUrl: string;
   flavor?: boolean;
 }) {
   await ensureCreativeSchema();
@@ -274,11 +284,12 @@ export async function saveCreativeProject(input: {
   await database().prepare(`INSERT INTO creative_projects (
     id, vehicle_id, associate_email, selected_images, style, duration_seconds,
     voiceover_script, social_caption, end_card_name, end_card_phone, end_card_email,
-    end_card_cta, status
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'storyboard_ready')`)
+    end_card_cta, end_card_photo_url, status
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'storyboard_ready')`)
     .bind(id, input.vehicle.id, input.associateEmail, JSON.stringify(input.selectedImages),
       input.style, input.durationSeconds, copy.voiceoverScript, copy.socialCaption,
-      input.endCardName, input.endCardPhone, input.endCardEmail, input.endCardCta).run();
+      input.endCardName, input.endCardPhone, input.endCardEmail, input.endCardCta,
+      input.endCardPhotoUrl).run();
   return database().prepare("SELECT * FROM creative_projects WHERE id = ? LIMIT 1").bind(id).first<CreativeProjectRecord>();
 }
 
@@ -295,6 +306,7 @@ export function serializeCreativeProject(record: CreativeProjectRecord) {
     endCardPhone: record.end_card_phone,
     endCardEmail: record.end_card_email,
     endCardCta: record.end_card_cta,
+    endCardPhotoUrl: record.end_card_photo_url,
     status: record.status,
     createdAt: record.created_at,
   };

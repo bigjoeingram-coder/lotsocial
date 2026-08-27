@@ -23,3 +23,23 @@ export async function archiveRenderedVideo(jobId: string, associateEmail: string
 export async function getStoredVideo(storageKey: string) {
   return mediaBucket().get(storageKey);
 }
+
+export async function storeProfilePhoto(input: {
+  associateEmail: string;
+  photoId: string;
+  body: ArrayBuffer;
+  contentType: string;
+}) {
+  const safeOwner = input.associateEmail.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60) || "associate";
+  const key = `profile-photos/${input.photoId}`;
+  await mediaBucket().put(key, input.body, {
+    httpMetadata: { contentType: input.contentType, cacheControl: "public, max-age=86400" },
+    customMetadata: { associateEmail: input.associateEmail, owner: safeOwner, photoId: input.photoId },
+  });
+  return { storageKey: key };
+}
+
+export async function getStoredProfilePhoto(photoId: string) {
+  if (!/^[a-f0-9-]{36}\.(?:jpg|jpeg|png|webp)$/i.test(photoId)) return null;
+  return mediaBucket().get(`profile-photos/${photoId}`);
+}

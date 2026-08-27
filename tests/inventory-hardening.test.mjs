@@ -7,6 +7,8 @@ const hardeningClient = await readFile(new URL("../app/components/InventoryHarde
 const renderRoute = await readFile(new URL("../app/api/creative-projects/[id]/render/route.ts", import.meta.url), "utf8");
 const renderer = await readFile(new URL("../app/lib/rendering.ts", import.meta.url), "utf8");
 const creative = await readFile(new URL("../app/lib/creative.ts", import.meta.url), "utf8");
+const profileUploadRoute = await readFile(new URL("../app/api/profile-photos/route.ts", import.meta.url), "utf8");
+const moderation = await readFile(new URL("../app/lib/image-moderation.ts", import.meta.url), "utf8");
 const layout = await readFile(new URL("../app/layout.tsx", import.meta.url), "utf8");
 const app = await readFile(new URL("../app/components/AuthorizationApp.tsx", import.meta.url), "utf8");
 const css = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
@@ -76,14 +78,17 @@ test("rendered vehicle media fills dead space with same-image wallpaper and star
 test("rendered video ends with branded salesperson end card", () => {
   assert.match(renderer, /const endCardPhone = project\.end_card_phone \? `<div class="phone">\$\{escapeHtml\(project\.end_card_phone\)\}<\/div>` : ""/);
   assert.match(renderer, /const endCardEmail = project\.end_card_email \? `<div class="email">\$\{escapeHtml\(project\.end_card_email\)\}<\/div>` : ""/);
+  assert.match(renderer, /const endCardProfile = project\.end_card_photo_url \? `<img class="profile" src="\$\{escapeHtml\(project\.end_card_photo_url\)\}" alt="" \/>` : ""/);
   assert.match(renderer, /class="end-card"/);
   assert.match(renderer, /class="content"/);
+  assert.match(renderer, /class="profile"/);
   assert.match(renderer, /class="contact"/);
   assert.match(renderer, /<b>LotSocial<\/b>/);
   assert.match(renderer, /html,body\{margin:0\}/);
-  assert.match(renderer, /left:190px;right:190px;top:560px/);
-  assert.match(renderer, /\.phone\{display:block;margin:8px auto 0;color:#e8f1eb;font-size:29px;line-height:1\.22;font-weight:900/);
-  assert.match(renderer, /\.email\{display:block;margin:10px auto 0;color:#e8f1eb;font-size:24px;line-height:1\.22;font-weight:650/);
+  assert.match(renderer, /left:205px;right:205px;top:405px/);
+  assert.match(renderer, /\.profile\{display:block;width:250px;height:250px/);
+  assert.match(renderer, /\.phone\{display:block;margin:10px auto 0;color:#e8f1eb;font-size:31px;line-height:1\.22;font-weight:900/);
+  assert.match(renderer, /\.email\{display:block;margin:13px auto 0;color:#e8f1eb;font-size:24px;line-height:1\.22;font-weight:650/);
   assert.match(renderer, /text-align:center/);
   assert.match(renderer, /overflow-wrap:anywhere/);
   assert.match(renderer, /escapeHtml\(project\.end_card_cta\)/);
@@ -91,6 +96,22 @@ test("rendered video ends with branded salesperson end card", () => {
   assert.match(renderer, /escapeHtml\(vehicleLine\(vehicle\)\)/);
   assert.match(renderer, /css: endCardCss/);
   assert.match(renderer, /branded salesperson end card/);
+});
+
+test("profile photo upload is social-safety gated before use on the end card", () => {
+  assert.match(profileUploadRoute, /verifyProfilePhotoForSocial/);
+  assert.match(profileUploadRoute, /storeProfilePhoto/);
+  assert.match(profileUploadRoute, /\/api\/profile-photos\/\$\{photoId\}/);
+  assert.match(moderation, /omni-moderation-latest/);
+  assert.match(moderation, /IMAGE_MODERATION_API_KEY/);
+  assert.match(moderation, /OPENAI_API_KEY/);
+  assert.match(moderation, /not connected yet/);
+  assert.match(moderation, /result\?\.flagged/);
+  assert.match(app, /uploadEndCardPhoto/);
+  assert.match(app, /accept="image\/jpeg,image\/png,image\/webp"/);
+  assert.match(app, /endCardPhotoUrl/);
+  assert.match(creative, /end_card_photo_url TEXT NOT NULL DEFAULT ''/);
+  assert.match(creative, /ALTER TABLE creative_projects ADD COLUMN end_card_photo_url/);
 });
 
 test("creative shot picker uses swipeable four-photo pages on mobile", () => {
