@@ -1,0 +1,43 @@
+# LotSocial — State of the Company (Clarity Break, 2026-08-28)
+
+Auditor: Fable (Visionary seat). Repo at commit c63240a. Live context: semi-live on ChatGPT Sites, real salespeople testing.
+
+Format: one issue per line, [impact] — issue → why it matters.
+
+## Security & money
+
+- [HIGH] I-01 — `getChatGPTUser` trusts the `oai-authenticated-user-email` header with no proof the request came through OpenAI's proxy → if the worker is reachable at any direct URL (workers.dev or custom route), anyone can set that header and read/write/delete any associate's inventory, projects, and authorizations. Verify platform provenance or block direct routes.
+- [HIGH] I-02 — No rate limit or quota on `/api/vdp-imports` POST → each blocked import fires up to 6 external reader fetches plus a PAID Bright Data request; one eager tester or a loop burns real spend with zero cap or alert.
+- [MED-HIGH] I-03 — `/api/authorization-requests` POST sends email to any attacker-typed `managerEmail` with attacker-controlled names via Resend → signed-in user can use LotSocial as a spam cannon; hits sender reputation. No rate limit, no domain sanity check.
+- [MED] I-04 — Manager approval token never expires and doubles as the permanent management credential (`manageAuthorization` by token) → a forwarded or breached inbox controls the authorization forever. Add token expiry/rotation on decision.
+- [LOW] I-05 — `.env.example` omits BRIGHTDATA_API_KEY/BRIGHTDATA_ZONE/SHOTSTACK_API_KEY/SHOTSTACK_STAGE → env drift between devs/deploys is invisible until a silent fallback fires.
+
+## Correctness & the dead state machine
+
+- [HIGH] I-06 — Nothing in the codebase ever sets an authorization to status `active`, but `evaluateAuthorization` requires exactly `active` and the UI promises "enforcement will deny until Active" → the entire manager→provider→enforcement pipeline is a road to a door that never opens. Either build the activation transition or cut the flow to what's real (do less better).
+- [MED-HIGH] I-07 — Dealer Inspire listing-guess fallback parses ±5000 chars around VIN evidence on multi-vehicle inventory pages → price/mileage regexes can capture the NEIGHBORING vehicle's numbers; a salesperson publishes a wrong price with LotSocial's name on the video. Compliance-grade risk given real users.
+- [MED] I-08 — Module-level `schemaReady` caches a FAILED promise forever (vdp, authorization, creative all copy the pattern) → one transient D1 error poisons every subsequent request until redeploy. Reset on rejection.
+- [MED] I-09 — Runtime `CREATE TABLE IF NOT EXISTS` in three libs competes with drizzle migrations in `drizzle/` as a second source of schema truth → drift between environments is undetectable; migrations exist but aren't the authority.
+- [MED-LOW] I-10 — Delete route runs sequential per-project deletes with no transaction (D1 `batch` exists, unused) → a mid-flight failure leaves orphaned render jobs the code specifically claims to prevent.
+- [LOW] I-11 — `sourceUrlVariants` only toggles trailing slash → same VDP with ?utm params or case differences imports as a duplicate row despite the UNIQUE constraint's intent.
+
+## Process & proof
+
+- [HIGH] I-12 — Both test files assert regex matches against SOURCE TEXT, not behavior (`assert.match(deleteRoute, /DELETE FROM/)`) → the proof passes while the feature can be completely broken; this is the "proof that lies" anti-pattern, institutionalized.
+- [MED-HIGH] I-13 — CI triggers only on a stale feature branch (`build/delete-and-draft-revalidation`) plus narrow PR paths → pushes to main ship untested; the extractor (highest-churn, highest-risk file) has zero coverage of any kind.
+- [MED] I-14 — No import outcome telemetry beyond console.warn → with salespeople live, nobody knows the import success rate, which dealer hosts fail, or when Bright Data starts eating money. Failures are discovered by user complaint (the scavenger-hunt pattern already ruled against in INGRAM OS).
+
+## Fragility & debt
+
+- [MED] I-15 — Extraction chain leans on free unauthenticated r.jina.ai (including an intentionally nested double-reader hack) → third-party rate limits or a jina change silently kill the fallback with no signal.
+- [MED] I-16 — `app/lib/vdp.ts` (628 lines) mixes URL validation, three fetch strategies, two parsers, persistence, and serialization → god module; every extractor tweak risks persistence, and it's the file that changes most.
+- [MED] I-17 — `AuthorizationApp.tsx` is a 759-line client component with 38 useState hooks and 9 inline fetch flows → any UI change risks every UI feature; split by view.
+- [MED-LOW] I-18 — Hardcoded 23-make allowlist inside `candidateInventoryPaths` → fallback silently skips model-path guessing for any brand not on the list (no Ram trucks, no Jeep, no Chrysler, no Dodge — in a dealership app).
+- [LOW] I-19 — `vehicleName`/price-formatting logic duplicated across creative.ts and rendering.ts; `seed`/`vibeSeed` computed twice identically in createCopy → divergence bugs waiting.
+- [LOW] I-20 — Repo identity is still the starter's: package name `site-creator-vinext-starter`, starter README, leftover `examples/d1/` → onboarding confusion, and the README documents a different product.
+- [CLARIFY] I-21 — Phase 0 spec features (Claim the Sale, Standings, Rising Star, Hall of Fame) are entirely absent from the codebase → is this cycle about hardening what's live, or resuming the spec? Changes what the rocks are.
+
+## Assets worth protecting (not issues)
+
+- Compliance discipline in copy: facts allowlist, "price when captured" wording, 7-day ad expiry line, flavor mode constrained to puffery — this is the product's moat; no rock may weaken it.
+- Bright Data branch logging with credential redaction; token hashing at rest; SSRF guard on VDP URLs; per-associate scoping on every query.
