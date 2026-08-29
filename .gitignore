@@ -40,3 +40,7 @@ next-env.d.ts
 /.wrangler/
 /outputs/
 /work/
+
+# Deploy packaging output (regenerable, never committed)
+lotsocial-*.tar.gz
+sites-package-stage-*/
