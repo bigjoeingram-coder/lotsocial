@@ -37,6 +37,10 @@ Format: one issue per line, [impact] — issue → why it matters.
 - [LOW] I-20 — Repo identity is still the starter's: package name `site-creator-vinext-starter`, starter README, leftover `examples/d1/` → onboarding confusion, and the README documents a different product.
 - [CLARIFY] I-21 — Phase 0 spec features (Claim the Sale, Standings, Rising Star, Hall of Fame) are entirely absent from the codebase → is this cycle about hardening what's live, or resuming the spec? Changes what the rocks are.
 
+## Found during the build (added after the audit)
+
+- [MED-HIGH] I-22 — The live D1 database was created by the runtime `CREATE TABLE IF NOT EXISTS` bootstrap, not by the drizzle migrations, and the two declared DIFFERENT schemas: six primary key columns (`authorization_audit_events.id`, `authorization_requests.id`, `creative_projects.id`, `creative_render_jobs.id`, `imported_vehicles.id`, `provider_verifications.request_id`) were `PRIMARY KEY` in the bootstrap but `PRIMARY KEY NOT NULL` in the migrations, and SQLite genuinely allows NULL in a TEXT PRIMARY KEY column. Rock 1 corrected the bootstrap and added `npm run db:bootstrap-check` to keep them in lockstep, but `CREATE TABLE IF NOT EXISTS` cannot alter a table that already exists → the deployed database very likely still carries the nullable-id variant. This is I-09 confirmed as an actual divergence rather than a hypothetical one. Needs a real migration path plus a deploy-time verification of the live schema; not fixable from the bootstrap. Discovered 2026-08-28 by the bootstrap-vs-migrations check on its first run.
+
 ## Assets worth protecting (not issues)
 
 - Compliance discipline in copy: facts allowlist, "price when captured" wording, 7-day ad expiry line, flavor mode constrained to puffery — this is the product's moat; no rock may weaken it.

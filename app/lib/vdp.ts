@@ -1,4 +1,5 @@
-import { env } from "cloudflare:workers";
+import { database, ensureLotSocialSchema } from "./schema-bootstrap.ts";
+import type { LotSocialEnvironment } from "./schema-bootstrap.ts";
 
 export type ImportedVehicleRecord = {
   id: string;
@@ -40,49 +41,14 @@ export type ExtractedVehicle = {
   facts: Record<string, string>;
 };
 
-let schemaReady: Promise<void> | null = null;
 const IMPORT_DEADLINE_MS = 36_000;
 const DIRECT_FETCH_MS = 8_000;
 const READER_FETCH_MS = 14_000;
 const BRIGHTDATA_FETCH_MS = 25_000;
 const MAX_READER_ATTEMPTS = 6;
 
-function database() {
-  if (!env.DB) throw new Error("The inventory database is unavailable.");
-  return env.DB;
-}
-
-async function ensureVdpSchema() {
-  if (!schemaReady) {
-    const db = database();
-    schemaReady = db.batch([
-      db.prepare(`CREATE TABLE IF NOT EXISTS imported_vehicles (
-        id TEXT PRIMARY KEY,
-        associate_email TEXT NOT NULL,
-        source_url TEXT NOT NULL,
-        source_host TEXT NOT NULL,
-        title TEXT NOT NULL,
-        vin TEXT NOT NULL DEFAULT '',
-        stock_number TEXT NOT NULL DEFAULT '',
-        year TEXT NOT NULL DEFAULT '',
-        make TEXT NOT NULL DEFAULT '',
-        model TEXT NOT NULL DEFAULT '',
-        trim TEXT NOT NULL DEFAULT '',
-        price TEXT NOT NULL DEFAULT '',
-        currency TEXT NOT NULL DEFAULT 'USD',
-        description TEXT NOT NULL DEFAULT '',
-        image_urls TEXT NOT NULL DEFAULT '[]',
-        facts TEXT NOT NULL DEFAULT '{}',
-        source_type TEXT NOT NULL DEFAULT 'vdp_one_time',
-        authorization_certified_at TEXT NOT NULL,
-        imported_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        UNIQUE(associate_email, source_url)
-      )`),
-      db.prepare("CREATE INDEX IF NOT EXISTS imported_vehicles_associate_idx ON imported_vehicles(associate_email, imported_at DESC)"),
-    ]).then(() => undefined);
-  }
-  return schemaReady;
+async function ensureVdpSchema(env?: LotSocialEnvironment) {
+  return ensureLotSocialSchema(env);
 }
 
 function validatePublicUrl(value: string) {
@@ -365,9 +331,9 @@ async function extractFromDealerInspireListing(sourceUrl: URL, deadline: { expir
   return null;
 }
 
-async function fetchViaBrightData(url: URL, deadline: { expiresAt: number }): Promise<{ html: string; finalUrl: URL } | null> {
-  const apiKey = (env as unknown as { BRIGHTDATA_API_KEY?: string }).BRIGHTDATA_API_KEY;
-  const zone = (env as unknown as { BRIGHTDATA_ZONE?: string }).BRIGHTDATA_ZONE;
+async function fetchViaBrightData(url: URL, deadline: { expiresAt: number }, env?: LotSocialEnvironment): Promise<{ html: string; finalUrl: URL } | null> {
+  const apiKey = env?.BRIGHTDATA_API_KEY;
+  const zone = env?.BRIGHTDATA_ZONE;
   const envPresent = Boolean(apiKey);
   const zonePresent = Boolean(zone);
   const startedAt = Date.now();
@@ -414,12 +380,12 @@ async function fetchViaBrightData(url: URL, deadline: { expiresAt: number }): Pr
   }
 }
 
-export async function extractVehicleFromVdp(value: string): Promise<ExtractedVehicle> {
+export async function extractVehicleFromVdp(value: string, env?: LotSocialEnvironment): Promise<ExtractedVehicle> {
   const requestedUrl = validatePublicUrl(value);
   const deadline = createDeadline();
 
   async function viaListingOrThrow(reason: string): Promise<{ html: string; finalUrl: URL }> {
-    const viaBrightData = await fetchViaBrightData(requestedUrl, deadline);
+    const viaBrightData = await fetchViaBrightData(requestedUrl, deadline, env);
     if (viaBrightData) return viaBrightData;
     const listingVehicle = await extractFromDealerInspireListing(requestedUrl, deadline);
     if (listingVehicle) throw new ResolvedVehicle(listingVehicle);
@@ -560,12 +526,13 @@ async function parseVehicleHtml(html: string, finalUrl: URL): Promise<ExtractedV
   return extracted;
 }
 
-export async function saveImportedVehicle(associateEmail: string, vehicle: ExtractedVehicle) {
-  await ensureVdpSchema();
-  const existing = await database().prepare("SELECT id FROM imported_vehicles WHERE LOWER(associate_email) = LOWER(?) AND source_url = ? LIMIT 1").bind(associateEmail, vehicle.sourceUrl).first<{ id: string }>();
+export async function saveImportedVehicle(associateEmail: string, vehicle: ExtractedVehicle, env?: LotSocialEnvironment) {
+  await ensureVdpSchema(env);
+  const db = database(env, "inventory");
+  const existing = await db.prepare("SELECT id FROM imported_vehicles WHERE LOWER(associate_email) = LOWER(?) AND source_url = ? LIMIT 1").bind(associateEmail, vehicle.sourceUrl).first<{ id: string }>();
   const id = existing?.id ?? crypto.randomUUID();
   const certifiedAt = new Date().toISOString();
-  await database().prepare(`INSERT INTO imported_vehicles (
+  await db.prepare(`INSERT INTO imported_vehicles (
     id, associate_email, source_url, source_host, title, vin, stock_number, year, make,
     model, trim, price, currency, description, image_urls, facts, authorization_certified_at
   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -580,26 +547,26 @@ export async function saveImportedVehicle(associateEmail: string, vehicle: Extra
       vehicle.stockNumber, vehicle.year, vehicle.make, vehicle.model, vehicle.trim,
       vehicle.price, vehicle.currency, vehicle.description, JSON.stringify(vehicle.imageUrls),
       JSON.stringify(vehicle.facts), certifiedAt).run();
-  return getImportedVehicle(id, associateEmail);
+  return getImportedVehicle(id, associateEmail, env);
 }
 
-export async function getImportedVehicle(id: string, associateEmail: string) {
-  await ensureVdpSchema();
-  return database().prepare("SELECT * FROM imported_vehicles WHERE id = ? AND LOWER(associate_email) = LOWER(?) LIMIT 1").bind(id, associateEmail).first<ImportedVehicleRecord>();
+export async function getImportedVehicle(id: string, associateEmail: string, env?: LotSocialEnvironment) {
+  await ensureVdpSchema(env);
+  return database(env, "inventory").prepare("SELECT * FROM imported_vehicles WHERE id = ? AND LOWER(associate_email) = LOWER(?) LIMIT 1").bind(id, associateEmail).first<ImportedVehicleRecord>();
 }
 
-export async function getImportedVehicleBySourceUrl(associateEmail: string, sourceUrl: string) {
-  await ensureVdpSchema();
+export async function getImportedVehicleBySourceUrl(associateEmail: string, sourceUrl: string, env?: LotSocialEnvironment) {
+  await ensureVdpSchema(env);
   const variants = sourceUrlVariants(sourceUrl);
   const placeholders = variants.map(() => "?").join(", ");
-  return database().prepare(`SELECT * FROM imported_vehicles WHERE LOWER(associate_email) = LOWER(?) AND source_url IN (${placeholders}) ORDER BY updated_at DESC LIMIT 1`)
+  return database(env, "inventory").prepare(`SELECT * FROM imported_vehicles WHERE LOWER(associate_email) = LOWER(?) AND source_url IN (${placeholders}) ORDER BY updated_at DESC LIMIT 1`)
     .bind(associateEmail, ...variants)
     .first<ImportedVehicleRecord>();
 }
 
-export async function listImportedVehicles(associateEmail: string) {
-  await ensureVdpSchema();
-  const result = await database().prepare("SELECT * FROM imported_vehicles WHERE LOWER(associate_email) = LOWER(?) ORDER BY imported_at DESC LIMIT 100").bind(associateEmail).all<ImportedVehicleRecord>();
+export async function listImportedVehicles(associateEmail: string, env?: LotSocialEnvironment) {
+  await ensureVdpSchema(env);
+  const result = await database(env, "inventory").prepare("SELECT * FROM imported_vehicles WHERE LOWER(associate_email) = LOWER(?) ORDER BY imported_at DESC LIMIT 100").bind(associateEmail).all<ImportedVehicleRecord>();
   return result.results;
 }
 

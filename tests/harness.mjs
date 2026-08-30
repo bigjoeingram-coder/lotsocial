@@ -1,0 +1,192 @@
+import assert from "node:assert/strict";
+import { readdir } from "node:fs/promises";
+import { join } from "node:path";
+
+export const signedInUser = {
+  displayName: "Joe Associate",
+  email: "joe@example.com",
+  fullName: "Joe Associate",
+};
+
+export async function json(response) {
+  return response.json();
+}
+
+export function jsonRequest(url, method, body) {
+  return new Request(url, {
+    method,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+class FakeStatement {
+  constructor(db, sql) {
+    this.db = db;
+    this.sql = sql;
+    this.values = [];
+  }
+
+  bind(...values) {
+    const statement = new FakeStatement(this.db, this.sql);
+    statement.values = values;
+    return statement;
+  }
+
+  async first() {
+    return this.db.first(this.sql, this.values);
+  }
+
+  async all() {
+    return { results: this.db.all(this.sql, this.values) };
+  }
+
+  async run() {
+    return { meta: { changes: this.db.run(this.sql, this.values) } };
+  }
+}
+
+export class FakeD1 {
+  constructor(seed = {}) {
+    this.importedVehicles = [...(seed.importedVehicles ?? [])];
+    this.creativeProjects = [...(seed.creativeProjects ?? [])];
+    this.creativeRenderJobs = [...(seed.creativeRenderJobs ?? [])];
+    this.preparedSql = [];
+  }
+
+  prepare(sql) {
+    this.preparedSql.push(sql);
+    return new FakeStatement(this, sql);
+  }
+
+  async batch(statements) {
+    return Promise.all(statements.map((statement) => statement.run()));
+  }
+
+  first(sql, values) {
+    if (matches(sql, "SELECT id FROM imported_vehicles")) {
+      const [associateEmail, sourceUrl] = values;
+      return this.importedVehicles.find((vehicle) =>
+        sameEmail(vehicle.associate_email, associateEmail) && vehicle.source_url === sourceUrl
+      ) ?? null;
+    }
+    assert.fail(`Unexpected first() SQL: ${sql}`);
+  }
+
+  all(sql, values) {
+    if (matches(sql, "SELECT id FROM creative_projects")) {
+      const [vehicleId, associateEmail] = values;
+      return this.creativeProjects
+        .filter((project) => project.vehicle_id === vehicleId && sameEmail(project.associate_email, associateEmail))
+        .map((project) => ({ id: project.id }));
+    }
+    assert.fail(`Unexpected all() SQL: ${sql}`);
+  }
+
+  run(sql, values) {
+    if (matches(sql, "CREATE TABLE") || matches(sql, "CREATE INDEX")) return 0;
+    if (matches(sql, "DELETE FROM creative_render_jobs")) {
+      const [projectId, associateEmail] = values;
+      return removeMatching(this.creativeRenderJobs, (job) =>
+        job.project_id === projectId && sameEmail(job.associate_email, associateEmail)
+      );
+    }
+    if (matches(sql, "DELETE FROM creative_projects")) {
+      const [vehicleId, associateEmail] = values;
+      return removeMatching(this.creativeProjects, (project) =>
+        project.vehicle_id === vehicleId && sameEmail(project.associate_email, associateEmail)
+      );
+    }
+    if (matches(sql, "DELETE FROM imported_vehicles")) {
+      const [vehicleId, associateEmail] = values;
+      return removeMatching(this.importedVehicles, (vehicle) =>
+        vehicle.id === vehicleId && sameEmail(vehicle.associate_email, associateEmail)
+      );
+    }
+    assert.fail(`Unexpected run() SQL: ${sql}`);
+  }
+}
+
+function matches(sql, fragment) {
+  return sql.replace(/\s+/g, " ").trim().toLowerCase().includes(fragment.toLowerCase());
+}
+
+function sameEmail(left, right) {
+  return String(left).toLowerCase() === String(right).toLowerCase();
+}
+
+function removeMatching(rows, predicate) {
+  const before = rows.length;
+  for (let index = rows.length - 1; index >= 0; index -= 1) {
+    if (predicate(rows[index])) rows.splice(index, 1);
+  }
+  return before - rows.length;
+}
+
+export function importedVehicle(overrides = {}) {
+  return {
+    id: "veh_1",
+    associate_email: "joe@example.com",
+    source_url: "https://dealer.example/vdp/1",
+    source_host: "dealer.example",
+    title: "2026 Test Vehicle",
+    vin: "1HGBH41JXMN109186",
+    stock_number: "A1",
+    year: "2026",
+    make: "Test",
+    model: "Vehicle",
+    trim: "",
+    price: "45000",
+    currency: "USD",
+    description: "",
+    image_urls: "[]",
+    facts: "{}",
+    source_type: "vdp_one_time",
+    authorization_certified_at: "2026-08-29T00:00:00.000Z",
+    imported_at: "2026-08-29 00:00:00",
+    updated_at: "2026-08-29 00:00:00",
+    ...overrides,
+  };
+}
+
+export async function startTier2Worker() {
+  const { Miniflare } = await loadMiniflare();
+  const modules = (await serverModules("dist/server")).map((path) => ({
+    type: "ESModule",
+    path,
+  }));
+  const mf = new Miniflare({
+    modules,
+    compatibilityDate: "2026-05-15",
+    compatibilityFlags: ["nodejs_compat"],
+    scriptPath: "dist/server/index.js",
+  });
+
+  return {
+    fetch: (input, init) => mf.dispatchFetch(input, init),
+    dispose: () => mf.dispose(),
+  };
+}
+
+async function loadMiniflare() {
+  try {
+    return await import("miniflare");
+  } catch (error) {
+    throw new Error("Miniflare is required for Tier 2 worker tests. Install project devDependencies before running tests.", {
+      cause: error,
+    });
+  }
+}
+
+async function serverModules(directory) {
+  const entries = [];
+  for (const entry of await readdir(directory, { withFileTypes: true })) {
+    const path = join(directory, entry.name).replaceAll("\\", "/");
+    if (entry.isDirectory()) {
+      entries.push(...await serverModules(path));
+    } else if (entry.isFile() && path.endsWith(".js")) {
+      entries.push(path);
+    }
+  }
+  return entries;
+}

@@ -1,5 +1,6 @@
-import { env } from "cloudflare:workers";
-import { ImportedVehicleRecord } from "./vdp";
+import { database, ensureLotSocialSchema } from "./schema-bootstrap.ts";
+import type { LotSocialEnvironment } from "./schema-bootstrap.ts";
+import type { ImportedVehicleRecord } from "./vdp.ts";
 
 export type CreativeProjectRecord = {
   id: string;
@@ -34,55 +35,8 @@ export type CreativeRenderJobRecord = {
   updated_at: string;
 };
 
-let schemaReady: Promise<void> | null = null;
-
-function database() {
-  if (!env.DB) throw new Error("The creative database is unavailable.");
-  return env.DB;
-}
-
-async function ensureCreativeSchema() {
-  if (!schemaReady) {
-    const db = database();
-    schemaReady = db.batch([
-      db.prepare(`CREATE TABLE IF NOT EXISTS creative_projects (
-        id TEXT PRIMARY KEY,
-        vehicle_id TEXT NOT NULL,
-        associate_email TEXT NOT NULL,
-        selected_images TEXT NOT NULL DEFAULT '[]',
-        style TEXT NOT NULL,
-        duration_seconds INTEGER NOT NULL DEFAULT 30,
-        voiceover_script TEXT NOT NULL,
-        social_caption TEXT NOT NULL,
-        end_card_name TEXT NOT NULL,
-        end_card_phone TEXT NOT NULL DEFAULT '',
-        end_card_email TEXT NOT NULL DEFAULT '',
-        end_card_cta TEXT NOT NULL DEFAULT 'Message me for details',
-        status TEXT NOT NULL DEFAULT 'draft',
-        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-      )`),
-      db.prepare("CREATE INDEX IF NOT EXISTS creative_projects_associate_idx ON creative_projects(associate_email, created_at DESC)"),
-      db.prepare("CREATE INDEX IF NOT EXISTS creative_projects_vehicle_idx ON creative_projects(vehicle_id, created_at DESC)"),
-      db.prepare(`CREATE TABLE IF NOT EXISTS creative_render_jobs (
-        id TEXT PRIMARY KEY,
-        project_id TEXT NOT NULL,
-        associate_email TEXT NOT NULL,
-        provider TEXT NOT NULL DEFAULT 'shotstack',
-        provider_render_id TEXT NOT NULL DEFAULT '',
-        status TEXT NOT NULL DEFAULT 'prepared',
-        render_plan TEXT NOT NULL,
-        output_url TEXT NOT NULL DEFAULT '',
-        storage_key TEXT NOT NULL DEFAULT '',
-        error_message TEXT NOT NULL DEFAULT '',
-        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-      )`),
-      db.prepare("CREATE INDEX IF NOT EXISTS creative_render_jobs_project_idx ON creative_render_jobs(project_id, created_at DESC)"),
-      db.prepare("CREATE INDEX IF NOT EXISTS creative_render_jobs_associate_idx ON creative_render_jobs(associate_email, created_at DESC)"),
-    ]).then(() => undefined);
-  }
-  return schemaReady;
+async function ensureCreativeSchema(env?: LotSocialEnvironment) {
+  return ensureLotSocialSchema(env);
 }
 
 function vehicleName(vehicle: ImportedVehicleRecord) {
@@ -223,11 +177,13 @@ export async function saveCreativeProject(input: {
   endCardEmail: string;
   endCardCta: string;
   flavor?: boolean;
+  env?: LotSocialEnvironment;
 }) {
-  await ensureCreativeSchema();
+  await ensureCreativeSchema(input.env);
+  const db = database(input.env, "creative");
   const id = crypto.randomUUID();
   const copy = createCopy(input.vehicle, input.style, input.durationSeconds, input.endCardName, input.endCardCta, input.flavor === true);
-  await database().prepare(`INSERT INTO creative_projects (
+  await db.prepare(`INSERT INTO creative_projects (
     id, vehicle_id, associate_email, selected_images, style, duration_seconds,
     voiceover_script, social_caption, end_card_name, end_card_phone, end_card_email,
     end_card_cta, status
@@ -235,7 +191,7 @@ export async function saveCreativeProject(input: {
     .bind(id, input.vehicle.id, input.associateEmail, JSON.stringify(input.selectedImages),
       input.style, input.durationSeconds, copy.voiceoverScript, copy.socialCaption,
       input.endCardName, input.endCardPhone, input.endCardEmail, input.endCardCta).run();
-  return database().prepare("SELECT * FROM creative_projects WHERE id = ? LIMIT 1").bind(id).first<CreativeProjectRecord>();
+  return db.prepare("SELECT * FROM creative_projects WHERE id = ? LIMIT 1").bind(id).first<CreativeProjectRecord>();
 }
 
 export function serializeCreativeProject(record: CreativeProjectRecord) {
@@ -256,9 +212,9 @@ export function serializeCreativeProject(record: CreativeProjectRecord) {
   };
 }
 
-export async function getCreativeProject(id: string, associateEmail: string) {
-  await ensureCreativeSchema();
-  return database().prepare("SELECT * FROM creative_projects WHERE id = ? AND associate_email = ? LIMIT 1")
+export async function getCreativeProject(id: string, associateEmail: string, env?: LotSocialEnvironment) {
+  await ensureCreativeSchema(env);
+  return database(env, "creative").prepare("SELECT * FROM creative_projects WHERE id = ? AND associate_email = ? LIMIT 1")
     .bind(id, associateEmail).first<CreativeProjectRecord>();
 }
 
@@ -269,22 +225,24 @@ export async function createRenderJob(input: {
   providerRenderId?: string;
   status: string;
   errorMessage?: string;
+  env?: LotSocialEnvironment;
 }) {
-  await ensureCreativeSchema();
+  await ensureCreativeSchema(input.env);
+  const db = database(input.env, "creative");
   const id = crypto.randomUUID();
-  await database().prepare(`INSERT INTO creative_render_jobs (
+  await db.prepare(`INSERT INTO creative_render_jobs (
     id, project_id, associate_email, provider, provider_render_id, status,
     render_plan, error_message
   ) VALUES (?, ?, ?, 'shotstack', ?, ?, ?, ?)`)
     .bind(id, input.projectId, input.associateEmail, input.providerRenderId ?? "",
       input.status, JSON.stringify(input.renderPlan), input.errorMessage ?? "").run();
-  return database().prepare("SELECT * FROM creative_render_jobs WHERE id = ? LIMIT 1")
+  return db.prepare("SELECT * FROM creative_render_jobs WHERE id = ? LIMIT 1")
     .bind(id).first<CreativeRenderJobRecord>();
 }
 
-export async function getLatestRenderJob(projectId: string, associateEmail: string) {
-  await ensureCreativeSchema();
-  return database().prepare(`SELECT * FROM creative_render_jobs
+export async function getLatestRenderJob(projectId: string, associateEmail: string, env?: LotSocialEnvironment) {
+  await ensureCreativeSchema(env);
+  return database(env, "creative").prepare(`SELECT * FROM creative_render_jobs
     WHERE project_id = ? AND associate_email = ?
     ORDER BY created_at DESC LIMIT 1`)
     .bind(projectId, associateEmail).first<CreativeRenderJobRecord>();
@@ -297,19 +255,21 @@ export async function updateRenderJob(input: {
   outputUrl?: string;
   storageKey?: string;
   errorMessage?: string;
+  env?: LotSocialEnvironment;
 }) {
-  await ensureCreativeSchema();
-  await database().prepare(`UPDATE creative_render_jobs
+  await ensureCreativeSchema(input.env);
+  const db = database(input.env, "creative");
+  await db.prepare(`UPDATE creative_render_jobs
     SET status = ?, output_url = ?, storage_key = ?, error_message = ?, updated_at = CURRENT_TIMESTAMP
     WHERE id = ? AND associate_email = ?`)
     .bind(input.status, input.outputUrl ?? "", input.storageKey ?? "", input.errorMessage ?? "", input.id, input.associateEmail).run();
-  return database().prepare("SELECT * FROM creative_render_jobs WHERE id = ? AND associate_email = ? LIMIT 1")
+  return db.prepare("SELECT * FROM creative_render_jobs WHERE id = ? AND associate_email = ? LIMIT 1")
     .bind(input.id, input.associateEmail).first<CreativeRenderJobRecord>();
 }
 
-export async function getRenderJob(id: string, associateEmail: string) {
-  await ensureCreativeSchema();
-  return database().prepare("SELECT * FROM creative_render_jobs WHERE id = ? AND associate_email = ? LIMIT 1")
+export async function getRenderJob(id: string, associateEmail: string, env?: LotSocialEnvironment) {
+  await ensureCreativeSchema(env);
+  return database(env, "creative").prepare("SELECT * FROM creative_render_jobs WHERE id = ? AND associate_email = ? LIMIT 1")
     .bind(id, associateEmail).first<CreativeRenderJobRecord>();
 }
 

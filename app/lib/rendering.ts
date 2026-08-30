@@ -1,19 +1,20 @@
-import { env } from "cloudflare:workers";
-import type { CreativeProjectRecord } from "./creative";
-import type { ImportedVehicleRecord } from "./vdp";
+import { resolveLotSocialEnvironment } from "./schema-bootstrap.ts";
+import type { LotSocialEnvironment } from "./schema-bootstrap.ts";
+import type { CreativeProjectRecord } from "./creative.ts";
+import type { ImportedVehicleRecord } from "./vdp.ts";
 
 type RenderEnvironment = { SHOTSTACK_API_KEY?: string; SHOTSTACK_STAGE?: string };
 
-function renderEnvironment() {
-  const runtime = env as unknown as RenderEnvironment;
+function renderEnvironment(env?: LotSocialEnvironment) {
+  const runtime = resolveLotSocialEnvironment(env) as RenderEnvironment;
   return {
     apiKey: runtime.SHOTSTACK_API_KEY?.trim() ?? "",
     stage: runtime.SHOTSTACK_STAGE === "v1" ? "v1" : "stage",
   };
 }
 
-export function rendererIsConfigured() {
-  return Boolean(renderEnvironment().apiKey);
+export function rendererIsConfigured(env?: LotSocialEnvironment) {
+  return Boolean(renderEnvironment(env).apiKey);
 }
 
 function escapeHtml(value: string) {
@@ -74,8 +75,8 @@ export function buildVerticalRenderPlan(project: CreativeProjectRecord, vehicle:
   };
 }
 
-export async function submitRender(plan: ReturnType<typeof buildVerticalRenderPlan>) {
-  const { apiKey, stage } = renderEnvironment();
+export async function submitRender(plan: ReturnType<typeof buildVerticalRenderPlan>, env?: LotSocialEnvironment) {
+  const { apiKey, stage } = renderEnvironment(env);
   if (!apiKey) return { status: "awaiting_provider_setup", providerRenderId: "", errorMessage: "The production renderer is not connected yet." };
 
   const response = await fetch(`https://api.shotstack.io/edit/${stage}/render`, {
@@ -90,8 +91,8 @@ export async function submitRender(plan: ReturnType<typeof buildVerticalRenderPl
   return { status: "queued", providerRenderId: payload.response.id, errorMessage: "" };
 }
 
-export async function checkRender(providerRenderId: string) {
-  const { apiKey, stage } = renderEnvironment();
+export async function checkRender(providerRenderId: string, env?: LotSocialEnvironment) {
+  const { apiKey, stage } = renderEnvironment(env);
   if (!apiKey) return null;
   const response = await fetch(`https://api.shotstack.io/edit/${stage}/render/${encodeURIComponent(providerRenderId)}`, {
     headers: { "x-api-key": apiKey },
