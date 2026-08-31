@@ -19,7 +19,7 @@ type RouteUser = {
 type RenderContext = { params: Promise<{ id: string }> };
 
 type CreativeRenderDependencies = {
-  getUser(): Promise<RouteUser | null>;
+  associate: RouteUser;
   getCreativeProject?: typeof getCreativeProject;
   getLatestRenderJob?: typeof getLatestRenderJob;
   rendererIsConfigured?: typeof rendererIsConfigured;
@@ -48,8 +48,7 @@ export async function handleCreativeRenderPost(
   context: RenderContext,
   dependencies: CreativeRenderDependencies,
 ) {
-  const user = await dependencies.getUser();
-  if (!user) return Response.json({ error: "Associate sign-in is required." }, { status: 401 });
+  const user = dependencies.associate;
   const { id } = await context.params;
   const project = await (dependencies.getCreativeProject ?? getCreativeProject)(id, user.email, env);
   if (!project) return Response.json({ error: "That creative project was not found." }, { status: 404 });
@@ -87,8 +86,7 @@ export async function handleCreativeRenderGet(
   context: RenderContext,
   dependencies: CreativeRenderDependencies,
 ) {
-  const user = await dependencies.getUser();
-  if (!user) return Response.json({ error: "Associate sign-in is required." }, { status: 401 });
+  const user = dependencies.associate;
   const { id } = await context.params;
   const project = await (dependencies.getCreativeProject ?? getCreativeProject)(id, user.email, env);
   if (!project) return Response.json({ error: "That creative project was not found." }, { status: 404 });

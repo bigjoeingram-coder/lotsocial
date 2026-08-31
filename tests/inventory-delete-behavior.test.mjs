@@ -26,7 +26,7 @@ test("inventory deletion removes only the signed-in associate's vehicle, project
       sourceUrl: "https://dealer.example/vdp/1",
     }),
     { DB: db },
-    { getUser: async () => signedInUser },
+    { associate: signedInUser },
   );
 
   assert.equal(response.status, 200);
@@ -48,7 +48,7 @@ test("inventory deletion returns 404 when the source belongs to another associat
       sourceUrl: "https://dealer.example/vdp/1",
     }),
     { DB: db },
-    { getUser: async () => signedInUser },
+    { associate: signedInUser },
   );
 
   assert.equal(response.status, 404);

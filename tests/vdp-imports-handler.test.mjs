@@ -1,16 +1,17 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { handleVdpImportsGet, handleVdpImportsPost } from "../app/lib/vdp-imports-handler.ts";
-import { importedVehicle, json, jsonRequest, signedInUser } from "./harness.mjs";
+import { FakeD1, importedVehicle, json, jsonRequest, signedInUser, testEnv } from "./harness.mjs";
 
 test("VDP handlers return real Responses under plain node --test", async () => {
-  const response = await handleVdpImportsGet(new Request("https://app.example/api/vdp-imports"), {}, {
-    getUser: async () => null,
+  const response = await handleVdpImportsGet(new Request("https://app.example/api/vdp-imports"), testEnv(), {
+    associate: signedInUser,
+    listImportedVehicles: async () => [],
   });
 
   assert.equal(response instanceof Response, true);
-  assert.equal(response.status, 401);
-  assert.deepEqual(await json(response), { error: "Associate sign-in is required." });
+  assert.equal(response.status, 200);
+  assert.deepEqual(await json(response), { vehicles: [] });
 });
 
 test("VDP import rejects unconfirmed marketing authority before extraction", async () => {
@@ -18,8 +19,8 @@ test("VDP import rejects unconfirmed marketing authority before extraction", asy
   const response = await handleVdpImportsPost(jsonRequest("https://app.example/api/vdp-imports", "POST", {
     sourceUrl: "https://dealer.example/vdp/1",
     authorizedToMarket: false,
-  }), {}, {
-    getUser: async () => signedInUser,
+  }), testEnv(), {
+    associate: signedInUser,
     extractVehicleFromVdp: async () => {
       extracted = true;
       throw new Error("should not extract");
@@ -36,8 +37,8 @@ test("VDP import reuses an existing source record before scraping", async () => 
   const response = await handleVdpImportsPost(jsonRequest("https://app.example/api/vdp-imports", "POST", {
     sourceUrl: " https://dealer.example/vdp/1 ",
     authorizedToMarket: true,
-  }), {}, {
-    getUser: async () => signedInUser,
+  }), testEnv({ DB: new FakeD1() }), {
+    associate: signedInUser,
     getImportedVehicleBySourceUrl: async (associateEmail, sourceUrl) => {
       assert.equal(associateEmail, signedInUser.email);
       assert.equal(sourceUrl, "https://dealer.example/vdp/1");
@@ -77,8 +78,8 @@ test("VDP import scrapes and saves when no existing source record exists", async
   const response = await handleVdpImportsPost(jsonRequest("https://app.example/api/vdp-imports", "POST", {
     sourceUrl: "https://dealer.example/vdp/2",
     authorizedToMarket: true,
-  }), {}, {
-    getUser: async () => signedInUser,
+  }), testEnv({ DB: new FakeD1() }), {
+    associate: signedInUser,
     getImportedVehicleBySourceUrl: async () => null,
     extractVehicleFromVdp: async (sourceUrl) => {
       assert.equal(sourceUrl, "https://dealer.example/vdp/2");

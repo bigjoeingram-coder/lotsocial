@@ -17,6 +17,19 @@ const eslintConfig = defineConfig([
     "sites-package-stage-*/**",
     "next-env.d.ts",
   ]),
+  {
+    files: ["**/*.{js,mjs,cjs,ts,tsx}"],
+    ignores: ["app/chatgpt-auth.ts"],
+    rules: {
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector: "CallExpression[callee.property.name='get'] > Literal[value=/^oai-/i]",
+          message: "Read oai-* identity headers only inside requireAssociate() in app/chatgpt-auth.ts.",
+        },
+      ],
+    },
+  },
   // Pre-existing violations live in deferred I-17 UI refactor files; keep these rules enforced elsewhere.
   {
     files: [

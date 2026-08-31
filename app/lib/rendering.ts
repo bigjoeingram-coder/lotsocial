@@ -1,19 +1,18 @@
-import { resolveLotSocialEnvironment } from "./schema-bootstrap.ts";
 import type { LotSocialEnvironment } from "./schema-bootstrap.ts";
 import type { CreativeProjectRecord } from "./creative.ts";
 import type { ImportedVehicleRecord } from "./vdp.ts";
 
 type RenderEnvironment = { SHOTSTACK_API_KEY?: string; SHOTSTACK_STAGE?: string };
 
-function renderEnvironment(env?: LotSocialEnvironment) {
-  const runtime = resolveLotSocialEnvironment(env) as RenderEnvironment;
+function renderEnvironment(env: LotSocialEnvironment) {
+  const runtime = env as RenderEnvironment;
   return {
     apiKey: runtime.SHOTSTACK_API_KEY?.trim() ?? "",
     stage: runtime.SHOTSTACK_STAGE === "v1" ? "v1" : "stage",
   };
 }
 
-export function rendererIsConfigured(env?: LotSocialEnvironment) {
+export function rendererIsConfigured(env: LotSocialEnvironment) {
   return Boolean(renderEnvironment(env).apiKey);
 }
 
@@ -75,7 +74,7 @@ export function buildVerticalRenderPlan(project: CreativeProjectRecord, vehicle:
   };
 }
 
-export async function submitRender(plan: ReturnType<typeof buildVerticalRenderPlan>, env?: LotSocialEnvironment) {
+export async function submitRender(plan: ReturnType<typeof buildVerticalRenderPlan>, env: LotSocialEnvironment) {
   const { apiKey, stage } = renderEnvironment(env);
   if (!apiKey) return { status: "awaiting_provider_setup", providerRenderId: "", errorMessage: "The production renderer is not connected yet." };
 
@@ -91,7 +90,7 @@ export async function submitRender(plan: ReturnType<typeof buildVerticalRenderPl
   return { status: "queued", providerRenderId: payload.response.id, errorMessage: "" };
 }
 
-export async function checkRender(providerRenderId: string, env?: LotSocialEnvironment) {
+export async function checkRender(providerRenderId: string, env: LotSocialEnvironment) {
   const { apiKey, stage } = renderEnvironment(env);
   if (!apiKey) return null;
   const response = await fetch(`https://api.shotstack.io/edit/${stage}/render/${encodeURIComponent(providerRenderId)}`, {

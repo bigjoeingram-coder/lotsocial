@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { index, integer, primaryKey, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 export const authorizationRequests = sqliteTable("authorization_requests", {
   id: text("id").primaryKey(),
@@ -124,4 +124,17 @@ export const creativeRenderJobs = sqliteTable("creative_render_jobs", {
 }, (table) => [
   index("creative_render_jobs_project_idx").on(table.projectId, table.createdAt),
   index("creative_render_jobs_associate_idx").on(table.associateEmail, table.createdAt),
+]);
+
+export const rateLimitCounters = sqliteTable("rate_limit_counters", {
+  counterKey: text("counter_key").notNull(),
+  counterScope: text("counter_scope").notNull(),
+  counterSubject: text("counter_subject").notNull(),
+  counterDay: text("counter_day").notNull(),
+  count: integer("count").notNull().default(0),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [
+  primaryKey({ columns: [table.counterKey, table.counterDay] }),
+  index("rate_limit_counters_scope_day_idx").on(table.counterScope, table.counterDay),
 ]);

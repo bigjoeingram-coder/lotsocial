@@ -1,12 +1,25 @@
 import assert from "node:assert/strict";
 import { readdir } from "node:fs/promises";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 
 export const signedInUser = {
   displayName: "Joe Associate",
   email: "joe@example.com",
   fullName: "Joe Associate",
 };
+
+export function testEnv(overrides = {}) {
+  return {
+    LOTSOCIAL_EXPECTED_SITES_HOSTNAME: "lotsocial.test",
+    LOTSOCIAL_ASSOCIATE_ALLOWLIST: signedInUser.email,
+    LOTSOCIAL_DAILY_VDP_IMPORT_CAP: "25",
+    LOTSOCIAL_DAILY_AUTHORIZATION_REQUEST_CAP: "10",
+    LOTSOCIAL_DAILY_MANAGER_EMAIL_CAP: "5",
+    LOTSOCIAL_MANAGER_EMAIL_DOMAIN_ALLOWLIST: "",
+    ...overrides,
+  };
+}
 
 export async function json(response) {
   return response.json();
@@ -51,6 +64,7 @@ export class FakeD1 {
     this.importedVehicles = [...(seed.importedVehicles ?? [])];
     this.creativeProjects = [...(seed.creativeProjects ?? [])];
     this.creativeRenderJobs = [...(seed.creativeRenderJobs ?? [])];
+    this.rateLimitCounters = new Map();
     this.preparedSql = [];
   }
 
@@ -64,6 +78,20 @@ export class FakeD1 {
   }
 
   first(sql, values) {
+    if (matches(sql, "INSERT INTO rate_limit_counters")) {
+      const [counterKey, counterScope, counterSubject, counterDay] = values;
+      const key = `${counterKey}:${counterDay}`;
+      const current = this.rateLimitCounters.get(key) ?? {
+        counter_key: counterKey,
+        counter_scope: counterScope,
+        counter_subject: counterSubject,
+        counter_day: counterDay,
+        count: 0,
+      };
+      current.count += 1;
+      this.rateLimitCounters.set(key, current);
+      return { count: current.count };
+    }
     if (matches(sql, "SELECT id FROM imported_vehicles")) {
       const [associateEmail, sourceUrl] = values;
       return this.importedVehicles.find((vehicle) =>
@@ -104,6 +132,55 @@ export class FakeD1 {
       );
     }
     assert.fail(`Unexpected run() SQL: ${sql}`);
+  }
+}
+
+class SqliteStatement {
+  constructor(db, sql) {
+    this.db = db;
+    this.sql = sql;
+    this.values = [];
+  }
+
+  bind(...values) {
+    const statement = new SqliteStatement(this.db, this.sql);
+    statement.values = values;
+    return statement;
+  }
+
+  async first() {
+    return this.db.prepare(this.sql).get(...this.values) ?? null;
+  }
+
+  async all() {
+    return { results: this.db.prepare(this.sql).all(...this.values) };
+  }
+
+  async run() {
+    const result = this.db.prepare(this.sql).run(...this.values);
+    return { meta: { changes: result.changes } };
+  }
+}
+
+export class SqliteD1 {
+  constructor() {
+    this.db = new DatabaseSync(":memory:");
+  }
+
+  prepare(sql) {
+    return new SqliteStatement(this.db, sql);
+  }
+
+  async batch(statements) {
+    return Promise.all(statements.map((statement) => statement.run()));
+  }
+
+  close() {
+    this.db.close();
+  }
+
+  rows(sql, ...values) {
+    return this.db.prepare(sql).all(...values);
   }
 }
 
@@ -149,7 +226,7 @@ export function importedVehicle(overrides = {}) {
   };
 }
 
-export async function startTier2Worker() {
+export async function startTier2Worker(bindings = {}) {
   const { Miniflare } = await loadMiniflare();
   const modules = (await serverModules("dist/server")).map((path) => ({
     type: "ESModule",
@@ -160,6 +237,8 @@ export async function startTier2Worker() {
     compatibilityDate: "2026-05-15",
     compatibilityFlags: ["nodejs_compat"],
     scriptPath: "dist/server/index.js",
+    d1Databases: ["DB"],
+    bindings: testEnv(bindings),
   });
 
   return {

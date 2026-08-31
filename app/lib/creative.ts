@@ -35,7 +35,7 @@ export type CreativeRenderJobRecord = {
   updated_at: string;
 };
 
-async function ensureCreativeSchema(env?: LotSocialEnvironment) {
+async function ensureCreativeSchema(env: LotSocialEnvironment) {
   return ensureLotSocialSchema(env);
 }
 
@@ -177,7 +177,7 @@ export async function saveCreativeProject(input: {
   endCardEmail: string;
   endCardCta: string;
   flavor?: boolean;
-  env?: LotSocialEnvironment;
+  env: LotSocialEnvironment;
 }) {
   await ensureCreativeSchema(input.env);
   const db = database(input.env, "creative");
@@ -212,7 +212,7 @@ export function serializeCreativeProject(record: CreativeProjectRecord) {
   };
 }
 
-export async function getCreativeProject(id: string, associateEmail: string, env?: LotSocialEnvironment) {
+export async function getCreativeProject(id: string, associateEmail: string, env: LotSocialEnvironment) {
   await ensureCreativeSchema(env);
   return database(env, "creative").prepare("SELECT * FROM creative_projects WHERE id = ? AND associate_email = ? LIMIT 1")
     .bind(id, associateEmail).first<CreativeProjectRecord>();
@@ -225,7 +225,7 @@ export async function createRenderJob(input: {
   providerRenderId?: string;
   status: string;
   errorMessage?: string;
-  env?: LotSocialEnvironment;
+  env: LotSocialEnvironment;
 }) {
   await ensureCreativeSchema(input.env);
   const db = database(input.env, "creative");
@@ -240,7 +240,7 @@ export async function createRenderJob(input: {
     .bind(id).first<CreativeRenderJobRecord>();
 }
 
-export async function getLatestRenderJob(projectId: string, associateEmail: string, env?: LotSocialEnvironment) {
+export async function getLatestRenderJob(projectId: string, associateEmail: string, env: LotSocialEnvironment) {
   await ensureCreativeSchema(env);
   return database(env, "creative").prepare(`SELECT * FROM creative_render_jobs
     WHERE project_id = ? AND associate_email = ?
@@ -255,7 +255,7 @@ export async function updateRenderJob(input: {
   outputUrl?: string;
   storageKey?: string;
   errorMessage?: string;
-  env?: LotSocialEnvironment;
+  env: LotSocialEnvironment;
 }) {
   await ensureCreativeSchema(input.env);
   const db = database(input.env, "creative");
@@ -267,7 +267,7 @@ export async function updateRenderJob(input: {
     .bind(input.id, input.associateEmail).first<CreativeRenderJobRecord>();
 }
 
-export async function getRenderJob(id: string, associateEmail: string, env?: LotSocialEnvironment) {
+export async function getRenderJob(id: string, associateEmail: string, env: LotSocialEnvironment) {
   await ensureCreativeSchema(env);
   return database(env, "creative").prepare("SELECT * FROM creative_render_jobs WHERE id = ? AND associate_email = ? LIMIT 1")
     .bind(id, associateEmail).first<CreativeRenderJobRecord>();

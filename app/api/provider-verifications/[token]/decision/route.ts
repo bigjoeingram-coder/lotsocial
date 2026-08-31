@@ -1,3 +1,4 @@
+import { env } from "cloudflare:workers";
 import { decideProviderVerification } from "../../../../lib/authorization";
 
 function clean(value: unknown) {
@@ -18,6 +19,7 @@ export async function POST(request: Request, context: { params: Promise<{ token:
     feedFormat: clean(payload.feedFormat),
     connectionNotes: clean(payload.connectionNotes),
     typedSignature: clean(payload.typedSignature),
+    env,
   } as const;
   if (decision === "verified" && (!input.providerName || !input.contactName || !input.contactEmail || !input.deliveryMethod || !input.feedFormat || !input.typedSignature || payload.confirmedAuthority !== true || payload.confirmedRights !== true)) {
     return Response.json({ error: "Verification requires provider details, delivery information, both confirmations, and a signature." }, { status: 400 });

@@ -1,6 +1,7 @@
 import { database, ensureLotSocialSchema } from "./schema-bootstrap.ts";
 import type { LotSocialEnvironment } from "./schema-bootstrap.ts";
-import { PERMISSIONS, PermissionId } from "./authorization-shared.ts";
+import { PERMISSIONS } from "./authorization-shared.ts";
+import type { PermissionId } from "./authorization-shared.ts";
 
 export { PERMISSIONS };
 export type { PermissionId };
@@ -60,7 +61,7 @@ export type ProviderVerificationRecord = {
   updated_at: string;
 };
 
-export function ensureAuthorizationSchema(env?: LotSocialEnvironment) {
+export function ensureAuthorizationSchema(env: LotSocialEnvironment) {
   return ensureLotSocialSchema(env);
 }
 
@@ -74,7 +75,7 @@ export async function hashToken(token: string) {
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-export async function listAuthorizationRequests(associateEmail: string, limit = 20, env?: LotSocialEnvironment) {
+export async function listAuthorizationRequests(associateEmail: string, limit = 20, env: LotSocialEnvironment) {
   await ensureAuthorizationSchema(env);
   const result = await database(env, "authorization")
     .prepare(`SELECT id, dealership_name, rooftop_location, associate_name, associate_email,
@@ -87,7 +88,7 @@ export async function listAuthorizationRequests(associateEmail: string, limit = 
   return result.results;
 }
 
-export async function getAuthorizationById(id: string, env?: LotSocialEnvironment) {
+export async function getAuthorizationById(id: string, env: LotSocialEnvironment) {
   await ensureAuthorizationSchema(env);
   return database(env, "authorization")
     .prepare("SELECT * FROM authorization_requests WHERE id = ? LIMIT 1")
@@ -95,7 +96,7 @@ export async function getAuthorizationById(id: string, env?: LotSocialEnvironmen
     .first<AuthorizationRequestRecord>();
 }
 
-export async function getAuthorizationByIdForAssociate(id: string, associateEmail: string, env?: LotSocialEnvironment) {
+export async function getAuthorizationByIdForAssociate(id: string, associateEmail: string, env: LotSocialEnvironment) {
   await ensureAuthorizationSchema(env);
   return database(env, "authorization")
     .prepare("SELECT * FROM authorization_requests WHERE id = ? AND LOWER(associate_email) = LOWER(?) LIMIT 1")
@@ -103,7 +104,7 @@ export async function getAuthorizationByIdForAssociate(id: string, associateEmai
     .first<AuthorizationRequestRecord>();
 }
 
-export async function listAuditEvents(requestId: string, env?: LotSocialEnvironment) {
+export async function listAuditEvents(requestId: string, env: LotSocialEnvironment) {
   await ensureAuthorizationSchema(env);
   const result = await database(env, "authorization")
     .prepare("SELECT * FROM authorization_audit_events WHERE request_id = ? ORDER BY created_at DESC, id DESC")
@@ -112,7 +113,7 @@ export async function listAuditEvents(requestId: string, env?: LotSocialEnvironm
   return result.results;
 }
 
-export async function getProviderVerification(requestId: string, env?: LotSocialEnvironment) {
+export async function getProviderVerification(requestId: string, env: LotSocialEnvironment) {
   await ensureAuthorizationSchema(env);
   return database(env, "authorization")
     .prepare("SELECT * FROM provider_verifications WHERE request_id = ? LIMIT 1")
@@ -126,7 +127,7 @@ export async function createProviderVerificationInvite(input: {
   providerName: string;
   contactName: string;
   contactEmail: string;
-  env?: LotSocialEnvironment;
+  env: LotSocialEnvironment;
 }) {
   await ensureAuthorizationSchema(input.env);
   const db = database(input.env, "authorization");
@@ -153,7 +154,7 @@ export async function createProviderVerificationInvite(input: {
   }, input.env);
 }
 
-export async function getProviderVerificationByToken(token: string, env?: LotSocialEnvironment) {
+export async function getProviderVerificationByToken(token: string, env: LotSocialEnvironment) {
   await ensureAuthorizationSchema(env);
   const tokenHash = await hashToken(token);
   return database(env, "authorization")
@@ -175,7 +176,7 @@ export async function decideProviderVerification(input: {
   feedFormat: string;
   connectionNotes: string;
   typedSignature: string;
-  env?: LotSocialEnvironment;
+  env: LotSocialEnvironment;
 }) {
   const verification = await getProviderVerificationByToken(input.token, input.env);
   if (!verification) return null;
@@ -217,7 +218,7 @@ export function evaluateAuthorization(record: AuthorizationRequestRecord | null,
   return { allowed: true, reason: "authorized" } as const;
 }
 
-export async function getAuthorizationByToken(token: string, env?: LotSocialEnvironment) {
+export async function getAuthorizationByToken(token: string, env: LotSocialEnvironment) {
   await ensureAuthorizationSchema(env);
   const tokenHash = await hashToken(token);
   return database(env, "authorization")
@@ -232,7 +233,7 @@ export async function addAuditEvent(
   actorEmail: string,
   action: string,
   metadata: Record<string, unknown> = {},
-  env?: LotSocialEnvironment,
+  env: LotSocialEnvironment,
 ) {
   await ensureAuthorizationSchema(env);
   await database(env, "authorization")
@@ -257,7 +258,7 @@ export async function createAuthorizationRequest(input: {
   providerContactName: string;
   providerContactEmail: string;
   requestedPermissions: PermissionId[];
-  env?: LotSocialEnvironment;
+  env: LotSocialEnvironment;
 }) {
   await ensureAuthorizationSchema(input.env);
   await database(input.env, "authorization")
@@ -281,7 +282,7 @@ export async function createAuthorizationRequest(input: {
   }, input.env);
 }
 
-export async function setEmailDelivery(id: string, status: string, messageId?: string, env?: LotSocialEnvironment) {
+export async function setEmailDelivery(id: string, status: string, messageId: string | undefined, env: LotSocialEnvironment) {
   await database(env, "authorization")
     .prepare("UPDATE authorization_requests SET email_delivery_status = ?, email_message_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
     .bind(status, messageId ?? null, id)
@@ -298,7 +299,7 @@ export async function decideAuthorization(input: {
   providerContactEmail: string;
   expiresAt: string | null;
   managerNotes: string;
-  env?: LotSocialEnvironment;
+  env: LotSocialEnvironment;
 }) {
   const record = await getAuthorizationByToken(input.token, input.env);
   if (!record) return null;
@@ -337,7 +338,7 @@ export async function manageAuthorization(input: {
   approvedPermissions: PermissionId[];
   expiresAt: string | null;
   managerNotes: string;
-  env?: LotSocialEnvironment;
+  env: LotSocialEnvironment;
 }) {
   const record = await getAuthorizationByToken(input.token, input.env);
   if (!record) return null;

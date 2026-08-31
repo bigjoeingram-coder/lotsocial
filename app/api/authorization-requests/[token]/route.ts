@@ -1,8 +1,9 @@
+import { env } from "cloudflare:workers";
 import { getAuthorizationByToken, parsePermissions } from "../../../lib/authorization";
 
 export async function GET(_request: Request, context: { params: Promise<{ token: string }> }) {
   const { token } = await context.params;
-  const record = await getAuthorizationByToken(token);
+  const record = await getAuthorizationByToken(token, env);
   if (!record) return Response.json({ error: "This authorization link is invalid or has expired." }, { status: 404 });
 
   return Response.json({

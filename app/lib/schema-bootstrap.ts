@@ -18,25 +18,18 @@ export type LotSocialEnvironment = {
   BRIGHTDATA_ZONE?: string;
   SHOTSTACK_API_KEY?: string;
   SHOTSTACK_STAGE?: string;
+  LOTSOCIAL_EXPECTED_SITES_HOSTNAME?: string;
+  LOTSOCIAL_ASSOCIATE_ALLOWLIST?: string;
+  LOTSOCIAL_DAILY_VDP_IMPORT_CAP?: string;
+  LOTSOCIAL_DAILY_AUTHORIZATION_REQUEST_CAP?: string;
+  LOTSOCIAL_DAILY_MANAGER_EMAIL_CAP?: string;
+  LOTSOCIAL_MANAGER_EMAIL_DOMAIN_ALLOWLIST?: string;
 };
-
-const GLOBAL_ENV_KEY = "__LOTSOCIAL_ENV__";
 
 let schemaReady = new WeakMap<D1DatabaseLike, Promise<void>>();
 
-export function bindLotSocialEnvironment(env: LotSocialEnvironment) {
-  (globalThis as unknown as Record<string, LotSocialEnvironment>)[GLOBAL_ENV_KEY] = env;
-  return env;
-}
-
-export function resolveLotSocialEnvironment(env?: LotSocialEnvironment) {
-  const resolved = env ?? (globalThis as unknown as Record<string, LotSocialEnvironment | undefined>)[GLOBAL_ENV_KEY];
-  if (!resolved) throw new Error("The LotSocial runtime environment is unavailable.");
-  return resolved;
-}
-
-export function database(env: LotSocialEnvironment | undefined, label: string) {
-  const db = resolveLotSocialEnvironment(env).DB;
+export function database(env: LotSocialEnvironment, label: string) {
+  const db = env.DB;
   if (!db) throw new Error(`The ${label} database is unavailable.`);
   return db;
 }
@@ -156,9 +149,20 @@ export const SCHEMA_BOOTSTRAP_SQL = [
   )`,
   "CREATE INDEX IF NOT EXISTS creative_render_jobs_project_idx ON creative_render_jobs(project_id, created_at DESC)",
   "CREATE INDEX IF NOT EXISTS creative_render_jobs_associate_idx ON creative_render_jobs(associate_email, created_at DESC)",
+  `CREATE TABLE IF NOT EXISTS rate_limit_counters (
+    counter_key TEXT NOT NULL,
+    counter_scope TEXT NOT NULL,
+    counter_subject TEXT NOT NULL,
+    counter_day TEXT NOT NULL,
+    count INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY(counter_key, counter_day)
+  )`,
+  "CREATE INDEX IF NOT EXISTS rate_limit_counters_scope_day_idx ON rate_limit_counters(counter_scope, counter_day)",
 ];
 
-export function ensureLotSocialSchema(env?: LotSocialEnvironment) {
+export function ensureLotSocialSchema(env: LotSocialEnvironment) {
   const db = database(env, "LotSocial");
   if (!schemaReady.has(db)) {
     schemaReady.set(db, db.batch(SCHEMA_BOOTSTRAP_SQL.map((statement) => db.prepare(statement))).then(() => undefined));

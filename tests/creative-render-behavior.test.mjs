@@ -5,7 +5,7 @@ import {
   handleCreativeRenderPost,
   requiresRegeneration,
 } from "../app/lib/creative-render-handler.ts";
-import { json, signedInUser } from "./harness.mjs";
+import { json, signedInUser, testEnv } from "./harness.mjs";
 
 const cleanProject = {
   id: "project_1",
@@ -31,10 +31,10 @@ test("render revalidation blocks drafts created before the current copy policy",
 
   const response = await handleCreativeRenderPost(
     new Request("https://app.example/api/creative-projects/project_1/render", { method: "POST" }),
-    {},
+    testEnv(),
     { params: Promise.resolve({ id: "project_1" }) },
     {
-      getUser: async () => signedInUser,
+      associate: signedInUser,
       getCreativeProject: async () => staleProject,
       getLatestRenderJob: async () => {
         touchedRenderer = true;
@@ -53,10 +53,10 @@ test("render status returns regenerationRequired for unsafe stored copy", async 
 
   const response = await handleCreativeRenderGet(
     new Request("https://app.example/api/creative-projects/project_1/render"),
-    {},
+    testEnv(),
     { params: Promise.resolve({ id: "project_1" }) },
     {
-      getUser: async () => signedInUser,
+      associate: signedInUser,
       getCreativeProject: async () => unsafeProject,
     },
   );

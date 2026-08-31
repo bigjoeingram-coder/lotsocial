@@ -1,4 +1,5 @@
-import { getChatGPTUser } from "../../chatgpt-auth";
+import { env } from "cloudflare:workers";
+import { associateAuthResponse, requireAssociate } from "../../chatgpt-auth";
 import { saveCreativeProject, serializeCreativeProject } from "../../lib/creative";
 import { getImportedVehicle } from "../../lib/vdp";
 
@@ -7,11 +8,15 @@ function clean(value: unknown) {
 }
 
 export async function POST(request: Request) {
-  const user = await getChatGPTUser();
-  if (!user) return Response.json({ error: "Associate sign-in is required." }, { status: 401 });
+  let user;
+  try {
+    user = await requireAssociate(request, env);
+  } catch (error) {
+    return associateAuthResponse(error);
+  }
   const payload = (await request.json()) as Record<string, unknown>;
   const vehicleId = clean(payload.vehicleId);
-  const vehicle = await getImportedVehicle(vehicleId, user.email);
+  const vehicle = await getImportedVehicle(vehicleId, user.email, env);
   if (!vehicle) return Response.json({ error: "That vehicle is not in your inventory." }, { status: 404 });
   const availableImages = JSON.parse(vehicle.image_urls || "[]") as string[];
   const selectedImages = Array.isArray(payload.selectedImages)
@@ -33,6 +38,7 @@ export async function POST(request: Request) {
     endCardEmail: clean(payload.endCardEmail) || user.email,
     endCardCta,
     flavor,
+    env,
   });
   if (!project) return Response.json({ error: "The creative draft could not be saved." }, { status: 500 });
   return Response.json({ project: serializeCreativeProject(project) }, { status: 201 });

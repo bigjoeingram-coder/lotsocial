@@ -1,5 +1,6 @@
 import { database } from "./schema-bootstrap.ts";
 import type { LotSocialEnvironment } from "./schema-bootstrap.ts";
+import { incrementDailyLimit, rateLimitResponse } from "./limits.ts";
 import {
   extractVehicleFromVdp,
   getImportedVehicleBySourceUrl,
@@ -16,7 +17,7 @@ type RouteUser = {
 };
 
 type VdpImportDependencies = {
-  getUser(): Promise<RouteUser | null>;
+  associate: RouteUser;
   listImportedVehicles?: typeof listImportedVehicles;
   getImportedVehicleBySourceUrl?: typeof getImportedVehicleBySourceUrl;
   extractVehicleFromVdp?: typeof extractVehicleFromVdp;
@@ -29,8 +30,7 @@ export async function handleVdpImportsGet(
   env: LotSocialEnvironment,
   dependencies: VdpImportDependencies,
 ) {
-  const user = await dependencies.getUser();
-  if (!user) return Response.json({ error: "Associate sign-in is required." }, { status: 401 });
+  const user = dependencies.associate;
   const vehicles = await (dependencies.listImportedVehicles ?? listImportedVehicles)(user.email, env);
   const serialize = dependencies.serializeVehicle ?? serializeVehicle;
   return Response.json({ vehicles: vehicles.map(serialize) });
@@ -41,8 +41,7 @@ export async function handleVdpImportsPost(
   env: LotSocialEnvironment,
   dependencies: VdpImportDependencies,
 ) {
-  const user = await dependencies.getUser();
-  if (!user) return Response.json({ error: "Associate sign-in is required." }, { status: 401 });
+  const user = dependencies.associate;
   const payload = (await request.json()) as Record<string, unknown>;
   if (payload.authorizedToMarket !== true) {
     return Response.json({ error: "Confirm that you are authorized to market this dealership's vehicle content." }, { status: 400 });
@@ -50,6 +49,10 @@ export async function handleVdpImportsPost(
   const sourceUrl = typeof payload.sourceUrl === "string" ? payload.sourceUrl.trim() : "";
   if (!sourceUrl) return Response.json({ error: "Paste a vehicle detail page URL." }, { status: 400 });
   try {
+    const limit = await incrementDailyLimit(env, "vdp_imports", user.email);
+    if (!limit.allowed) {
+      return rateLimitResponse(limit, "Daily VDP import limit reached for this associate.");
+    }
     const findExisting = dependencies.getImportedVehicleBySourceUrl ?? getImportedVehicleBySourceUrl;
     const existing = await findExisting(user.email, sourceUrl, env);
     const serialize = dependencies.serializeVehicle ?? serializeVehicle;
@@ -72,7 +75,7 @@ export async function handleVdpImportsPost(
 }
 
 type VdpDeleteDependencies = {
-  getUser(): Promise<RouteUser | null>;
+  associate: RouteUser;
 };
 
 export async function handleVdpImportDelete(
@@ -80,8 +83,7 @@ export async function handleVdpImportDelete(
   env: LotSocialEnvironment,
   dependencies: VdpDeleteDependencies,
 ) {
-  const user = await dependencies.getUser();
-  if (!user) return Response.json({ error: "Associate sign-in is required." }, { status: 401 });
+  const user = dependencies.associate;
 
   const payload = (await request.json().catch(() => ({}))) as Record<string, unknown>;
   const sourceUrl = typeof payload.sourceUrl === "string" ? payload.sourceUrl.trim() : "";

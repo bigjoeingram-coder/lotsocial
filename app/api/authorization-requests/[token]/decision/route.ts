@@ -1,4 +1,6 @@
-import { PERMISSIONS, PermissionId, decideAuthorization } from "../../../../lib/authorization";
+import { env } from "cloudflare:workers";
+import { PERMISSIONS, decideAuthorization } from "../../../../lib/authorization";
+import type { PermissionId } from "../../../../lib/authorization";
 
 function clean(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
@@ -30,6 +32,7 @@ export async function POST(request: Request, context: { params: Promise<{ token:
     providerContactEmail: clean(payload.providerContactEmail).toLowerCase(),
     expiresAt: clean(payload.expiresAt) || null,
     managerNotes: clean(payload.managerNotes),
+    env,
   });
   if (!result) return Response.json({ error: "This authorization link is invalid or has expired." }, { status: 404 });
   if (result.alreadyDecided) return Response.json({ error: "This request has already been decided.", status: result.record.status }, { status: 409 });
