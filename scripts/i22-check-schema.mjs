@@ -5,11 +5,18 @@
  *   1. Do the five TEXT PRIMARY KEY columns enforce NOT NULL?
  *   2. Do any NULL ids already exist?
  *
- * Needs no deploy and no code change. Get the schema from the D1 console or:
- *   wrangler d1 execute <DB> --remote --json \
- *     --command "SELECT name, sql FROM sqlite_master WHERE type='table'" \
- *     > schema.json
+ * The database is provisioned by the OpenAI Sites platform (.openai/hosting.json
+ * declares "d1": "DB"), not by Cloudflare directly, and this repo has no
+ * wrangler config. However you reach it, run:
+ *
+ *   SELECT name, sql FROM sqlite_master WHERE type='table'
+ *
+ * save the rows as JSON, then:
+ *
  *   node scripts/i22-check-schema.mjs schema.json
+ *
+ * Accepts a bare rows array, {results:[...]}, or wrangler's [{results:[...]}].
+ * This script itself needs no deploy, no credentials, and no network.
  */
 import { readFile } from "node:fs/promises";
 
