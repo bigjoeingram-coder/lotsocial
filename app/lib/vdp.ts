@@ -1,5 +1,7 @@
 import { database, ensureLotSocialSchema } from "./schema-bootstrap.ts";
 import type { LotSocialEnvironment } from "./schema-bootstrap.ts";
+import { invokeScraplingParser } from "./scrapling-parser.ts";
+import type { ScraplingProposal } from "./scrapling-parser.ts";
 
 export type ImportedVehicleRecord = {
   id: string;
@@ -411,7 +413,7 @@ export async function extractVehicleFromVdp(value: string, env: LotSocialEnviron
       });
     } catch {
       resolved = await viaListingOrThrow("This store blocks the direct page");
-      return await parseVehicleHtml(resolved.html, resolved.finalUrl);
+      return await parseVehicleHtmlWithPilot(resolved.html, resolved.finalUrl, deadline, env);
     } finally {
       timeout.cleanup();
     }
@@ -426,7 +428,7 @@ export async function extractVehicleFromVdp(value: string, env: LotSocialEnviron
         contentType: response.headers.get("content-type") ?? "",
       });
       resolved = await viaListingOrThrow("This store blocks the direct page");
-      return await parseVehicleHtml(resolved.html, resolved.finalUrl);
+      return await parseVehicleHtmlWithPilot(resolved.html, resolved.finalUrl, deadline, env);
     }
     const finalUrl = validatePublicUrl(response.url);
     const contentType = response.headers.get("content-type") ?? "";
@@ -437,14 +439,14 @@ export async function extractVehicleFromVdp(value: string, env: LotSocialEnviron
     if (html.length > 3_000_000) throw new Error("That VDP is too large to import safely.");
     if (isCloudflareChallenge(html, response.headers)) {
       resolved = await viaListingOrThrow("This store returned a Cloudflare challenge");
-      return await parseVehicleHtml(resolved.html, resolved.finalUrl);
+      return await parseVehicleHtmlWithPilot(resolved.html, resolved.finalUrl, deadline, env);
     }
     resolved = { html, finalUrl };
   } catch (caught) {
     if (caught instanceof ResolvedVehicle) return caught.vehicle;
     throw caught;
   }
-  return await parseVehicleHtml(resolved.html, resolved.finalUrl);
+  return await parseVehicleHtmlWithPilot(resolved.html, resolved.finalUrl, deadline, env);
 }
 
 class ResolvedVehicle extends Error {
@@ -455,7 +457,7 @@ class ResolvedVehicle extends Error {
   }
 }
 
-async function parseVehicleHtml(html: string, finalUrl: URL): Promise<ExtractedVehicle> {
+export async function parseVehicleHtml(html: string, finalUrl: URL): Promise<ExtractedVehicle> {
   const nodes: Record<string, unknown>[] = [];
   for (const match of html.matchAll(/<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)) {
     try { nodes.push(...flattenJsonLd(JSON.parse(match[1].trim()))); } catch { /* malformed third-party JSON-LD is ignored */ }
@@ -524,6 +526,83 @@ async function parseVehicleHtml(html: string, finalUrl: URL): Promise<ExtractedV
     throw new Error("LotSocial could not confirm a specific vehicle on that page. Nothing was saved.");
   }
   return extracted;
+}
+
+function compactEvidence(value: string) {
+  return decodeEntities(value).toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+function evidenceRaw(proposal: ScraplingProposal, key: string) {
+  const value = proposal.evidence[key];
+  return Array.isArray(value) ? value.map((item) => item.rawValue ?? "") : [value?.rawValue ?? ""];
+}
+
+function scalarEvidenceIsGrounded(proposal: ScraplingProposal, key: string, value: string, html: string) {
+  if (!value) return true;
+  return evidenceRaw(proposal, key).some((raw) => {
+    if (!raw || !html.includes(raw)) return false;
+    if (key === "currency" && value === "USD") return /USD|\$/i.test(raw);
+    const normalizedValue = compactEvidence(value);
+    const normalizedRaw = compactEvidence(raw);
+    return Boolean(normalizedValue) && (normalizedRaw.includes(normalizedValue) || normalizedValue.includes(normalizedRaw));
+  });
+}
+
+export function validateScraplingProposal(proposal: ScraplingProposal, html: string, finalUrl: URL): ExtractedVehicle | null {
+  if (isCloudflareChallenge(html)) return null;
+  const expectedVin = vinFromUrl(finalUrl);
+  const candidate = proposal.vehicle;
+  const vin = (candidate.vin ?? "").toUpperCase();
+  if (expectedVin && vin !== expectedVin) return null;
+  if (vin && !new RegExp(`\\b${vin}\\b`, "i").test(html)) return null;
+  const title = candidate.title?.trim() ?? "";
+  if (!title || isInventoryPageTitle(title)) return null;
+  for (const key of ["title", "vin", "stockNumber", "year", "make", "model", "trim", "price", "currency", "description"] as const) {
+    const value = candidate[key] ?? "";
+    if (!scalarEvidenceIsGrounded(proposal, key, value, html)) return null;
+  }
+  for (const [key, value] of Object.entries(candidate.facts)) {
+    if (!scalarEvidenceIsGrounded(proposal, `facts.${key}`, value, html)) return null;
+  }
+  const imageEvidence = evidenceRaw(proposal, "imageUrls");
+  const imageUrls = candidate.imageUrls.filter((value, index) => {
+    if (!usableImageUrl(value)) return false;
+    const raw = imageEvidence[index];
+    if (!raw || !html.includes(raw)) return false;
+    try { return new URL(raw, finalUrl).href === value; } catch { return false; }
+  });
+  if (imageUrls.length !== candidate.imageUrls.length) return null;
+  if (!vin && !(candidate.year && (candidate.make || candidate.model))) return null;
+  return {
+    sourceUrl: finalUrl.href,
+    sourceHost: finalUrl.hostname,
+    title,
+    vin,
+    stockNumber: candidate.stockNumber ?? "",
+    year: candidate.year ?? "",
+    make: candidate.make ?? "",
+    model: candidate.model ?? "",
+    trim: candidate.trim ?? "",
+    price: candidate.price ?? "",
+    currency: candidate.currency ?? "USD",
+    description: candidate.description ?? "",
+    imageUrls,
+    facts: candidate.facts,
+  };
+}
+
+async function parseVehicleHtmlWithPilot(html: string, finalUrl: URL, deadline: { expiresAt: number }, env: LotSocialEnvironment) {
+  try {
+    return await parseVehicleHtml(html, finalUrl);
+  } catch (baselineError) {
+    if (deadline.expiresAt <= Date.now()) throw baselineError;
+    const proposal = await invokeScraplingParser(html, finalUrl, vinFromUrl(finalUrl), env, {
+      timeoutMs: Math.min(10_000, Math.max(1, deadline.expiresAt - Date.now())),
+    });
+    const accepted = proposal && validateScraplingProposal(proposal, html, finalUrl);
+    if (accepted) return accepted;
+    throw baselineError;
+  }
 }
 
 export async function saveImportedVehicle(associateEmail: string, vehicle: ExtractedVehicle, env: LotSocialEnvironment) {

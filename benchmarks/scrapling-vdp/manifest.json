@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "status": "CORPUS_INCOMPLETE",
+  "required": {
+    "positive": 50,
+    "negative": 10
+  },
+  "fixtures": [],
+  "gap": "No verified, scrubbed 60-item VDP HTML corpus or expected-value manifest was supplied with Relay row 1215 or the approved Drive specification. Expected values must not be invented."
+}

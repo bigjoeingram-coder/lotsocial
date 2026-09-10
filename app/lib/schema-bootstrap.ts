@@ -24,6 +24,9 @@ export type LotSocialEnvironment = {
   LOTSOCIAL_DAILY_AUTHORIZATION_REQUEST_CAP?: string;
   LOTSOCIAL_DAILY_MANAGER_EMAIL_CAP?: string;
   LOTSOCIAL_MANAGER_EMAIL_DOMAIN_ALLOWLIST?: string;
+  LOTSOCIAL_SCRAPLING_ENABLED?: string;
+  LOTSOCIAL_SCRAPLING_URL?: string;
+  LOTSOCIAL_SCRAPLING_TOKEN?: string;
 };
 
 let schemaReady = new WeakMap<D1DatabaseLike, Promise<void>>();

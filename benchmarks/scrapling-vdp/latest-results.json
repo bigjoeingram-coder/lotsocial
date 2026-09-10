@@ -1,0 +1,16 @@
+{
+  "verdict": "REVISION_NEEDED",
+  "reason": "frozen_corpus_incomplete",
+  "required": {
+    "positive": 50,
+    "negative": 10
+  },
+  "available": {
+    "positive": 0,
+    "negative": 0
+  },
+  "missing": {
+    "positive": 50,
+    "negative": 10
+  }
+}

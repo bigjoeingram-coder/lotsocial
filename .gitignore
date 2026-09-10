@@ -40,6 +40,9 @@ next-env.d.ts
 /.wrangler/
 /outputs/
 /work/
+**/.venv/
+**/__pycache__/
+*.pyc
 
 # Deploy packaging output (regenerable, never committed)
 lotsocial-*.tar.gz
