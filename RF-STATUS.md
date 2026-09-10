@@ -137,3 +137,35 @@ exist there; the repair is insurance for staying, not a blocker for leaving.
 match; Drizzle drift check; and lint with 0 errors (five pre-existing UI warnings).
 Targeted Rock 3 proof is 6/6 in `tests/persistence.test.mjs` plus the existing inventory
 delete suite. No schema change, new runtime dependency, deployment, or live data write.
+
+## 2026-09-09 — Rock 6: real extractor tests — BUILT (Fable, cloud session)
+
+**Files:** `app/lib/vdp.ts`, `tests/extractor.test.mjs` (new, 17 tests, offline fixtures).
+
+- **I-07 wrong-neighbor price — fixed and locked.** `vehicleBlockBounds()` constrains the
+  Dealer Inspire window to the matched vehicle's own block: it starts at that vehicle's
+  `## [title](link)` heading and stops at the next heading or the next `VIN:` line. The
+  two-vehicle fixture (vehicle A has no price, vehicle B directly after it does) fails on
+  the old fixed 5000-character window — A inherited B's $64,120 — and passes on the fix
+  with A's price empty. Verified failing-then-fixed by swapping the window logic back in.
+- **I-18 hardcoded 23-make allowlist — removed.** `slugMakeAndModel()` anchors on the year
+  token in the `<condition>-<year>-<make>-<model>-...` slug (fallback: first token after
+  the condition words), handles two-word makes (land-rover, mercedes-benz, alfa-romeo,
+  aston-martin, rolls-royce, mini), never treats a VIN as a model. Ram, Jeep, Chrysler and
+  Dodge URLs now generate `/new-vehicles/<model>/` candidate paths; Lexus/Maserati paths
+  are unchanged. `certified-` slugs are recognized alongside `new-`/`used-`.
+- **Testability exports:** `parseVehicleHtml`, `parseDealerInspireMarkdown`,
+  `candidateInventoryPaths`, `slugMakeAndModel`, `vehicleBlockBounds`, `vinFromUrl`,
+  `normalizeListedPrice` (behavior unchanged; `isCloudflareChallenge` was already exported).
+- **Fixtures covered:** JSON-LD VDP, meta/regex-only VDP (Jeep), Cloudflare challenge page
+  (HTML + reader markdown), Dealer Inspire two-vehicle listing, no-VIN URL, inventory-page
+  title refusal, no-evidence refusal, price normalization.
+
+**Proof:** `node --test tests/extractor.test.mjs` → 17/17. Full `node --test tests/*.test.mjs`
+in the cloud session: 37 pass / 6 fail, and every failure is the pre-existing Tier-2/worker
+boot set (500 instead of 401 from miniflare in that sandbox) — the untouched branch fails the
+same tests there (20 pass / 7 fail before this change). No schema change (safe on Sites).
+
+**Delivery note:** the cloud session's git proxy refuses to push to this repository
+(403, "not in this session's authorized repository set"), so this rock lands via the GitHub
+web UI on branch `rf/rock-6-extractor-tests` and a PR into `rf/clarity-break-2026-08-28`.
