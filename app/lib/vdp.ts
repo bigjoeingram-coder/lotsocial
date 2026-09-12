@@ -191,7 +191,7 @@ function vehicleSlugParts(url: URL) {
 }
 
 // Makes whose slug is two words: the model is the token after BOTH words.
-const TWO_WORD_MAKES = new Set(["land", "range", "mercedes", "alfa", "aston", "rolls", "mini"]);
+const TWO_WORD_MAKES = new Set(["land", "range", "mercedes", "alfa", "aston", "rolls"]);
 const SLUG_CONDITION_WORDS = new Set(["new", "used", "certified", "pre", "owned", "preowned", "cpo"]);
 
 // Rock 6 (I-18): the make/model guess no longer depends on a hardcoded make list — a
