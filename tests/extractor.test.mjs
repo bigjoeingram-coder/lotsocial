@@ -189,6 +189,7 @@ test("slug heuristic finds make and model without an allowlist", () => {
   assert.deepEqual(slugMakeAndModel(new URL("https://dealer.example/new-2025-lexus-rx-350-premium/")), { make: "lexus", model: "rx" });
   assert.deepEqual(slugMakeAndModel(new URL("https://dealer.example/new-2025-land-rover-defender-110/")), { make: "land-rover", model: "defender" });
   assert.deepEqual(slugMakeAndModel(new URL("https://dealer.example/certified-pre-owned-2023-mercedes-benz-gle-350/")), { make: "mercedes-benz", model: "gle" });
+  assert.deepEqual(slugMakeAndModel(new URL("https://dealer.example/used-2024-mini-cooper-s-hardtop/")), { make: "mini", model: "cooper" });
 });
 
 test("slug heuristic without a year still finds the make and model", () => {

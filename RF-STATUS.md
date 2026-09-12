@@ -151,7 +151,7 @@ delete suite. No schema change, new runtime dependency, deployment, or live data
 - **I-18 hardcoded 23-make allowlist — removed.** `slugMakeAndModel()` anchors on the year
   token in the `<condition>-<year>-<make>-<model>-...` slug (fallback: first token after
   the condition words), handles two-word makes (land-rover, mercedes-benz, alfa-romeo,
-  aston-martin, rolls-royce, mini), never treats a VIN as a model. Ram, Jeep, Chrysler and
+  aston-martin, rolls-royce), keeps single-word MINI intact, and never treats a VIN as a model. Ram, Jeep, Chrysler and
   Dodge URLs now generate `/new-vehicles/<model>/` candidate paths; Lexus/Maserati paths
   are unchanged. `certified-` slugs are recognized alongside `new-`/`used-`.
 - **Testability exports:** `parseVehicleHtml`, `parseDealerInspireMarkdown`,
