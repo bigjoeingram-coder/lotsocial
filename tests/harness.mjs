@@ -255,7 +255,12 @@ export function importedVehicle(overrides = {}) {
 
 export async function startTier2Worker(bindings = {}) {
   const { Miniflare } = await loadMiniflare();
-  const modules = (await serverModules("dist/server")).map((path) => ({
+  const entrypoint = "dist/server/index.js";
+  const modulePaths = await serverModules("dist/server");
+  assert(modulePaths.includes(entrypoint), `Missing built Worker entrypoint: ${entrypoint}`);
+  // With an explicit modules array, Miniflare treats the first module as the
+  // Worker entrypoint. Filesystem enumeration order differs across platforms.
+  const modules = [entrypoint, ...modulePaths.filter((path) => path !== entrypoint)].map((path) => ({
     type: "ESModule",
     path,
   }));
@@ -263,7 +268,6 @@ export async function startTier2Worker(bindings = {}) {
     modules,
     compatibilityDate: "2026-05-15",
     compatibilityFlags: ["nodejs_compat"],
-    scriptPath: "dist/server/index.js",
     d1Databases: ["DB"],
     bindings: testEnv(bindings),
   });

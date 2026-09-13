@@ -130,6 +130,8 @@ exist there; the repair is insurance for staying, not a blocker for leaving.
   `utm_*`/`gclid`/`fbclid`, stable query ordering, and no non-root trailing slash.
   Lookup and save both use that identity, so tracking-first and bare-first imports
   converge on one row.
+- The shared Tier-2 harness now pins `dist/server/index.js` as Miniflare's first module;
+  this is the same cross-platform CI repair already proven on the Rock 6 branch.
 
 **Proof:** `pnpm test` passed end to end: build; 30/30 behavior tests; bootstrap-schema
 match; Drizzle drift check; and lint with 0 errors (five pre-existing UI warnings).
