@@ -20,6 +20,7 @@ type ApprovalRequest = {
   expiresAt: string | null;
   managerNotes: string;
   termsVersion: string;
+  managementLinkExpired: boolean;
 };
 
 const manageableStatuses = ["manager_approved", "provider_pending", "provider_verified", "provider_declined", "feed_connected", "active", "suspended"];
@@ -89,7 +90,7 @@ export function ApprovalForm({ token }: { token: string }) {
       const payload = await response.json() as { error?: string; status?: string };
       if (!response.ok || !payload.status) throw new Error(payload.error ?? "Unable to record this decision.");
       setRecord((current) => current ? { ...current, status: payload.status!, approvedPermissions: requestedDecision === "approved" ? permissions : [] } : current);
-      setNotice(requestedDecision === "approved" ? "Authorization approved. This secure link is now your access-management link." : "");
+      setNotice(requestedDecision === "approved" ? "Authorization approved. This secure link can manage access for the configured security window." : "");
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Unable to record this decision.");
     } finally {
@@ -128,6 +129,10 @@ export function ApprovalForm({ token }: { token: string }) {
   if (record.status === "declined" || record.status === "revoked") {
     const revoked = record.status === "revoked";
     return <ApprovalShell><div className="approval-result"><div className="result-mark danger">×</div><p className="eyebrow">Authorization closed</p><h1>{revoked ? "Access has been revoked." : "Authorization declined."}</h1><p>{revoked ? `LotSocial no longer has permission to use inventory data for ${record.associateName}. The revocation is recorded in the audit history.` : "No inventory connection will be activated for this request."}</p><div className="result-reference"><span>Dealership</span><strong>{record.dealershipName}</strong><small>{record.rooftopLocation}</small></div></div></ApprovalShell>;
+  }
+
+  if (record.managementLinkExpired && manageableStatuses.includes(record.status)) {
+    return <ApprovalShell><div className="approval-result"><div className="result-mark danger">!</div><p className="eyebrow">Secure link expired</p><h1>A fresh management link is required.</h1><p>Ask the LotSocial associate to send a new secure link before changing, pausing, or revoking access.</p></div></ApprovalShell>;
   }
 
   if (manageableStatuses.includes(record.status)) {

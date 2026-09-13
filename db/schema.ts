@@ -61,6 +61,16 @@ export const providerVerifications = sqliteTable("provider_verifications", {
   updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 });
 
+export const authorizationManagementLinks = sqliteTable("authorization_management_links", {
+  requestId: text("request_id").primaryKey(),
+  tokenHash: text("token_hash").notNull().unique(),
+  expiresAt: text("expires_at").notNull(),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [
+  index("authorization_management_links_expiry_idx").on(table.expiresAt),
+]);
+
 export const importedVehicles = sqliteTable("imported_vehicles", {
   id: text("id").primaryKey(),
   associateEmail: text("associate_email").notNull(),
@@ -137,4 +147,19 @@ export const rateLimitCounters = sqliteTable("rate_limit_counters", {
 }, (table) => [
   primaryKey({ columns: [table.counterKey, table.counterDay] }),
   index("rate_limit_counters_scope_day_idx").on(table.counterScope, table.counterDay),
+]);
+
+export const importOutcomes = sqliteTable("import_outcomes", {
+  id: text("id").primaryKey(),
+  associateEmail: text("associate_email").notNull(),
+  sourceHost: text("source_host").notNull(),
+  outcome: text("outcome").notNull(),
+  elapsedMs: integer("elapsed_ms").notNull(),
+  fallback: text("fallback").notNull().default("none"),
+  brightDataUsed: integer("bright_data_used").notNull().default(0),
+  notice: text("notice").notNull().default(""),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [
+  index("import_outcomes_created_idx").on(table.createdAt),
+  index("import_outcomes_host_created_idx").on(table.sourceHost, table.createdAt),
 ]);

@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1536" height="1024" viewBox="0 0 1536 1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#eef5ff"/><stop offset="1" stop-color="#d9e8ff"/></linearGradient>
+  </defs>
+  <rect width="1536" height="1024" fill="url(#bg)"/>
+  <circle cx="1320" cy="130" r="290" fill="#0b6cff" opacity=".08"/>
+  <circle cx="170" cy="900" r="340" fill="#0b6cff" opacity=".06"/>
+  <image href="lotsocial-mark.svg" x="160" y="210" width="310" height="310"/>
+  <text x="530" y="385" fill="#071014" font-family="Arial, Helvetica, sans-serif" font-size="154" font-weight="800" letter-spacing="-8">Lot<tspan fill="#0868f5">Social</tspan></text>
+  <text x="536" y="474" fill="#334451" font-family="Arial, Helvetica, sans-serif" font-size="42" font-weight="600">Paste a VDP. Create grounded social content.</text>
+  <rect x="536" y="532" width="685" height="82" rx="41" fill="#071014"/>
+  <text x="584" y="585" fill="#ffffff" font-family="Arial, Helvetica, sans-serif" font-size="30" font-weight="700">VDP → Content → Storefront → Lead</text>
+</svg>

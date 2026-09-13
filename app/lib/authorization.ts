@@ -33,6 +33,7 @@ export type AuthorizationRequestRecord = {
   expires_at: string | null;
   created_at: string;
   updated_at: string;
+  management_link_expires_at?: string | null;
 };
 
 export type AuthorizationAuditEvent = {
@@ -208,23 +209,63 @@ export async function decideProviderVerification(input: {
 
 export function evaluateAuthorization(record: AuthorizationRequestRecord | null, permission: PermissionId) {
   if (!record) return { allowed: false, reason: "authorization_not_found" } as const;
-  if (record.status !== "active") return { allowed: false, reason: `status_${record.status}` } as const;
   if (record.expires_at && new Date(`${record.expires_at}T23:59:59Z`).getTime() < Date.now()) {
     return { allowed: false, reason: "authorization_expired" } as const;
   }
   if (!parsePermissions(record.approved_permissions).includes(permission)) {
     return { allowed: false, reason: "permission_not_approved" } as const;
   }
-  return { allowed: true, reason: "authorized" } as const;
+  if (["requested", "declined", "suspended", "revoked", "expired"].includes(record.status)) {
+    return { allowed: false, reason: `status_${record.status}` } as const;
+  }
+  const tier = PERMISSIONS.find((item) => item.id === permission)?.tier;
+  if (tier === "manager" && ["manager_approved", "provider_pending", "provider_verified", "provider_declined", "feed_connected", "active"].includes(record.status)) {
+    return { allowed: true, reason: "manager_authorized" } as const;
+  }
+  if (tier === "provider" && ["provider_verified", "feed_connected", "active"].includes(record.status)) {
+    return { allowed: true, reason: "provider_verified" } as const;
+  }
+  return { allowed: false, reason: `provider_rights_${record.status}` } as const;
+}
+
+export function isManagementLinkExpired(record: AuthorizationRequestRecord, env: LotSocialEnvironment, now = new Date()) {
+  if (record.status === "requested") return false;
+  const expiresAt = Date.parse(record.management_link_expires_at ?? "");
+  return !Number.isFinite(expiresAt) || now.getTime() > expiresAt;
+}
+
+export function managementLinkExpiry(env: LotSocialEnvironment, now = new Date()) {
+  const configuredTtl = Number(env.LOTSOCIAL_MANAGEMENT_LINK_TTL_HOURS || "72");
+  const ttlHours = Number.isFinite(configuredTtl) && configuredTtl > 0 ? configuredTtl : 72;
+  return new Date(now.getTime() + ttlHours * 60 * 60 * 1000).toISOString();
 }
 
 export async function getAuthorizationByToken(token: string, env: LotSocialEnvironment) {
   await ensureAuthorizationSchema(env);
   const tokenHash = await hashToken(token);
-  return database(env, "authorization")
+  const db = database(env, "authorization");
+  const request = await db
     .prepare("SELECT * FROM authorization_requests WHERE approval_token_hash = ? LIMIT 1")
     .bind(tokenHash)
     .first<AuthorizationRequestRecord>();
+  if (request?.status === "requested") return request;
+  return db.prepare(`SELECT ar.*, ml.expires_at AS management_link_expires_at
+      FROM authorization_management_links ml
+      JOIN authorization_requests ar ON ar.id = ml.request_id
+      WHERE ml.token_hash = ? LIMIT 1`)
+    .bind(tokenHash)
+    .first<AuthorizationRequestRecord>();
+}
+
+export async function rotateManagementLink(requestId: string, tokenHash: string, env: LotSocialEnvironment) {
+  await ensureAuthorizationSchema(env);
+  const expiresAt = managementLinkExpiry(env);
+  await database(env, "authorization").prepare(`INSERT INTO authorization_management_links (
+      request_id, token_hash, expires_at
+    ) VALUES (?, ?, ?) ON CONFLICT(request_id) DO UPDATE SET
+      token_hash = excluded.token_hash, expires_at = excluded.expires_at, updated_at = CURRENT_TIMESTAMP`)
+    .bind(requestId, tokenHash, expiresAt).run();
+  return expiresAt;
 }
 
 export async function addAuditEvent(
@@ -306,8 +347,8 @@ export async function decideAuthorization(input: {
   if (record.status !== "requested") return { record, alreadyDecided: true };
 
   const status = input.decision === "approved" ? "manager_approved" : "declined";
-  await database(input.env, "authorization")
-    .prepare(`UPDATE authorization_requests SET status = ?, approved_permissions = ?,
+  const db = database(input.env, "authorization");
+  const statements = [db.prepare(`UPDATE authorization_requests SET status = ?, approved_permissions = ?,
       typed_signature = ?, provider_name = ?, provider_contact_name = ?,
       provider_contact_email = ?, expires_at = ?, manager_notes = ?,
       decided_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
@@ -321,8 +362,15 @@ export async function decideAuthorization(input: {
       input.expiresAt,
       input.managerNotes,
       record.id,
-    )
-    .run();
+    )];
+  if (input.decision === "approved") {
+    statements.push(db.prepare(`INSERT INTO authorization_management_links (
+      request_id, token_hash, expires_at
+    ) VALUES (?, ?, ?) ON CONFLICT(request_id) DO UPDATE SET
+      token_hash = excluded.token_hash, expires_at = excluded.expires_at, updated_at = CURRENT_TIMESTAMP`)
+      .bind(record.id, await hashToken(input.token), managementLinkExpiry(input.env)));
+  }
+  await db.batch(statements);
   await addAuditEvent(record.id, "manager", record.manager_email, status, {
     permissions: input.approvedPermissions,
     providerName: input.providerName,
@@ -339,12 +387,15 @@ export async function manageAuthorization(input: {
   expiresAt: string | null;
   managerNotes: string;
   env: LotSocialEnvironment;
+  now?: Date;
 }) {
   const record = await getAuthorizationByToken(input.token, input.env);
   if (!record) return null;
 
+  if (isManagementLinkExpired(record, input.env, input.now)) return { record, unavailable: true, expired: true };
+
   const manageableStatuses = ["manager_approved", "provider_pending", "provider_verified", "provider_declined", "feed_connected", "active", "suspended"];
-  if (!manageableStatuses.includes(record.status)) return { record, unavailable: true };
+  if (!manageableStatuses.includes(record.status)) return { record, unavailable: true, expired: false };
 
   const nextStatus = input.action === "revoke"
     ? "revoked"
@@ -372,7 +423,7 @@ export async function manageAuthorization(input: {
     notes: input.managerNotes,
   }, input.env);
 
-  return { record: { ...record, status: nextStatus, approved_permissions: JSON.stringify(nextPermissions) }, unavailable: false };
+  return { record: { ...record, status: nextStatus, approved_permissions: JSON.stringify(nextPermissions) }, unavailable: false, expired: false };
 }
 
 export function parsePermissions(value: string | null): PermissionId[] {

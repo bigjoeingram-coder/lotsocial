@@ -169,3 +169,16 @@ same tests there (20 pass / 7 fail before this change). No schema change (safe o
 **Delivery note:** the cloud session's git proxy refuses to push to this repository
 (403, "not in this session's authorized repository set"), so this rock lands via the GitHub
 web UI on branch `rf/rock-6-extractor-tests` and a PR into `rf/clarity-break-2026-08-28`.
+
+---
+
+## 2026-09-13 — Closed customer-pilot build — BUILT LOCALLY, DEPLOYMENT GATED
+
+**Integration branch:** `codex/customer-pilot-ready-2026-09-13`, based on remote Rock 3 and carrying the final remote Rock 6 fixes.
+
+- Rock 4 is implemented: every import records one outcome; the seven-day keyed health endpoint reports success and paid-fallback usage by dealer host; Bright Data is capped per associate and globally; budget skips continue through the free path with honest UI notice.
+- Rock 5 is implemented without altering an existing Sites table: dealership-controlled permissions activate after manager approval, provider-controlled rights remain blocked until provider verification, and a provider decline does not switch off dealership rights. Management links live in a new bootstrap-safe table, expire, rotate, and invalidate older links.
+- Approved centered-car branding is installed as deterministic SVG, favicon/app icons, manifest, and Open Graph art. Starter package/readme identity is removed.
+- Current proof: production build; 57/57 behavior tests; bootstrap/schema parity; Drizzle drift; lint 0 errors (four intentional direct-VDP-image performance warnings).
+
+**Not deployed:** Sites deployment, live environment values, D1 inspection/cutover, real paid extraction, real email, real render, tester invitations, and public/customer sends remain Joe-gated.

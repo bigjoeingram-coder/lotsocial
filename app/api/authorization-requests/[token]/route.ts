@@ -1,5 +1,5 @@
 import { env } from "cloudflare:workers";
-import { getAuthorizationByToken, parsePermissions } from "../../../lib/authorization";
+import { getAuthorizationByToken, isManagementLinkExpired, parsePermissions } from "../../../lib/authorization";
 
 export async function GET(_request: Request, context: { params: Promise<{ token: string }> }) {
   const { token } = await context.params;
@@ -25,6 +25,7 @@ export async function GET(_request: Request, context: { params: Promise<{ token:
       expiresAt: record.expires_at,
       managerNotes: record.manager_notes,
       termsVersion: record.terms_version,
+      managementLinkExpired: isManagementLinkExpired(record, env),
     },
   });
 }

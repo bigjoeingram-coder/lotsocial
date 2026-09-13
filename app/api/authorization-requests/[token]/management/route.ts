@@ -28,6 +28,7 @@ export async function POST(request: Request, context: { params: Promise<{ token:
     env,
   });
   if (!result) return Response.json({ error: "This management link is invalid." }, { status: 404 });
+  if (result.expired) return Response.json({ error: "This management link has expired. Ask the LotSocial associate to email a fresh secure link." }, { status: 410 });
   if (result.unavailable) return Response.json({ error: "This authorization can no longer be changed.", status: result.record.status }, { status: 409 });
 
   return Response.json({

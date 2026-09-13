@@ -1,5 +1,6 @@
 import { database, ensureLotSocialSchema } from "./schema-bootstrap.ts";
 import type { LotSocialEnvironment } from "./schema-bootstrap.ts";
+import { incrementDailyLimit } from "./limits.ts";
 
 export type ImportedVehicleRecord = {
   id: string;
@@ -40,6 +41,29 @@ export type ExtractedVehicle = {
   imageUrls: string[];
   facts: Record<string, string>;
 };
+
+export type ExtractionTrace = {
+  fallback: "none" | "bright_data" | "listing_guess";
+  brightDataUsed: boolean;
+  budgetSkipped: boolean;
+  networkTimedOut: boolean;
+  notice: string;
+};
+
+export type ExtractionContext = {
+  associateEmail: string;
+  trace: ExtractionTrace;
+};
+
+export function createExtractionTrace(): ExtractionTrace {
+  return { fallback: "none", brightDataUsed: false, budgetSkipped: false, networkTimedOut: false, notice: "" };
+}
+
+export async function reserveBrightDataBudget(env: LotSocialEnvironment, associateEmail: string) {
+  const associate = await incrementDailyLimit(env, "brightdata_associate", associateEmail);
+  const global = associate.allowed ? await incrementDailyLimit(env, "brightdata_global", "all-associates") : null;
+  return { allowed: associate.allowed && Boolean(global?.allowed), associate, global };
+}
 
 const IMPORT_DEADLINE_MS = 36_000;
 const DIRECT_FETCH_MS = 8_000;
@@ -392,7 +416,12 @@ async function extractFromDealerInspireListing(sourceUrl: URL, deadline: { expir
   return null;
 }
 
-async function fetchViaBrightData(url: URL, deadline: { expiresAt: number }, env: LotSocialEnvironment): Promise<{ html: string; finalUrl: URL } | null> {
+async function fetchViaBrightData(
+  url: URL,
+  deadline: { expiresAt: number },
+  env: LotSocialEnvironment,
+  context?: ExtractionContext,
+): Promise<{ html: string; finalUrl: URL } | null> {
   const apiKey = env?.BRIGHTDATA_API_KEY;
   const zone = env?.BRIGHTDATA_ZONE;
   const envPresent = Boolean(apiKey);
@@ -413,6 +442,20 @@ async function fetchViaBrightData(url: URL, deadline: { expiresAt: number }, env
     logBranch("skipped_no_credentials");
     return null;
   }
+  if (!context?.associateEmail) throw new Error("Bright Data spend control requires an authenticated associate.");
+  const budget = await reserveBrightDataBudget(env, context.associateEmail);
+  if (!budget.allowed) {
+    context.trace.budgetSkipped = true;
+    context.trace.notice = "Paid extraction was skipped because the daily Bright Data budget was reached; LotSocial tried the free inventory path instead.";
+    logBranch("skipped_budget", {
+      associateCount: budget.associate.count,
+      associateCap: budget.associate.cap,
+      globalCount: budget.global?.count,
+      globalCap: budget.global?.cap,
+    });
+    return null;
+  }
+  context.trace.brightDataUsed = true;
   const timeout = timeoutFor(deadline, BRIGHTDATA_FETCH_MS);
   try {
     const response = await fetch("https://api.brightdata.com/request", {
@@ -431,6 +474,7 @@ async function fetchViaBrightData(url: URL, deadline: { expiresAt: number }, env
       return null;
     }
     logBranch("success_parsed", { length: html.length });
+    context.trace.fallback = "bright_data";
     return { html, finalUrl: url };
   } catch (caught) {
     const isAbort = caught instanceof Error && caught.name === "AbortError";
@@ -441,15 +485,22 @@ async function fetchViaBrightData(url: URL, deadline: { expiresAt: number }, env
   }
 }
 
-export async function extractVehicleFromVdp(value: string, env: LotSocialEnvironment): Promise<ExtractedVehicle> {
+export async function extractVehicleFromVdp(
+  value: string,
+  env: LotSocialEnvironment,
+  context?: ExtractionContext,
+): Promise<ExtractedVehicle> {
   const requestedUrl = validatePublicUrl(value);
   const deadline = createDeadline();
 
   async function viaListingOrThrow(reason: string): Promise<{ html: string; finalUrl: URL }> {
-    const viaBrightData = await fetchViaBrightData(requestedUrl, deadline, env);
+    const viaBrightData = await fetchViaBrightData(requestedUrl, deadline, env, context);
     if (viaBrightData) return viaBrightData;
     const listingVehicle = await extractFromDealerInspireListing(requestedUrl, deadline);
-    if (listingVehicle) throw new ResolvedVehicle(listingVehicle);
+    if (listingVehicle) {
+      if (context) context.trace.fallback = "listing_guess";
+      throw new ResolvedVehicle(listingVehicle);
+    }
     throw new Error(`LotSocial could not scrape that VDP yet. ${reason} and no matching public inventory listing was found.`);
   }
 
@@ -470,7 +521,8 @@ export async function extractVehicleFromVdp(value: string, env: LotSocialEnviron
         redirect: "follow",
         signal: timeout.signal,
       });
-    } catch {
+    } catch (caught) {
+      if (context && caught instanceof Error && caught.name === "AbortError") context.trace.networkTimedOut = true;
       resolved = await viaListingOrThrow("This store blocks the direct page");
       return await parseVehicleHtml(resolved.html, resolved.finalUrl);
     } finally {

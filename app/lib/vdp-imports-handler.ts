@@ -2,6 +2,7 @@ import { database } from "./schema-bootstrap.ts";
 import type { LotSocialEnvironment } from "./schema-bootstrap.ts";
 import { incrementDailyLimit, rateLimitResponse } from "./limits.ts";
 import {
+  createExtractionTrace,
   extractVehicleFromVdp,
   getImportedVehicleBySourceUrl,
   listImportedVehicles,
@@ -10,6 +11,7 @@ import {
   sourceUrlVariants,
 } from "./vdp.ts";
 import type { ExtractedVehicle, ImportedVehicleRecord } from "./vdp.ts";
+import { writeImportOutcome } from "./telemetry.ts";
 
 type RouteUser = {
   displayName: string;
@@ -24,6 +26,7 @@ type VdpImportDependencies = {
   extractVehicleFromVdp?: typeof extractVehicleFromVdp;
   saveImportedVehicle?: typeof saveImportedVehicle;
   serializeVehicle?: typeof serializeVehicle;
+  writeImportOutcome?: typeof writeImportOutcome;
 };
 
 export async function handleVdpImportsGet(
@@ -49,29 +52,75 @@ export async function handleVdpImportsPost(
   }
   const sourceUrl = typeof payload.sourceUrl === "string" ? payload.sourceUrl.trim() : "";
   if (!sourceUrl) return Response.json({ error: "Paste a vehicle detail page URL." }, { status: 400 });
+  const startedAt = Date.now();
+  const trace = createExtractionTrace();
+  const sourceHost = hostOf(sourceUrl);
+  const recordOutcome = dependencies.writeImportOutcome ?? writeImportOutcome;
   try {
     const limit = await incrementDailyLimit(env, "vdp_imports", user.email);
     if (!limit.allowed) {
+      await recordOutcomeSafely(recordOutcome, {
+        associateEmail: user.email, sourceHost, outcome: "rate_limited", elapsedMs: Date.now() - startedAt,
+        fallback: "none", brightDataUsed: false,
+      }, env);
       return rateLimitResponse(limit, "Daily VDP import limit reached for this associate.");
     }
     const findExisting = dependencies.getImportedVehicleBySourceUrl ?? getImportedVehicleBySourceUrl;
     const existing = await findExisting(user.email, sourceUrl, env);
     const serialize = dependencies.serializeVehicle ?? serializeVehicle;
-    if (existing) return Response.json({ vehicle: serialize(existing), reused: true }, { status: 200 });
+    if (existing) {
+      await recordOutcomeSafely(recordOutcome, {
+        associateEmail: user.email, sourceHost, outcome: "reused", elapsedMs: Date.now() - startedAt,
+        fallback: "none", brightDataUsed: false,
+      }, env);
+      return Response.json({ vehicle: serialize(existing), reused: true }, { status: 200 });
+    }
     const extract = dependencies.extractVehicleFromVdp ?? extractVehicleFromVdp;
     const save = dependencies.saveImportedVehicle ?? saveImportedVehicle;
-    const extracted = await extract(sourceUrl, env);
+    const extracted = await extract(sourceUrl, env, { associateEmail: user.email, trace });
     const record = await save(user.email, extracted, env);
     if (!record) throw new Error("The imported vehicle could not be saved.");
-    return Response.json({ vehicle: serialize(record) }, { status: 201 });
+    const outcome = trace.budgetSkipped
+      ? "skipped_budget_success"
+      : trace.fallback === "bright_data" ? "bright_data_success"
+        : trace.fallback === "listing_guess" ? "listing_guess_success" : "direct_success";
+    await recordOutcomeSafely(recordOutcome, {
+      associateEmail: user.email, sourceHost, outcome, elapsedMs: Date.now() - startedAt,
+      fallback: trace.fallback, brightDataUsed: trace.brightDataUsed, notice: trace.notice,
+    }, env);
+    return Response.json({ vehicle: serialize(record), notice: trace.notice || undefined }, { status: 201 });
   } catch (error) {
+    const outcome = trace.budgetSkipped ? "skipped_budget_failure" : trace.networkTimedOut ? "network_timeout" : "parse_failure";
+    await recordOutcomeSafely(recordOutcome, {
+      associateEmail: user.email, sourceHost, outcome, elapsedMs: Date.now() - startedAt,
+      fallback: trace.fallback, brightDataUsed: trace.brightDataUsed, notice: trace.notice,
+    }, env);
     try {
       const parsed = new URL(sourceUrl);
       console.warn("vdp_import_failed", { host: parsed.hostname, path: parsed.pathname, message: error instanceof Error ? error.message : "Unknown import failure" });
     } catch {
       console.warn("vdp_import_failed", { host: "invalid-url", message: error instanceof Error ? error.message : "Unknown import failure" });
     }
-    return Response.json({ error: error instanceof Error ? error.message : "Unable to import that VDP." }, { status: 422 });
+    return Response.json({
+      error: error instanceof Error ? error.message : "Unable to import that VDP.",
+      notice: trace.notice || undefined,
+    }, { status: 422 });
+  }
+}
+
+function hostOf(value: string) {
+  try { return new URL(value).hostname.toLowerCase(); } catch { return "invalid-url"; }
+}
+
+async function recordOutcomeSafely(
+  writer: typeof writeImportOutcome,
+  input: Parameters<typeof writeImportOutcome>[0],
+  env: LotSocialEnvironment,
+) {
+  try {
+    await writer(input, env);
+  } catch (error) {
+    console.error("vdp_import_telemetry_failed", { message: error instanceof Error ? error.message : "Unknown telemetry failure" });
   }
 }
 

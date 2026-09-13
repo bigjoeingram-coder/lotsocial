@@ -19,6 +19,9 @@ export async function generateMetadata(): Promise<Metadata> {
   return {
     title,
     description,
+    manifest: "/manifest.webmanifest",
+    icons: { icon: "/favicon.svg", apple: "/icon-192.png" },
+    themeColor: "#0868f5",
     openGraph: { title, description, images: [{ url: imageUrl, width: 1536, height: 1024, alt: "LotSocial inventory permission workflow" }] },
     twitter: { card: "summary_large_image", title, description, images: [imageUrl] },
   };

@@ -65,6 +65,7 @@ export class FakeD1 {
     this.creativeProjects = [...(seed.creativeProjects ?? [])];
     this.creativeRenderJobs = [...(seed.creativeRenderJobs ?? [])];
     this.rateLimitCounters = new Map();
+    this.importOutcomes = [...(seed.importOutcomes ?? [])];
     this.preparedSql = [];
     this.failOnSql = seed.failOnSql ?? "";
   }
@@ -80,6 +81,7 @@ export class FakeD1 {
       creativeProjects: structuredClone(this.creativeProjects),
       creativeRenderJobs: structuredClone(this.creativeRenderJobs),
       rateLimitCounters: structuredClone(this.rateLimitCounters),
+      importOutcomes: structuredClone(this.importOutcomes),
     };
     try {
       const results = [];
@@ -90,6 +92,7 @@ export class FakeD1 {
       this.creativeProjects = snapshot.creativeProjects;
       this.creativeRenderJobs = snapshot.creativeRenderJobs;
       this.rateLimitCounters = snapshot.rateLimitCounters;
+      this.importOutcomes = snapshot.importOutcomes;
       throw error;
     }
   }
@@ -131,6 +134,11 @@ export class FakeD1 {
   run(sql, values) {
     if (this.failOnSql && matches(sql, this.failOnSql)) throw new Error(`Injected batch failure: ${this.failOnSql}`);
     if (matches(sql, "CREATE TABLE") || matches(sql, "CREATE INDEX")) return 0;
+    if (matches(sql, "INSERT INTO import_outcomes")) {
+      const [id, associateEmail, sourceHost, outcome, elapsedMs, fallback, brightDataUsed, notice] = values;
+      this.importOutcomes.push({ id, associate_email: associateEmail, source_host: sourceHost, outcome, elapsed_ms: elapsedMs, fallback, bright_data_used: brightDataUsed, notice });
+      return 1;
+    }
     if (matches(sql, "DELETE FROM creative_render_jobs")) {
       if (matches(sql, "SELECT id FROM creative_projects")) {
         const [associateEmail, vehicleId, projectAssociateEmail] = values;
