@@ -4,6 +4,26 @@ Auditor: Fable (Visionary seat). Repo at commit c63240a. Live context: semi-live
 
 Format: one issue per line, [impact] — issue → why it matters.
 
+## Current disposition — closed pilot candidate (2026-09-13)
+
+The findings below are the original audit record, not the current open-work list. The closed-pilot candidate at local commit `e1572a2` resolves the pilot-blocking build work as follows:
+
+| Finding | Disposition | Evidence / boundary |
+|---|---|---|
+| I-01–I-05 | RESOLVED IN BUILD | Rock 2 closes the identity, request-budget, manager-email, and environment-contract gaps; Rock 4 adds paid-fallback budgets; Rock 5 replaces permanent manager credentials with expiring rotating links. Live host/allowlist and email behavior still require the deployment gate. |
+| I-06–I-07 | RESOLVED IN BUILD | Rock 5 makes the authorization state machine reachable without weakening provider rights. Rock 6 locks the adjacent-vehicle extraction regression with fixtures. |
+| I-08–I-11 | RESOLVED IN BUILD | Rock 1 establishes one bootstrap/migration authority; Rock 3 adds retryable initialization, atomic deletion, and canonical VDP identity. |
+| I-12–I-14 | RESOLVED IN BUILD | Behavior tests, main-targeted CI, import outcomes, and the keyed seven-day health endpoint are present and enforced by `npm test`. |
+| I-15 | MITIGATED FOR PILOT | The free reader remains a dependency, but outcome telemetry, paid-fallback caps, honest budget notices, and host-level health reporting make failure and spend observable. Keep under pilot monitoring. |
+| I-16–I-17 | DEFERRED, NON-BLOCKING | Module and UI decomposition are maintainability work. They are not missing customer behavior and remain outside this hardening cycle. |
+| I-18 | RESOLVED IN BUILD | Rock 6 removes the fixed make allowlist and proves Ram, Jeep, Chrysler, and Dodge candidate paths. |
+| I-19 | DEFERRED, NON-BLOCKING | Helper deduplication remains low-risk maintainability work. |
+| I-20 | RESOLVED IN BUILD | Package, README, icons, manifest, and product identity now name LotSocial. |
+| I-21 | DEFERRED BY PRODUCT DECISION | Phase 0 gamification remains out of scope until a real user database exists. |
+| I-22 | FRESH-DB PATH READY; EXISTING DB UNVERIFIED | A fresh pilot D1 from current migrations avoids the legacy nullable-key risk. Reuse of the Sites database remains gated on schema readback, affected-row counts, and backup before repair. |
+
+Pilot activation is therefore a deployment-and-live-verification decision, not unfinished local build work. `README.md` defines the local and closed-pilot operating gates; `RF-STATUS.md` preserves the live-only evidence gaps.
+
 ## Security & money
 
 - [HIGH] I-01 — `getChatGPTUser` trusts the `oai-authenticated-user-email` header with no proof the request came through OpenAI's proxy → if the worker is reachable at any direct URL (workers.dev or custom route), anyone can set that header and read/write/delete any associate's inventory, projects, and authorizations. Verify platform provenance or block direct routes.
