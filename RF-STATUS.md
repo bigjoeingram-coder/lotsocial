@@ -99,7 +99,7 @@ while Sites remains staging.**
 
 - **Rock 1** — committed, proven twice.
 - **Rock 2** — committed, undeployed, unverified in production.
-- **Rock 3** — reported committed from the cloud session; not present on this remote.
+- **Rock 3** — built and fully proven on `rf/rock-3-persistence`; not deployed.
 - **Rock 4** — new table, safe on Sites via bootstrap. Its ops endpoint gets no platform verification (Q5).
 - **Rock 5** — adds a column to an existing table. **Not safely deployable on Sites**; same failure mode as `storage_key`. Wait for cutover or resequence.
 - **Rock 6** — no schema change, safe.
@@ -114,3 +114,26 @@ Repair built and proven (`drizzle/repair/i22-enforce-pk-not-null.sql`,
 inspected — Q2 failed, no SQL surface exists. If the Cloudflare cutover happens, data is
 imported into a fresh D1 built from corrected migrations and the nullable columns never
 exist there; the repair is insurance for staying, not a blocker for leaving.
+
+---
+
+## 2026-09-12 — Rock 3: persistence recovery and canonical VDP identity — BUILT
+
+**Branch:** `rf/rock-3-persistence` from `d82f2c8` (the current hardening base).
+
+- A failed shared schema bootstrap now clears only its rejected cached promise, so the
+  next request retries instead of leaving the Worker isolate permanently poisoned.
+- Vehicle deletion now executes render-job, project, and vehicle deletes as one D1
+  batch. The render-job delete uses a scoped subquery inside that batch, eliminating
+  the prior select/delete race while preserving per-associate isolation.
+- VDP URLs now have one persistence identity: lowercase host, no fragment, no
+  `utm_*`/`gclid`/`fbclid`, stable query ordering, and no non-root trailing slash.
+  Lookup and save both use that identity, so tracking-first and bare-first imports
+  converge on one row.
+- The shared Tier-2 harness now pins `dist/server/index.js` as Miniflare's first module;
+  this is the same cross-platform CI repair already proven on the Rock 6 branch.
+
+**Proof:** `pnpm test` passed end to end: build; 30/30 behavior tests; bootstrap-schema
+match; Drizzle drift check; and lint with 0 errors (five pre-existing UI warnings).
+Targeted Rock 3 proof is 6/6 in `tests/persistence.test.mjs` plus the existing inventory
+delete suite. No schema change, new runtime dependency, deployment, or live data write.
