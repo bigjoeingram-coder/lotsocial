@@ -165,7 +165,15 @@ export const SCHEMA_BOOTSTRAP_SQL = [
 export function ensureLotSocialSchema(env: LotSocialEnvironment) {
   const db = database(env, "LotSocial");
   if (!schemaReady.has(db)) {
-    schemaReady.set(db, db.batch(SCHEMA_BOOTSTRAP_SQL.map((statement) => db.prepare(statement))).then(() => undefined));
+    const ready = db.batch(SCHEMA_BOOTSTRAP_SQL.map((statement) => db.prepare(statement)))
+      .then(() => undefined)
+      .catch((error) => {
+        // A transient bootstrap failure must not poison this Worker isolate.
+        // Remove only this attempt so the next request can retry safely.
+        if (schemaReady.get(db) === ready) schemaReady.delete(db);
+        throw error;
+      });
+    schemaReady.set(db, ready);
   }
   return schemaReady.get(db)!;
 }

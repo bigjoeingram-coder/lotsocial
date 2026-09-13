@@ -7,6 +7,7 @@ import {
   listImportedVehicles,
   saveImportedVehicle,
   serializeVehicle,
+  sourceUrlVariants,
 } from "./vdp.ts";
 import type { ExtractedVehicle, ImportedVehicleRecord } from "./vdp.ts";
 
@@ -90,31 +91,31 @@ export async function handleVdpImportDelete(
   if (!sourceUrl) return Response.json({ error: "Vehicle source URL is required." }, { status: 400 });
 
   const db = database(env, "inventory");
+  const variants = sourceUrlVariants(sourceUrl);
+  const placeholders = variants.map(() => "?").join(", ");
   const vehicle = await db.prepare(
-    "SELECT id FROM imported_vehicles WHERE LOWER(associate_email) = LOWER(?) AND source_url = ? LIMIT 1"
-  ).bind(user.email, sourceUrl).first<{ id: string }>();
+    `SELECT id FROM imported_vehicles WHERE LOWER(associate_email) = LOWER(?) AND source_url IN (${placeholders}) ORDER BY updated_at DESC LIMIT 1`
+  ).bind(user.email, ...variants).first<{ id: string }>();
 
   if (!vehicle) return Response.json({ error: "That vehicle is not in your inventory." }, { status: 404 });
 
-  const projectRows = await db.prepare(
-    "SELECT id FROM creative_projects WHERE vehicle_id = ? AND LOWER(associate_email) = LOWER(?)"
-  ).bind(vehicle.id, user.email).all<{ id: string }>();
-
-  for (const project of projectRows.results) {
-    await db.prepare(
-      "DELETE FROM creative_render_jobs WHERE project_id = ? AND LOWER(associate_email) = LOWER(?)"
-    ).bind(project.id, user.email).run();
-  }
-
-  await db.prepare(
+  const statements = [db.prepare(
+    `DELETE FROM creative_render_jobs
+     WHERE LOWER(associate_email) = LOWER(?)
+       AND project_id IN (
+         SELECT id FROM creative_projects
+         WHERE vehicle_id = ? AND LOWER(associate_email) = LOWER(?)
+       )`
+  ).bind(user.email, vehicle.id, user.email), db.prepare(
     "DELETE FROM creative_projects WHERE vehicle_id = ? AND LOWER(associate_email) = LOWER(?)"
-  ).bind(vehicle.id, user.email).run();
-
-  const result = await db.prepare(
+  ).bind(vehicle.id, user.email), db.prepare(
     "DELETE FROM imported_vehicles WHERE id = ? AND LOWER(associate_email) = LOWER(?)"
-  ).bind(vehicle.id, user.email).run();
+  ).bind(vehicle.id, user.email)];
 
-  if (!result.meta.changes) return Response.json({ error: "Vehicle deletion did not complete." }, { status: 409 });
+  const results = await db.batch<{ meta: { changes: number } }>(statements);
+  const result = results.at(-1);
+
+  if (!result?.meta.changes) return Response.json({ error: "Vehicle deletion did not complete." }, { status: 409 });
 
   return Response.json({ deleted: true, vehicleId: vehicle.id });
 }
