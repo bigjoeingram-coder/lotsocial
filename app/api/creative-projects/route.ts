@@ -1,6 +1,7 @@
 import { env } from "cloudflare:workers";
 import { associateAuthResponse, requireAssociate } from "../../chatgpt-auth";
 import { saveCreativeProject, serializeCreativeProject } from "../../lib/creative";
+import type { GravyLevel } from "../../lib/creative";
 import { getImportedVehicle } from "../../lib/vdp";
 
 function clean(value: unknown) {
@@ -38,7 +39,10 @@ export async function POST(request: Request) {
   const durationSeconds = [15, 30, 45].includes(Number(payload.durationSeconds)) ? Number(payload.durationSeconds) : 30;
   const endCardName = clean(payload.endCardName) || user.displayName;
   const endCardCta = clean(payload.endCardCta) || "Message me for details";
-  const flavor = payload.flavor === true;
+  const requestedGravy = clean(payload.gravyLevel);
+  const gravyLevel: GravyLevel = requestedGravy === "light" || requestedGravy === "extra"
+    ? requestedGravy
+    : payload.flavor === true ? "light" : "none";
   const project = await saveCreativeProject({
     vehicle,
     associateEmail: user.email,
@@ -50,7 +54,7 @@ export async function POST(request: Request) {
     endCardEmail: clean(payload.endCardEmail) || user.email,
     endCardCta,
     endCardPhotoUrl: cleanProfilePhotoUrl(payload.endCardPhotoUrl, request),
-    flavor,
+    gravyLevel,
     env,
   });
   if (!project) return Response.json({ error: "The creative draft could not be saved." }, { status: 500 });

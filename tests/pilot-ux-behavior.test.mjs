@@ -32,6 +32,24 @@ test("public caption names the dealership host instead of saying VDP", () => {
   assert.doesNotMatch(copy.socialCaption, /listed on the VDP/i);
 });
 
+test("No, Light, and Extra Gravy create distinct copy without changing the compliance disclosures", () => {
+  const vehicle = importedVehicle({ source_host: "dealer.example", price: "43921" });
+  const noGravy = createCopy(vehicle, "walkaround", 30, "Joe", "Message me for details", "none");
+  const lightGravy = createCopy(vehicle, "walkaround", 30, "Joe", "Message me for details", "light");
+  const extraGravy = createCopy(vehicle, "walkaround", 30, "Joe", "Message me for details", "extra");
+
+  assert.notEqual(noGravy.socialCaption, lightGravy.socialCaption);
+  assert.notEqual(lightGravy.socialCaption, extraGravy.socialCaption);
+  assert.doesNotMatch(noGravy.socialCaption, /confident presence/i);
+  assert.match(lightGravy.socialCaption, /confident presence/i);
+  assert.match(extraGravy.socialCaption, /Every angle brings another reason to keep watching/i);
+  for (const copy of [noGravy, lightGravy, extraGravy]) {
+    assert.match(copy.socialCaption, /Confirm current price, availability, equipment, and eligibility with the dealership/);
+    assert.match(copy.socialCaption, /expires 7 days after posting or when the vehicle sells/);
+    assert.match(copy.socialCaption, /Total price listed on dealer\.example: \$43,921/);
+  }
+});
+
 test("vehicle dates are normalized to a public model year", () => {
   assert.equal(normalizeVehicleYear("2025-01-01"), "2025");
   assert.equal(normalizeVehicleYear("2025"), "2025");
