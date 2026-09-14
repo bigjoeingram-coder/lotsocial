@@ -32,6 +32,7 @@ export type LotSocialEnvironment = {
   ENFORCEMENT_API_KEY?: string;
   RESEND_API_KEY?: string;
   EMAIL_FROM?: string;
+  LOTSOCIAL_SESSION_TTL_HOURS?: string;
 };
 
 let schemaReady = new WeakMap<D1DatabaseLike, Promise<void>>();
@@ -43,6 +44,49 @@ export function database(env: LotSocialEnvironment, label: string) {
 }
 
 export const SCHEMA_BOOTSTRAP_SQL = [
+  `CREATE TABLE IF NOT EXISTS pilot_invites (
+    id TEXT PRIMARY KEY NOT NULL,
+    token_hash TEXT NOT NULL UNIQUE,
+    email TEXT NOT NULL,
+    dealership_name TEXT NOT NULL,
+    dealership_domain TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    used_at TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`,
+  "CREATE INDEX IF NOT EXISTS pilot_invites_email_idx ON pilot_invites(email, created_at DESC)",
+  `CREATE TABLE IF NOT EXISTS associate_accounts (
+    id TEXT PRIMARY KEY NOT NULL,
+    email TEXT NOT NULL UNIQUE,
+    display_name TEXT NOT NULL,
+    phone TEXT NOT NULL DEFAULT '',
+    dealership_name TEXT NOT NULL,
+    dealership_domain TEXT NOT NULL,
+    rooftop_location TEXT NOT NULL DEFAULT '',
+    profile_photo_url TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'active',
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`,
+  `CREATE TABLE IF NOT EXISTS associate_sessions (
+    id TEXT PRIMARY KEY NOT NULL,
+    account_id TEXT NOT NULL,
+    token_hash TEXT NOT NULL UNIQUE,
+    expires_at TEXT NOT NULL,
+    revoked_at TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`,
+  "CREATE INDEX IF NOT EXISTS associate_sessions_account_idx ON associate_sessions(account_id, created_at DESC)",
+  "CREATE INDEX IF NOT EXISTS associate_sessions_expiry_idx ON associate_sessions(expires_at)",
+  `CREATE TABLE IF NOT EXISTS account_login_links (
+    id TEXT PRIMARY KEY NOT NULL,
+    account_id TEXT NOT NULL,
+    token_hash TEXT NOT NULL UNIQUE,
+    expires_at TEXT NOT NULL,
+    used_at TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`,
+  "CREATE INDEX IF NOT EXISTS account_login_links_account_idx ON account_login_links(account_id, created_at DESC)",
   `CREATE TABLE IF NOT EXISTS authorization_requests (
     id TEXT PRIMARY KEY NOT NULL,
     approval_token_hash TEXT NOT NULL UNIQUE,

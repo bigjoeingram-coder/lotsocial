@@ -1,11 +1,17 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
+import { getAccountUserFromHeaders } from "./lib/account-auth.ts";
 import type { LotSocialEnvironment } from "./lib/schema-bootstrap.ts";
 
 export type ChatGPTUser = {
   displayName: string;
   email: string;
   fullName: string | null;
+  phone?: string;
+  dealershipName?: string;
+  dealershipDomain?: string;
+  rooftopLocation?: string;
+  profilePhotoUrl?: string;
 };
 
 const USER_EMAIL_HEADER = "oai-authenticated-user-email";
@@ -13,8 +19,8 @@ const USER_FULL_NAME_HEADER = "oai-authenticated-user-full-name";
 const USER_FULL_NAME_ENCODING_HEADER =
   "oai-authenticated-user-full-name-encoding";
 const PERCENT_ENCODED_UTF8 = "percent-encoded-utf-8";
-const SIGN_IN_PATH = "/signin-with-chatgpt";
-const SIGN_OUT_PATH = "/signout-with-chatgpt";
+const SIGN_IN_PATH = "/login";
+const SIGN_OUT_PATH = "/api/account-logout";
 const CALLBACK_PATH = "/callback";
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -38,6 +44,9 @@ export async function requireAssociate(
   if (!expectedHost || requestHost !== expectedHost) {
     throw new AssociateAuthError("This request must come through the LotSocial Sites address.");
   }
+
+  const accountUser = await getAccountUserFromHeaders(requestHeaders, env);
+  if (accountUser) return accountUser;
 
   // Trusted-by-topology: OpenAI Sites currently provides only plaintext
   // oai-authenticated-user-* headers and no signed/verifiable provenance signal.

@@ -1,6 +1,52 @@
 import { sql } from "drizzle-orm";
 import { index, integer, primaryKey, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
+export const pilotInvites = sqliteTable("pilot_invites", {
+  id: text("id").primaryKey(),
+  tokenHash: text("token_hash").notNull().unique(),
+  email: text("email").notNull(),
+  dealershipName: text("dealership_name").notNull(),
+  dealershipDomain: text("dealership_domain").notNull(),
+  expiresAt: text("expires_at").notNull(),
+  usedAt: text("used_at"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [index("pilot_invites_email_idx").on(table.email, table.createdAt)]);
+
+export const associateAccounts = sqliteTable("associate_accounts", {
+  id: text("id").primaryKey(),
+  email: text("email").notNull().unique(),
+  displayName: text("display_name").notNull(),
+  phone: text("phone").notNull().default(""),
+  dealershipName: text("dealership_name").notNull(),
+  dealershipDomain: text("dealership_domain").notNull(),
+  rooftopLocation: text("rooftop_location").notNull().default(""),
+  profilePhotoUrl: text("profile_photo_url").notNull().default(""),
+  status: text("status").notNull().default("active"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});
+
+export const associateSessions = sqliteTable("associate_sessions", {
+  id: text("id").primaryKey(),
+  accountId: text("account_id").notNull(),
+  tokenHash: text("token_hash").notNull().unique(),
+  expiresAt: text("expires_at").notNull(),
+  revokedAt: text("revoked_at"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [
+  index("associate_sessions_account_idx").on(table.accountId, table.createdAt),
+  index("associate_sessions_expiry_idx").on(table.expiresAt),
+]);
+
+export const accountLoginLinks = sqliteTable("account_login_links", {
+  id: text("id").primaryKey(),
+  accountId: text("account_id").notNull(),
+  tokenHash: text("token_hash").notNull().unique(),
+  expiresAt: text("expires_at").notNull(),
+  usedAt: text("used_at"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [index("account_login_links_account_idx").on(table.accountId, table.createdAt)]);
+
 export const authorizationRequests = sqliteTable("authorization_requests", {
   id: text("id").primaryKey(),
   approvalTokenHash: text("approval_token_hash").notNull().unique(),

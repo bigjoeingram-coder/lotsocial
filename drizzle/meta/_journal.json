@@ -71,6 +71,13 @@
       "when": 1789321515768,
       "tag": "0009_powerful_blindfold",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1789426414966,
+      "tag": "0010_odd_master_mold",
+      "breakpoints": true
     }
   ]
 }

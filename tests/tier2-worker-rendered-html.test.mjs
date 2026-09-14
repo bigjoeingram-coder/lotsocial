@@ -20,6 +20,17 @@ test("Tier 2 boots the built Worker and serves a real API response", async () =>
   }
 });
 
+test("an unauthenticated workspace visit redirects to LotSocial login instead of ChatGPT", async () => {
+  const worker = await startTier2Worker();
+  try {
+    const response = await worker.fetch("https://lotsocial.test/", { redirect: "manual" });
+    assert.match(response.headers.get("location") ?? "", /\/login\?return_to=/);
+    assert.doesNotMatch(response.headers.get("location") ?? "", /signin-with-chatgpt/);
+  } finally {
+    await worker.dispose();
+  }
+});
+
 test("Tier 2 serves rendered LotSocial HTML", async () => {
   const worker = await startTier2Worker();
   try {
