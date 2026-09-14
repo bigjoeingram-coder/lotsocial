@@ -57,6 +57,13 @@
       "when": 1788158670741,
       "tag": "0007_great_baron_strucker",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1789378359743,
+      "tag": "0008_cool_leech",
+      "breakpoints": true
     }
   ]
 }
