@@ -23,6 +23,7 @@ export type AssociateAccountRecord = {
   dealership_domain: string;
   rooftop_location: string;
   profile_photo_url: string;
+  role: "associate" | "manager" | "admin";
   status: string;
 };
 
@@ -36,6 +37,7 @@ export type AccountUser = {
   dealershipDomain: string;
   rooftopLocation: string;
   profilePhotoUrl: string;
+  role: "associate" | "manager" | "admin";
 };
 
 export function normalizeWorkEmail(value: string) {
@@ -145,6 +147,7 @@ export async function getAccountUserFromHeaders(headers: Headers, env: LotSocial
     dealershipDomain: record.dealership_domain,
     rooftopLocation: record.rooftop_location,
     profilePhotoUrl: record.profile_photo_url,
+    role: record.role,
   };
 }
 

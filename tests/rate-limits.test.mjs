@@ -28,6 +28,7 @@ test("concurrent VDP imports never allow more than the associate daily cap", asy
         jsonRequest("https://lotsocial.test/api/vdp-imports", "POST", {
           sourceUrl: `https://dealer.example/vdp/${index}`,
           authorizedToMarket: true,
+          purposeNote: "Create a vehicle social post",
         }),
         env,
         {
@@ -53,6 +54,7 @@ test("concurrent VDP imports never allow more than the associate daily cap", asy
             saves += 1;
             return importedVehicle({ id: `veh_${saves}`, title: vehicle.title, source_url: vehicle.sourceUrl });
           },
+          recordImportEvidence: async () => ({ id: crypto.randomUUID() }),
         },
       ));
 
@@ -79,27 +81,33 @@ test("VDP import caps are per associate, not global", async () => {
       jsonRequest("https://lotsocial.test/api/vdp-imports", "POST", {
         sourceUrl: "https://dealer.example/vdp/1",
         authorizedToMarket: true,
+        purposeNote: "Create a vehicle social post",
       }),
       env,
       {
         associate: signedInUser,
-        getImportedVehicleBySourceUrl: async () => importedVehicle({ id: "veh_1" }),
+        extractVehicleFromVdp: async () => ({}),
+        saveImportedVehicle: async () => importedVehicle({ id: "veh_1" }),
+        recordImportEvidence: async () => ({ id: "ev_1" }),
       },
     );
     const secondAssociate = await handleVdpImportsPost(
       jsonRequest("https://lotsocial.test/api/vdp-imports", "POST", {
         sourceUrl: "https://dealer.example/vdp/2",
         authorizedToMarket: true,
+        purposeNote: "Create a vehicle social post",
       }),
       env,
       {
         associate: { ...signedInUser, email: "sam@example.com" },
-        getImportedVehicleBySourceUrl: async () => importedVehicle({ id: "veh_2", associate_email: "sam@example.com" }),
+        extractVehicleFromVdp: async () => ({}),
+        saveImportedVehicle: async () => importedVehicle({ id: "veh_2", associate_email: "sam@example.com" }),
+        recordImportEvidence: async () => ({ id: "ev_2" }),
       },
     );
 
-    assert.equal(firstAssociate.status, 200);
-    assert.equal(secondAssociate.status, 200);
+    assert.equal(firstAssociate.status, 201);
+    assert.equal(secondAssociate.status, 201);
   } finally {
     db.close();
   }

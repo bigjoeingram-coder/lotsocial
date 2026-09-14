@@ -31,29 +31,26 @@ test("VDP import rejects unconfirmed marketing authority before extraction", asy
   assert.equal(extracted, false);
 });
 
-test("VDP import reuses an existing source record before scraping", async () => {
-  let extracted = false;
+test("a deliberate reimport scrapes again and writes a second immutable evidence record", async () => {
+  let extracted = 0;
+  let evidenceWrites = 0;
   const existing = importedVehicle({ id: "veh_existing", title: "Existing vehicle" });
   const response = await handleVdpImportsPost(jsonRequest("https://app.example/api/vdp-imports", "POST", {
     sourceUrl: " https://dealer.example/vdp/1 ",
     authorizedToMarket: true,
+    purposeNote: "Create a vehicle social post",
   }), testEnv({ DB: new FakeD1() }), {
     associate: signedInUser,
-    getImportedVehicleBySourceUrl: async (associateEmail, sourceUrl) => {
-      assert.equal(associateEmail, signedInUser.email);
-      assert.equal(sourceUrl, "https://dealer.example/vdp/1");
-      return existing;
-    },
-    extractVehicleFromVdp: async () => {
-      extracted = true;
-      throw new Error("should not extract");
-    },
+    getImportedVehicleBySourceUrl: async () => existing,
+    extractVehicleFromVdp: async () => { extracted += 1; return { sourceUrl: existing.source_url, sourceHost: existing.source_host }; },
+    saveImportedVehicle: async () => existing,
+    recordImportEvidence: async (input) => { evidenceWrites += 1; assert.equal(input.purposeNote, "Create a vehicle social post"); return { id: `ev_${evidenceWrites}` }; },
   });
 
-  assert.equal(response.status, 200);
-  assert.equal(extracted, false);
+  assert.equal(response.status, 201);
+  assert.equal(extracted, 1);
+  assert.equal(evidenceWrites, 1);
   const payload = await json(response);
-  assert.equal(payload.reused, true);
   assert.equal(payload.vehicle.id, "veh_existing");
 });
 
@@ -78,6 +75,7 @@ test("VDP import scrapes and saves when no existing source record exists", async
   const response = await handleVdpImportsPost(jsonRequest("https://app.example/api/vdp-imports", "POST", {
     sourceUrl: "https://dealer.example/vdp/2",
     authorizedToMarket: true,
+    purposeNote: "Create a walkaround video",
   }), testEnv({ DB: new FakeD1() }), {
     associate: signedInUser,
     getImportedVehicleBySourceUrl: async () => null,
@@ -90,6 +88,7 @@ test("VDP import scrapes and saves when no existing source record exists", async
       assert.equal(vehicle, extractedVehicle);
       return importedVehicle({ id: "veh_saved", title: vehicle.title, source_url: vehicle.sourceUrl });
     },
+    recordImportEvidence: async () => ({ id: "ev_saved", screenshotStatus: "unavailable" }),
   });
 
   assert.equal(response.status, 201);

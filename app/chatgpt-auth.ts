@@ -12,6 +12,7 @@ export type ChatGPTUser = {
   dealershipDomain?: string;
   rooftopLocation?: string;
   profilePhotoUrl?: string;
+  role?: "associate" | "manager" | "admin";
 };
 
 const USER_EMAIL_HEADER = "oai-authenticated-user-email";
@@ -76,6 +77,7 @@ export async function requireAssociate(
     displayName: fullName ?? email,
     email,
     fullName,
+    role: "admin",
   };
 }
 

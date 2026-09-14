@@ -2,6 +2,7 @@ import { database, ensureLotSocialSchema } from "./schema-bootstrap.ts";
 import type { LotSocialEnvironment } from "./schema-bootstrap.ts";
 import { normalizeVehicleYear } from "./vdp.ts";
 import type { ImportedVehicleRecord } from "./vdp.ts";
+import { PRICING_DISCLAIMER_VERSION } from "./evidence.ts";
 
 export type CreativeProjectRecord = {
   id: string;
@@ -17,6 +18,7 @@ export type CreativeProjectRecord = {
   end_card_email: string;
   end_card_cta: string;
   end_card_photo_url: string;
+  disclaimer_version: string;
   status: string;
   created_at: string;
   updated_at: string;
@@ -250,12 +252,12 @@ export async function saveCreativeProject(input: {
   await db.prepare(`INSERT INTO creative_projects (
     id, vehicle_id, associate_email, selected_images, style, duration_seconds,
     voiceover_script, social_caption, end_card_name, end_card_phone, end_card_email,
-    end_card_cta, end_card_photo_url, status
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'storyboard_ready')`)
+    end_card_cta, end_card_photo_url, disclaimer_version, status
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'storyboard_ready')`)
     .bind(id, input.vehicle.id, input.associateEmail, JSON.stringify(input.selectedImages),
       input.style, input.durationSeconds, copy.voiceoverScript, copy.socialCaption,
       input.endCardName, input.endCardPhone, input.endCardEmail, input.endCardCta,
-      input.endCardPhotoUrl).run();
+      input.endCardPhotoUrl, PRICING_DISCLAIMER_VERSION).run();
   return db.prepare("SELECT * FROM creative_projects WHERE id = ? LIMIT 1").bind(id).first<CreativeProjectRecord>();
 }
 
@@ -273,6 +275,7 @@ export function serializeCreativeProject(record: CreativeProjectRecord) {
     endCardEmail: record.end_card_email,
     endCardCta: record.end_card_cta,
     endCardPhotoUrl: record.end_card_photo_url,
+    disclaimerVersion: record.disclaimer_version,
     status: record.status,
     createdAt: record.created_at,
   };

@@ -14,7 +14,7 @@ async function runImportScenario({ fallback = "none", budgetSkipped = false, bri
   const outcomes = [];
   const response = await handleVdpImportsPost(new Request("https://lotsocial.test/api/vdp-imports", {
     method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ sourceUrl: "https://dealer.example/vdp/1", authorizedToMarket: true }),
+    body: JSON.stringify({ sourceUrl: "https://dealer.example/vdp/1", authorizedToMarket: true, purposeNote: "Create a vehicle social post" }),
   }), env, {
     associate,
     getImportedVehicleBySourceUrl: async () => null,
@@ -27,6 +27,7 @@ async function runImportScenario({ fallback = "none", budgetSkipped = false, bri
       return {};
     },
     saveImportedVehicle: async () => importedVehicle(),
+    recordImportEvidence: async () => ({ id: "ev_1" }),
     writeImportOutcome: async (outcome) => { outcomes.push(outcome); },
   });
   db.close();

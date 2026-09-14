@@ -14,6 +14,7 @@ export type LotSocialEnvironment = {
   DB?: D1DatabaseLike;
   MEDIA?: R2Bucket;
   IMAGES?: unknown;
+  BROWSER?: { quickAction(action: string, input: Record<string, unknown>): Promise<Response> };
   BRIGHTDATA_API_KEY?: string;
   BRIGHTDATA_ZONE?: string;
   SHOTSTACK_API_KEY?: string;
@@ -64,6 +65,7 @@ export const SCHEMA_BOOTSTRAP_SQL = [
     dealership_domain TEXT NOT NULL,
     rooftop_location TEXT NOT NULL DEFAULT '',
     profile_photo_url TEXT NOT NULL DEFAULT '',
+    role TEXT NOT NULL DEFAULT 'associate',
     status TEXT NOT NULL DEFAULT 'active',
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -109,7 +111,7 @@ export const SCHEMA_BOOTSTRAP_SQL = [
     email_message_id TEXT,
     typed_signature TEXT,
     manager_notes TEXT NOT NULL DEFAULT '',
-    terms_version TEXT NOT NULL DEFAULT '2026-07-18-v1',
+    terms_version TEXT NOT NULL DEFAULT '2026-09-14-v2',
     requested_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     decided_at TEXT,
     expires_at TEXT,
@@ -174,6 +176,32 @@ export const SCHEMA_BOOTSTRAP_SQL = [
     UNIQUE(associate_email, source_url)
   )`,
   "CREATE INDEX IF NOT EXISTS imported_vehicles_associate_idx ON imported_vehicles(associate_email, imported_at DESC)",
+  `CREATE TABLE IF NOT EXISTS import_evidence (
+    id TEXT PRIMARY KEY NOT NULL,
+    vehicle_id TEXT NOT NULL,
+    associate_email TEXT NOT NULL,
+    dealership_tenant TEXT NOT NULL,
+    source_url TEXT NOT NULL,
+    source_host TEXT NOT NULL,
+    captured_at TEXT NOT NULL,
+    content_sha256 TEXT NOT NULL,
+    html_storage_key TEXT NOT NULL,
+    screenshot_storage_key TEXT NOT NULL DEFAULT '',
+    screenshot_status TEXT NOT NULL DEFAULT 'unavailable',
+    price_at_capture TEXT NOT NULL DEFAULT '',
+    currency TEXT NOT NULL DEFAULT 'USD',
+    vin_at_capture TEXT NOT NULL DEFAULT '',
+    stock_at_capture TEXT NOT NULL DEFAULT '',
+    title_at_capture TEXT NOT NULL,
+    purpose_project_id TEXT,
+    purpose_note TEXT NOT NULL,
+    source_type TEXT NOT NULL DEFAULT 'vdp_one_time',
+    content_type TEXT NOT NULL DEFAULT 'text/html; charset=utf-8',
+    storage_bytes INTEGER NOT NULL DEFAULT 0
+  )`,
+  "CREATE INDEX IF NOT EXISTS import_evidence_vehicle_idx ON import_evidence(vehicle_id, captured_at DESC)",
+  "CREATE INDEX IF NOT EXISTS import_evidence_tenant_idx ON import_evidence(dealership_tenant, captured_at DESC)",
+  "CREATE INDEX IF NOT EXISTS import_evidence_associate_idx ON import_evidence(associate_email, captured_at DESC)",
   `CREATE TABLE IF NOT EXISTS creative_projects (
     id TEXT PRIMARY KEY NOT NULL,
     vehicle_id TEXT NOT NULL,
@@ -188,6 +216,7 @@ export const SCHEMA_BOOTSTRAP_SQL = [
     end_card_email TEXT NOT NULL DEFAULT '',
     end_card_cta TEXT NOT NULL DEFAULT 'Message me for details',
     end_card_photo_url TEXT NOT NULL DEFAULT '',
+    disclaimer_version TEXT NOT NULL DEFAULT '2026-09-14-v1',
     status TEXT NOT NULL DEFAULT 'draft',
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP

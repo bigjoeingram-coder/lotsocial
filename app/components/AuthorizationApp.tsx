@@ -241,6 +241,7 @@ export function AuthorizationApp({ user }: { user: User }) {
   const [inventoryLoading, setInventoryLoading] = useState(true);
   const [vdpUrl, setVdpUrl] = useState("");
   const [authorizedToMarket, setAuthorizedToMarket] = useState(false);
+  const [importPurpose, setImportPurpose] = useState("Create a vehicle social post");
   const [importingVdp, setImportingVdp] = useState(false);
   const [inventoryError, setInventoryError] = useState("");
   const [importNotice, setImportNotice] = useState("");
@@ -334,7 +335,7 @@ export function AuthorizationApp({ user }: { user: User }) {
       const response = await fetch("/api/vdp-imports", {
         method: "POST",
         headers: apiHeaders({ "Content-Type": "application/json" }),
-        body: JSON.stringify({ sourceUrl: vdpUrl, authorizedToMarket }),
+        body: JSON.stringify({ sourceUrl: vdpUrl, authorizedToMarket, purposeNote: importPurpose }),
       });
       const payload = await response.json() as { vehicle?: ImportedVehicle; error?: string; notice?: string };
       if (!response.ok || !payload.vehicle) throw new Error(payload.error ?? "Unable to import that VDP.");
@@ -822,6 +823,7 @@ export function AuthorizationApp({ user }: { user: User }) {
             <form className="vdp-import-panel" onSubmit={importVdp}>
               <div className="vdp-import-heading"><div className="import-icon">↗</div><div><h2>Import a vehicle detail page</h2><p>Use the exact public VDP for the vehicle you want to promote.</p></div></div>
               <label className="vdp-url-field"><span>Vehicle detail page URL</span><div><input type="url" value={vdpUrl} onChange={(event) => setVdpUrl(event.target.value)} placeholder="https://dealer.com/inventory/vehicle..." required /><button className="primary-button" type="submit" disabled={importingVdp || !authorizedToMarket}>{importingVdp ? "Gathering vehicle info..." : "Import vehicle"}</button></div></label>
+              <label className="field"><span>Why are you importing this vehicle?</span><select value={importPurpose} onChange={(event) => setImportPurpose(event.target.value)} required><option>Create a vehicle social post</option><option>Create a walkaround video</option><option>Promote a new arrival</option><option>Promote aged inventory</option><option>Manager request</option></select></label>
               <label className="vdp-certification"><input type="checkbox" checked={authorizedToMarket} onChange={(event) => setAuthorizedToMarket(event.target.checked)} /><span className="custom-check">✓</span><span>I certify that I am authorized to market this dealership's vehicle and use its approved VDP content for dealership social posts.</span></label>
               <div className="vdp-boundary"><strong>One-time, source-stamped import</strong><span>LotSocial does not bypass logins or access controls. Automated inventory remains a Pro feed feature.</span></div>
               {inventoryError && <div className="form-error" role="alert">{inventoryError}</div>}

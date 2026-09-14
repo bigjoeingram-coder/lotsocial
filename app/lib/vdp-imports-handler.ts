@@ -4,7 +4,6 @@ import { incrementDailyLimit, rateLimitResponse } from "./limits.ts";
 import {
   createExtractionTrace,
   extractVehicleFromVdp,
-  getImportedVehicleBySourceUrl,
   listImportedVehicles,
   saveImportedVehicle,
   serializeVehicle,
@@ -12,21 +11,24 @@ import {
 } from "./vdp.ts";
 import type { ExtractedVehicle, ImportedVehicleRecord } from "./vdp.ts";
 import { writeImportOutcome } from "./telemetry.ts";
+import { recordImportEvidence } from "./evidence.ts";
 
 type RouteUser = {
   displayName: string;
   email: string;
   fullName: string | null;
+  dealershipName?: string;
+  dealershipDomain?: string;
 };
 
 type VdpImportDependencies = {
   associate: RouteUser;
   listImportedVehicles?: typeof listImportedVehicles;
-  getImportedVehicleBySourceUrl?: typeof getImportedVehicleBySourceUrl;
   extractVehicleFromVdp?: typeof extractVehicleFromVdp;
   saveImportedVehicle?: typeof saveImportedVehicle;
   serializeVehicle?: typeof serializeVehicle;
   writeImportOutcome?: typeof writeImportOutcome;
+  recordImportEvidence?: typeof recordImportEvidence;
 };
 
 export async function handleVdpImportsGet(
@@ -52,6 +54,10 @@ export async function handleVdpImportsPost(
   }
   const sourceUrl = typeof payload.sourceUrl === "string" ? payload.sourceUrl.trim() : "";
   if (!sourceUrl) return Response.json({ error: "Paste a vehicle detail page URL." }, { status: 400 });
+  const purposeNote = typeof payload.purposeNote === "string" ? payload.purposeNote.trim() : "";
+  if (!purposeNote || purposeNote.length > 240) {
+    return Response.json({ error: "Choose why you are importing this vehicle." }, { status: 400 });
+  }
   const startedAt = Date.now();
   const trace = createExtractionTrace();
   const sourceHost = hostOf(sourceUrl);
@@ -65,21 +71,20 @@ export async function handleVdpImportsPost(
       }, env);
       return rateLimitResponse(limit, "Daily VDP import limit reached for this associate.");
     }
-    const findExisting = dependencies.getImportedVehicleBySourceUrl ?? getImportedVehicleBySourceUrl;
-    const existing = await findExisting(user.email, sourceUrl, env);
     const serialize = dependencies.serializeVehicle ?? serializeVehicle;
-    if (existing) {
-      await recordOutcomeSafely(recordOutcome, {
-        associateEmail: user.email, sourceHost, outcome: "reused", elapsedMs: Date.now() - startedAt,
-        fallback: "none", brightDataUsed: false,
-      }, env);
-      return Response.json({ vehicle: serialize(existing), reused: true }, { status: 200 });
-    }
     const extract = dependencies.extractVehicleFromVdp ?? extractVehicleFromVdp;
     const save = dependencies.saveImportedVehicle ?? saveImportedVehicle;
     const extracted = await extract(sourceUrl, env, { associateEmail: user.email, trace });
     const record = await save(user.email, extracted, env);
     if (!record) throw new Error("The imported vehicle could not be saved.");
+    const evidenceWriter = dependencies.recordImportEvidence ?? recordImportEvidence;
+    const evidence = await evidenceWriter({
+      vehicle: record,
+      extracted,
+      associateEmail: user.email,
+      dealershipTenant: user.dealershipDomain || user.dealershipName || extracted.sourceHost,
+      purposeNote,
+    }, env);
     const outcome = trace.budgetSkipped
       ? "skipped_budget_success"
       : trace.fallback === "bright_data" ? "bright_data_success"
@@ -88,7 +93,7 @@ export async function handleVdpImportsPost(
       associateEmail: user.email, sourceHost, outcome, elapsedMs: Date.now() - startedAt,
       fallback: trace.fallback, brightDataUsed: trace.brightDataUsed, notice: trace.notice,
     }, env);
-    return Response.json({ vehicle: serialize(record), notice: trace.notice || undefined }, { status: 201 });
+    return Response.json({ vehicle: serialize(record), evidence, notice: trace.notice || undefined }, { status: 201 });
   } catch (error) {
     const outcome = trace.budgetSkipped ? "skipped_budget_failure" : trace.networkTimedOut ? "network_timeout" : "parse_failure";
     await recordOutcomeSafely(recordOutcome, {

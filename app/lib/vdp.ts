@@ -44,6 +44,8 @@ export type ExtractedVehicle = {
   description: string;
   imageUrls: string[];
   facts: Record<string, string>;
+  evidenceContent?: string;
+  evidenceContentType?: string;
 };
 
 export type ExtractionTrace = {
@@ -528,7 +530,7 @@ export async function extractVehicleFromVdp(
     } catch (caught) {
       if (context && caught instanceof Error && caught.name === "AbortError") context.trace.networkTimedOut = true;
       resolved = await viaListingOrThrow("This store blocks the direct page");
-      return await parseVehicleHtml(resolved.html, resolved.finalUrl);
+      return await parseCapturedVehicle(resolved.html, resolved.finalUrl);
     } finally {
       timeout.cleanup();
     }
@@ -543,7 +545,7 @@ export async function extractVehicleFromVdp(
         contentType: response.headers.get("content-type") ?? "",
       });
       resolved = await viaListingOrThrow("This store blocks the direct page");
-      return await parseVehicleHtml(resolved.html, resolved.finalUrl);
+      return await parseCapturedVehicle(resolved.html, resolved.finalUrl);
     }
     const finalUrl = validatePublicUrl(response.url);
     const contentType = response.headers.get("content-type") ?? "";
@@ -554,14 +556,28 @@ export async function extractVehicleFromVdp(
     if (html.length > 3_000_000) throw new Error("That VDP is too large to import safely.");
     if (isCloudflareChallenge(html, response.headers)) {
       resolved = await viaListingOrThrow("This store returned a Cloudflare challenge");
-      return await parseVehicleHtml(resolved.html, resolved.finalUrl);
+      return await parseCapturedVehicle(resolved.html, resolved.finalUrl);
     }
     resolved = { html, finalUrl };
   } catch (caught) {
-    if (caught instanceof ResolvedVehicle) return caught.vehicle;
+    if (caught instanceof ResolvedVehicle) {
+      return {
+        ...caught.vehicle,
+        evidenceContent: JSON.stringify({
+          captureType: "public_inventory_fallback",
+          capturedVehicle: caught.vehicle,
+        }),
+        evidenceContentType: "application/json",
+      };
+    }
     throw caught;
   }
-  return await parseVehicleHtml(resolved.html, resolved.finalUrl);
+  return await parseCapturedVehicle(resolved.html, resolved.finalUrl);
+}
+
+async function parseCapturedVehicle(html: string, finalUrl: URL) {
+  const vehicle = await parseVehicleHtml(html, finalUrl);
+  return { ...vehicle, evidenceContent: html, evidenceContentType: "text/html; charset=utf-8" };
 }
 
 class ResolvedVehicle extends Error {

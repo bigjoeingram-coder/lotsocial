@@ -1,5 +1,6 @@
 import { database, ensureLotSocialSchema } from "./schema-bootstrap.ts";
 import type { LotSocialEnvironment } from "./schema-bootstrap.ts";
+import { TERMS_VERSION } from "./evidence.ts";
 import { PERMISSIONS } from "./authorization-shared.ts";
 import type { PermissionId } from "./authorization-shared.ts";
 
@@ -307,14 +308,14 @@ export async function createAuthorizationRequest(input: {
       id, approval_token_hash, dealership_name, rooftop_location, dealership_domain,
       associate_name, associate_email, manager_name, manager_title, manager_email,
       manager_phone, provider_name, provider_contact_name, provider_contact_email,
-      requested_permissions, status, email_delivery_status
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'requested', 'pending')`)
+      requested_permissions, terms_version, status, email_delivery_status
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'requested', 'pending')`)
     .bind(
       input.id, input.tokenHash, input.dealershipName, input.rooftopLocation,
       input.dealershipDomain, input.associateName, input.associateEmail,
       input.managerName, input.managerTitle, input.managerEmail, input.managerPhone,
       input.providerName, input.providerContactName, input.providerContactEmail,
-      JSON.stringify(input.requestedPermissions),
+      JSON.stringify(input.requestedPermissions), TERMS_VERSION,
     )
     .run();
   await addAuditEvent(input.id, "associate", input.associateEmail, "permission_requested", {
