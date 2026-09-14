@@ -63,10 +63,23 @@ function validatePublicUrl(value: string) {
   return url;
 }
 
-function sourceUrlVariants(value: string) {
+const TRACKING_QUERY_PARAMETER = /^(?:utm_.+|gclid|fbclid)$/i;
+
+export function normalizeSourceUrl(value: string) {
   const url = validatePublicUrl(value);
-  const variants = new Set([url.href]);
-  const toggleTrailingSlash = new URL(url.href);
+  for (const key of Array.from(url.searchParams.keys())) {
+    if (TRACKING_QUERY_PARAMETER.test(key)) url.searchParams.delete(key);
+  }
+  url.searchParams.sort();
+  if (url.pathname.length > 1) url.pathname = url.pathname.replace(/\/+$/, "");
+  return url.href;
+}
+
+export function sourceUrlVariants(value: string) {
+  const raw = validatePublicUrl(value);
+  const canonical = normalizeSourceUrl(raw.href);
+  const variants = new Set([canonical, raw.href]);
+  const toggleTrailingSlash = new URL(canonical);
   if (toggleTrailingSlash.pathname !== "/") {
     toggleTrailingSlash.pathname = toggleTrailingSlash.pathname.endsWith("/")
       ? toggleTrailingSlash.pathname.slice(0, -1)
@@ -577,9 +590,21 @@ export async function parseVehicleHtml(html: string, finalUrl: URL): Promise<Ext
 export async function saveImportedVehicle(associateEmail: string, vehicle: ExtractedVehicle, env: LotSocialEnvironment) {
   await ensureVdpSchema(env);
   const db = database(env, "inventory");
-  const existing = await db.prepare("SELECT id FROM imported_vehicles WHERE LOWER(associate_email) = LOWER(?) AND source_url = ? LIMIT 1").bind(associateEmail, vehicle.sourceUrl).first<{ id: string }>();
+  const sourceUrl = normalizeSourceUrl(vehicle.sourceUrl);
+  const sourceHost = new URL(sourceUrl).hostname;
+  const variants = sourceUrlVariants(vehicle.sourceUrl);
+  const placeholders = variants.map(() => "?").join(", ");
+  const existing = await db.prepare(`SELECT id, associate_email, source_url FROM imported_vehicles WHERE LOWER(associate_email) = LOWER(?) AND source_url IN (${placeholders}) ORDER BY CASE WHEN source_url = ? THEN 0 ELSE 1 END, updated_at DESC LIMIT 1`)
+    .bind(associateEmail, ...variants, sourceUrl)
+    .first<{ id: string; associate_email: string; source_url: string }>();
   const id = existing?.id ?? crypto.randomUUID();
+  const storedAssociateEmail = existing?.associate_email ?? associateEmail;
   const certifiedAt = new Date().toISOString();
+  if (existing && existing.source_url !== sourceUrl) {
+    await db.prepare("UPDATE imported_vehicles SET source_url = ?, source_host = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND LOWER(associate_email) = LOWER(?)")
+      .bind(sourceUrl, sourceHost, existing.id, associateEmail)
+      .run();
+  }
   await db.prepare(`INSERT INTO imported_vehicles (
     id, associate_email, source_url, source_host, title, vin, stock_number, year, make,
     model, trim, price, currency, description, image_urls, facts, authorization_certified_at
@@ -591,7 +616,7 @@ export async function saveImportedVehicle(associateEmail: string, vehicle: Extra
     image_urls = excluded.image_urls, facts = excluded.facts,
     authorization_certified_at = excluded.authorization_certified_at,
     updated_at = CURRENT_TIMESTAMP`)
-    .bind(id, associateEmail, vehicle.sourceUrl, vehicle.sourceHost, vehicle.title, vehicle.vin,
+    .bind(id, storedAssociateEmail, sourceUrl, sourceHost, vehicle.title, vehicle.vin,
       vehicle.stockNumber, vehicle.year, vehicle.make, vehicle.model, vehicle.trim,
       vehicle.price, vehicle.currency, vehicle.description, JSON.stringify(vehicle.imageUrls),
       JSON.stringify(vehicle.facts), certifiedAt).run();

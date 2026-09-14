@@ -99,10 +99,10 @@ while Sites remains staging.**
 
 - **Rock 1** — committed, proven twice.
 - **Rock 2** — committed, undeployed, unverified in production.
-- **Rock 3** — reported committed from the cloud session; not present on this remote.
+- **Rock 3** — rebuilt conflict-safe on the post-Rock-6 hardening base; branch verification pending.
 - **Rock 4** — new table, safe on Sites via bootstrap. Its ops endpoint gets no platform verification (Q5).
 - **Rock 5** — adds a column to an existing table. **Not safely deployable on Sites**; same failure mode as `storage_key`. Wait for cutover or resequence.
-- **Rock 6** — no schema change, safe.
+- **Rock 6** — integrated into the hardening branch after CI passed (PR #4, 2026-09-14).
 
 Rock 1's `db:bootstrap-check` is load-bearing now: with controlled migration unavailable,
 it is the only guarantee that new tables get created correctly.
