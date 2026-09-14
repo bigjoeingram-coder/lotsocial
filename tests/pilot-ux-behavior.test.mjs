@@ -77,6 +77,8 @@ test("rendered end card uses the associate photo, spaced contact order, and appr
   assert.ok(html.indexOf("Message me for details") < html.indexOf("Pricing and availability"));
   assert.ok(html.indexOf("Pricing and availability") < html.indexOf("LotSocial"));
   assert.doesNotMatch(html, /2025 Ford/);
+  assert.doesNotMatch(html, /<span>L<\/span><b>LotSocial/);
+  assert.match(html, /<span><\/span><b>LotSocial/);
 });
 
 test("vehicle dates are normalized to a public model year", () => {
