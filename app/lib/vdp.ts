@@ -107,7 +107,7 @@ function decodeEntities(value: string) {
   return value.replace(/&amp;/g, "&").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/\s+/g, " ").trim();
 }
 
-function normalizeListedPrice(value: unknown) {
+export function normalizeListedPrice(value: unknown) {
   const raw = textValue(value);
   const match = raw.match(/(?:USD\s*)?\$?\s*([\d,]+(?:\.\d{1,2})?)/i);
   if (!match) return "";
@@ -181,20 +181,42 @@ function isReaderChallengeMarkdown(markdown: string) {
     || /(?:cf-chl|cdn-cgi\/challenge-platform|checking if the site connection is secure)/i.test(markdown);
 }
 
-function vinFromUrl(url: URL) {
+export function vinFromUrl(url: URL) {
   return url.pathname.match(/\b[A-HJ-NPR-Z0-9]{17}\b/i)?.[0]?.toUpperCase() ?? "";
 }
 
 function vehicleSlugParts(url: URL) {
-  const segment = url.pathname.split("/").filter(Boolean).find((part) => part.startsWith("new-") || part.startsWith("used-")) ?? "";
+  const segment = url.pathname.split("/").filter(Boolean).find((part) => part.startsWith("new-") || part.startsWith("used-") || part.startsWith("certified-")) ?? "";
   return segment.split("-").filter(Boolean);
 }
 
-function candidateInventoryPaths(url: URL) {
+// Makes whose slug is two words: the model is the token after BOTH words.
+const TWO_WORD_MAKES = new Set(["land", "range", "mercedes", "alfa", "aston", "rolls"]);
+const SLUG_CONDITION_WORDS = new Set(["new", "used", "certified", "pre", "owned", "preowned", "cpo"]);
+
+// Rock 6 (I-18): the make/model guess no longer depends on a hardcoded make list — a
+// list silently produced zero model paths for Ram, Jeep, Chrysler, Dodge, and every
+// other unlisted brand. The slug shape is stable across dealer platforms:
+// <condition>-<year>-<make>-<model>-<trim...>-<vin?>. Anchor on the year; fall back to
+// the first token after the condition words when a slug has no year.
+export function slugMakeAndModel(url: URL) {
+  const parts = vehicleSlugParts(url).map((part) => part.toLowerCase());
+  const yearIndex = parts.findIndex((part) => /^(?:19|20)\d{2}$/.test(part));
+  let makeIndex = yearIndex >= 0 ? yearIndex + 1 : parts.findIndex((part) => !SLUG_CONDITION_WORDS.has(part) && !/^\d+$/.test(part));
+  if (makeIndex < 0 || makeIndex >= parts.length) return { make: "", model: "" };
+  let make = parts[makeIndex];
+  if (TWO_WORD_MAKES.has(make) && parts[makeIndex + 1]) {
+    make = `${make}-${parts[makeIndex + 1]}`;
+    makeIndex += 1;
+  }
+  const model = parts[makeIndex + 1] ?? "";
+  if (!model || /^[A-HJ-NPR-Z0-9]{17}$/i.test(model)) return { make, model: "" };
+  return { make, model };
+}
+
+export function candidateInventoryPaths(url: URL) {
   const vin = vinFromUrl(url);
-  const parts = vehicleSlugParts(url);
-  const makeIndex = parts.findIndex((part) => ["lexus", "maserati", "ford", "lincoln", "toyota", "honda", "chevrolet", "gmc", "buick", "cadillac", "bmw", "mercedes", "mercedesbenz", "audi", "porsche", "hyundai", "kia", "nissan", "mazda", "subaru", "volvo", "land", "range"].includes(part));
-  const model = makeIndex >= 0 ? parts[makeIndex + 1] : "";
+  const { model } = slugMakeAndModel(url);
   const paths = new Set<string>();
   if (vin) paths.add(`/inventory/?q=${encodeURIComponent(vin)}`);
   paths.add("/llm/inventory/");
@@ -243,15 +265,41 @@ function isInventoryPageTitle(title: string) {
   return /(?:pre-owned|used|new)?\s*(?:cars|vehicles|inventory)\s+for\s+sale|view\s+\d+\s+matches/i.test(title);
 }
 
-function parseDealerInspireMarkdown(markdown: string, sourceUrl: URL): ExtractedVehicle | null {
+const VEHICLE_BLOCK_RADIUS = 5000;
+const VEHICLE_HEADING = /^## \[[^\]]+\]\([^)]+\)/gm;
+const ANOTHER_VIN_LINE = /\bVIN\s*:?\s*[A-HJ-NPR-Z0-9]{17}\b/gi;
+
+// Rock 6 (I-07): a Dealer Inspire inventory page lists vehicles back to back. The old
+// fixed 5000-character window after the VIN ran straight into the NEXT vehicle's block,
+// so a matched vehicle with no price on the page inherited its neighbor's price.
+// The window now stops at the next vehicle heading or the next vehicle's VIN line, and
+// starts at the matched vehicle's own heading, so every field comes from one block.
+export function vehicleBlockBounds(content: string, vinIndex: number) {
+  const windowStart = Math.max(0, vinIndex - VEHICLE_BLOCK_RADIUS);
+  const windowEnd = Math.min(content.length, vinIndex + VEHICLE_BLOCK_RADIUS);
+  let start = windowStart;
+  for (const match of content.slice(windowStart, vinIndex).matchAll(VEHICLE_HEADING)) {
+    start = windowStart + (match.index ?? 0);
+  }
+  let end = windowEnd;
+  const tail = content.slice(vinIndex + 17, windowEnd);
+  for (const pattern of [VEHICLE_HEADING, ANOTHER_VIN_LINE]) {
+    const next = tail.search(pattern);
+    if (next >= 0) end = Math.min(end, vinIndex + 17 + next);
+  }
+  return { start, end };
+}
+
+export function parseDealerInspireMarkdown(markdown: string, sourceUrl: URL): ExtractedVehicle | null {
   if (isReaderChallengeMarkdown(markdown)) return null;
   const vin = vinFromUrl(sourceUrl);
   if (!vin) return null;
   const content = markdownContent(markdown);
   const vinIndex = vehicleEvidenceIndex(content, vin);
   if (vinIndex < 0) return null;
-  const before = content.slice(Math.max(0, vinIndex - 5000), vinIndex);
-  const after = content.slice(vinIndex, Math.min(content.length, vinIndex + 5000));
+  const bounds = vehicleBlockBounds(content, vinIndex);
+  const before = content.slice(bounds.start, vinIndex);
+  const after = content.slice(vinIndex, bounds.end);
   const linkedTitle = (before.match(/## \[([^\]]+)\]\([^)]+\)\s*$/m) ?? Array.from(before.matchAll(/## \[([^\]]+)\]\([^)]+\)/g)).at(-1))?.[1];
   const plainHeadingTitle = Array.from(before.matchAll(/^##\s+(?!Visit our Store|Vehicle Information|Highlighted Features|Dealer Comments|Eligible Benefits|Package & Accessories|All Features)([^\n#][^\n]+)$/gim)).at(-1)?.[1];
   const title = decodeEntities(
@@ -455,7 +503,7 @@ class ResolvedVehicle extends Error {
   }
 }
 
-async function parseVehicleHtml(html: string, finalUrl: URL): Promise<ExtractedVehicle> {
+export async function parseVehicleHtml(html: string, finalUrl: URL): Promise<ExtractedVehicle> {
   const nodes: Record<string, unknown>[] = [];
   for (const match of html.matchAll(/<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)) {
     try { nodes.push(...flattenJsonLd(JSON.parse(match[1].trim()))); } catch { /* malformed third-party JSON-LD is ignored */ }
