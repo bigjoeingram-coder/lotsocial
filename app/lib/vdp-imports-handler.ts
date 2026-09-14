@@ -7,8 +7,12 @@ import {
   listImportedVehicles,
   saveImportedVehicle,
   serializeVehicle,
+  sourceUrlVariants,
 } from "./vdp.ts";
 import type { ExtractedVehicle, ImportedVehicleRecord } from "./vdp.ts";
+import { recordImportOutcome } from "./telemetry.ts";
+import type { ImportTelemetry } from "./telemetry.ts";
+import type { VdpExtractionContext } from "./vdp.ts";
 
 type RouteUser = {
   displayName: string;
@@ -20,7 +24,7 @@ type VdpImportDependencies = {
   associate: RouteUser;
   listImportedVehicles?: typeof listImportedVehicles;
   getImportedVehicleBySourceUrl?: typeof getImportedVehicleBySourceUrl;
-  extractVehicleFromVdp?: typeof extractVehicleFromVdp;
+  extractVehicleFromVdp?: (sourceUrl: string, env: LotSocialEnvironment, context?: VdpExtractionContext) => Promise<ExtractedVehicle>;
   saveImportedVehicle?: typeof saveImportedVehicle;
   serializeVehicle?: typeof serializeVehicle;
 };
@@ -42,27 +46,41 @@ export async function handleVdpImportsPost(
   dependencies: VdpImportDependencies,
 ) {
   const user = dependencies.associate;
+  const startedAt = Date.now();
   const payload = (await request.json()) as Record<string, unknown>;
   if (payload.authorizedToMarket !== true) {
     return Response.json({ error: "Confirm that you are authorized to market this dealership's vehicle content." }, { status: 400 });
   }
   const sourceUrl = typeof payload.sourceUrl === "string" ? payload.sourceUrl.trim() : "";
   if (!sourceUrl) return Response.json({ error: "Paste a vehicle detail page URL." }, { status: 400 });
+
+  let telemetry: ImportTelemetry | null = null;
+  let sourceHost = "invalid-url";
+  try { sourceHost = new URL(sourceUrl).hostname.toLowerCase(); } catch { /* extractor returns the user-safe URL error */ }
+  const report = (value: ImportTelemetry) => { telemetry ??= value; };
+
   try {
     const limit = await incrementDailyLimit(env, "vdp_imports", user.email);
     if (!limit.allowed) {
+      telemetry = { outcome: "rate_limited", fallback: "none", brightDataUsed: false };
       return rateLimitResponse(limit, "Daily VDP import limit reached for this associate.");
     }
     const findExisting = dependencies.getImportedVehicleBySourceUrl ?? getImportedVehicleBySourceUrl;
     const existing = await findExisting(user.email, sourceUrl, env);
     const serialize = dependencies.serializeVehicle ?? serializeVehicle;
-    if (existing) return Response.json({ vehicle: serialize(existing), reused: true }, { status: 200 });
+    if (existing) {
+      telemetry = { outcome: "reused", fallback: "existing_record", brightDataUsed: false };
+      return Response.json({ vehicle: serialize(existing), reused: true }, { status: 200 });
+    }
     const extract = dependencies.extractVehicleFromVdp ?? extractVehicleFromVdp;
     const save = dependencies.saveImportedVehicle ?? saveImportedVehicle;
-    const extracted = await extract(sourceUrl, env);
+    const extracted = await extract(sourceUrl, env, { associateEmail: user.email, report });
     const record = await save(user.email, extracted, env);
     if (!record) throw new Error("The imported vehicle could not be saved.");
-    return Response.json({ vehicle: serialize(record) }, { status: 201 });
+    const body: Record<string, unknown> = { vehicle: serialize(record) };
+    if (telemetry?.notice) body.notice = telemetry.notice;
+    if (telemetry?.budgetSkipped) body.budgetSkipped = true;
+    return Response.json(body, { status: 201 });
   } catch (error) {
     try {
       const parsed = new URL(sourceUrl);
@@ -70,7 +88,22 @@ export async function handleVdpImportsPost(
     } catch {
       console.warn("vdp_import_failed", { host: "invalid-url", message: error instanceof Error ? error.message : "Unknown import failure" });
     }
-    return Response.json({ error: error instanceof Error ? error.message : "Unable to import that VDP." }, { status: 422 });
+    telemetry ??= { outcome: error instanceof Error && error.name === "AbortError" ? "network_timeout" : "parse_failure", fallback: "none", brightDataUsed: false };
+    const body: Record<string, unknown> = { error: error instanceof Error ? error.message : "Unable to import that VDP." };
+    if (telemetry.notice) body.notice = telemetry.notice;
+    if (telemetry.budgetSkipped) body.budgetSkipped = true;
+    return Response.json(body, { status: 422 });
+  } finally {
+    if (telemetry) {
+      try {
+        await recordImportOutcome(env, {
+          associateEmail: user.email, sourceHost, outcome: telemetry.outcome,
+          elapsedMs: Date.now() - startedAt, fallback: telemetry.fallback, brightDataUsed: telemetry.brightDataUsed,
+        });
+      } catch (telemetryError) {
+        console.warn("vdp_import_telemetry_failed", { sourceHost, message: telemetryError instanceof Error ? telemetryError.message : "unknown" });
+      }
+    }
   }
 }
 
@@ -90,31 +123,31 @@ export async function handleVdpImportDelete(
   if (!sourceUrl) return Response.json({ error: "Vehicle source URL is required." }, { status: 400 });
 
   const db = database(env, "inventory");
+  const variants = sourceUrlVariants(sourceUrl);
+  const placeholders = variants.map(() => "?").join(", ");
   const vehicle = await db.prepare(
-    "SELECT id FROM imported_vehicles WHERE LOWER(associate_email) = LOWER(?) AND source_url = ? LIMIT 1"
-  ).bind(user.email, sourceUrl).first<{ id: string }>();
+    `SELECT id FROM imported_vehicles WHERE LOWER(associate_email) = LOWER(?) AND source_url IN (${placeholders}) ORDER BY updated_at DESC LIMIT 1`
+  ).bind(user.email, ...variants).first<{ id: string }>();
 
   if (!vehicle) return Response.json({ error: "That vehicle is not in your inventory." }, { status: 404 });
 
-  const projectRows = await db.prepare(
-    "SELECT id FROM creative_projects WHERE vehicle_id = ? AND LOWER(associate_email) = LOWER(?)"
-  ).bind(vehicle.id, user.email).all<{ id: string }>();
-
-  for (const project of projectRows.results) {
-    await db.prepare(
-      "DELETE FROM creative_render_jobs WHERE project_id = ? AND LOWER(associate_email) = LOWER(?)"
-    ).bind(project.id, user.email).run();
-  }
-
-  await db.prepare(
+  const statements = [db.prepare(
+    `DELETE FROM creative_render_jobs
+     WHERE LOWER(associate_email) = LOWER(?)
+       AND project_id IN (
+         SELECT id FROM creative_projects
+         WHERE vehicle_id = ? AND LOWER(associate_email) = LOWER(?)
+       )`
+  ).bind(user.email, vehicle.id, user.email), db.prepare(
     "DELETE FROM creative_projects WHERE vehicle_id = ? AND LOWER(associate_email) = LOWER(?)"
-  ).bind(vehicle.id, user.email).run();
-
-  const result = await db.prepare(
+  ).bind(vehicle.id, user.email), db.prepare(
     "DELETE FROM imported_vehicles WHERE id = ? AND LOWER(associate_email) = LOWER(?)"
-  ).bind(vehicle.id, user.email).run();
+  ).bind(vehicle.id, user.email)];
 
-  if (!result.meta.changes) return Response.json({ error: "Vehicle deletion did not complete." }, { status: 409 });
+  const results = await db.batch<{ meta: { changes: number } }>(statements);
+  const result = results.at(-1);
+
+  if (!result?.meta.changes) return Response.json({ error: "Vehicle deletion did not complete." }, { status: 409 });
 
   return Response.json({ deleted: true, vehicleId: vehicle.id });
 }

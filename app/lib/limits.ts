@@ -1,7 +1,7 @@
 import { database, ensureLotSocialSchema } from "./schema-bootstrap.ts";
 import type { LotSocialEnvironment } from "./schema-bootstrap.ts";
 
-export type DailyLimitName = "vdp_imports" | "authorization_requests" | "manager_email";
+export type DailyLimitName = "vdp_imports" | "authorization_requests" | "manager_email" | "brightdata_associate" | "brightdata_global";
 
 export type DailyLimitResult = {
   allowed: boolean;
@@ -14,6 +14,8 @@ const CONFIG_KEYS: Record<DailyLimitName, keyof LotSocialEnvironment> = {
   vdp_imports: "LOTSOCIAL_DAILY_VDP_IMPORT_CAP",
   authorization_requests: "LOTSOCIAL_DAILY_AUTHORIZATION_REQUEST_CAP",
   manager_email: "LOTSOCIAL_DAILY_MANAGER_EMAIL_CAP",
+  brightdata_associate: "LOTSOCIAL_DAILY_BRIGHTDATA_ASSOCIATE_CAP",
+  brightdata_global: "LOTSOCIAL_DAILY_BRIGHTDATA_GLOBAL_CAP",
 };
 
 export async function incrementDailyLimit(

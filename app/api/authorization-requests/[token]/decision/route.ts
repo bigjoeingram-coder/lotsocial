@@ -22,6 +22,7 @@ export async function POST(request: Request, context: { params: Promise<{ token:
     return Response.json({ error: "Approval requires a signature, both confirmations, and at least one permitted use." }, { status: 400 });
   }
 
+  const managementToken = decision === "approved" ? createSecureToken() : undefined;
   const result = await decideAuthorization({
     token,
     decision,
@@ -32,9 +33,14 @@ export async function POST(request: Request, context: { params: Promise<{ token:
     providerContactEmail: clean(payload.providerContactEmail).toLowerCase(),
     expiresAt: clean(payload.expiresAt) || null,
     managerNotes: clean(payload.managerNotes),
+    managementToken,
     env,
   });
   if (!result) return Response.json({ error: "This authorization link is invalid or has expired." }, { status: 404 });
   if (result.alreadyDecided) return Response.json({ error: "This request has already been decided.", status: result.record.status }, { status: 409 });
-  return Response.json({ status: result.record.status });
+  return Response.json({
+    status: result.record.status,
+    managementUrl: managementToken ? `${new URL(request.url).origin}/approve/${managementToken}` : undefined,
+    managementTokenExpiresAt: result.managementTokenExpiresAt,
+  });
 }

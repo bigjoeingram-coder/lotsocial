@@ -16,7 +16,10 @@ export function testEnv(overrides = {}) {
     LOTSOCIAL_DAILY_VDP_IMPORT_CAP: "25",
     LOTSOCIAL_DAILY_AUTHORIZATION_REQUEST_CAP: "10",
     LOTSOCIAL_DAILY_MANAGER_EMAIL_CAP: "5",
+    LOTSOCIAL_DAILY_BRIGHTDATA_ASSOCIATE_CAP: "10",
+    LOTSOCIAL_DAILY_BRIGHTDATA_GLOBAL_CAP: "100",
     LOTSOCIAL_MANAGER_EMAIL_DOMAIN_ALLOWLIST: "",
+    ENFORCEMENT_API_KEY: "test-enforcement-key",
     ...overrides,
   };
 }
@@ -66,6 +69,7 @@ export class FakeD1 {
     this.creativeRenderJobs = [...(seed.creativeRenderJobs ?? [])];
     this.rateLimitCounters = new Map();
     this.preparedSql = [];
+    this.failOnSql = seed.failOnSql ?? "";
   }
 
   prepare(sql) {
@@ -74,7 +78,23 @@ export class FakeD1 {
   }
 
   async batch(statements) {
-    return Promise.all(statements.map((statement) => statement.run()));
+    const snapshot = {
+      importedVehicles: structuredClone(this.importedVehicles),
+      creativeProjects: structuredClone(this.creativeProjects),
+      creativeRenderJobs: structuredClone(this.creativeRenderJobs),
+      rateLimitCounters: structuredClone(this.rateLimitCounters),
+    };
+    try {
+      const results = [];
+      for (const statement of statements) results.push(await statement.run());
+      return results;
+    } catch (error) {
+      this.importedVehicles = snapshot.importedVehicles;
+      this.creativeProjects = snapshot.creativeProjects;
+      this.creativeRenderJobs = snapshot.creativeRenderJobs;
+      this.rateLimitCounters = snapshot.rateLimitCounters;
+      throw error;
+    }
   }
 
   first(sql, values) {
@@ -93,9 +113,9 @@ export class FakeD1 {
       return { count: current.count };
     }
     if (matches(sql, "SELECT id FROM imported_vehicles")) {
-      const [associateEmail, sourceUrl] = values;
+      const [associateEmail, ...sourceUrls] = values;
       return this.importedVehicles.find((vehicle) =>
-        sameEmail(vehicle.associate_email, associateEmail) && vehicle.source_url === sourceUrl
+        sameEmail(vehicle.associate_email, associateEmail) && sourceUrls.includes(vehicle.source_url)
       ) ?? null;
     }
     assert.fail(`Unexpected first() SQL: ${sql}`);
@@ -112,8 +132,18 @@ export class FakeD1 {
   }
 
   run(sql, values) {
+    if (this.failOnSql && matches(sql, this.failOnSql)) throw new Error(`Injected batch failure: ${this.failOnSql}`);
     if (matches(sql, "CREATE TABLE") || matches(sql, "CREATE INDEX")) return 0;
     if (matches(sql, "DELETE FROM creative_render_jobs")) {
+      if (matches(sql, "SELECT id FROM creative_projects")) {
+        const [associateEmail, vehicleId, projectAssociateEmail] = values;
+        const projectIds = new Set(this.creativeProjects
+          .filter((project) => project.vehicle_id === vehicleId && sameEmail(project.associate_email, projectAssociateEmail))
+          .map((project) => project.id));
+        return removeMatching(this.creativeRenderJobs, (job) =>
+          projectIds.has(job.project_id) && sameEmail(job.associate_email, associateEmail)
+        );
+      }
       const [projectId, associateEmail] = values;
       return removeMatching(this.creativeRenderJobs, (job) =>
         job.project_id === projectId && sameEmail(job.associate_email, associateEmail)

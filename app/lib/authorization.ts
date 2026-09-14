@@ -1,6 +1,6 @@
 import { database, ensureLotSocialSchema } from "./schema-bootstrap.ts";
 import type { LotSocialEnvironment } from "./schema-bootstrap.ts";
-import { PERMISSIONS } from "./authorization-shared.ts";
+import { PERMISSIONS, permissionAuthority } from "./authorization-shared.ts";
 import type { PermissionId } from "./authorization-shared.ts";
 
 export { PERMISSIONS };
@@ -8,6 +8,8 @@ export type { PermissionId };
 
 export type AuthorizationRequestRecord = {
   id: string;
+  management_token_hash: string | null;
+  management_token_expires_at: string | null;
   dealership_name: string;
   rooftop_location: string;
   dealership_domain: string;
@@ -208,23 +210,55 @@ export async function decideProviderVerification(input: {
 
 export function evaluateAuthorization(record: AuthorizationRequestRecord | null, permission: PermissionId) {
   if (!record) return { allowed: false, reason: "authorization_not_found" } as const;
-  if (record.status !== "active") return { allowed: false, reason: `status_${record.status}` } as const;
+  if (record.status === "requested") return { allowed: false, reason: "manager_approval_required" } as const;
+  if (record.status === "declined") return { allowed: false, reason: "manager_declined" } as const;
+  if (record.status === "suspended") return { allowed: false, reason: "authorization_suspended" } as const;
+  if (record.status === "revoked") return { allowed: false, reason: "authorization_revoked" } as const;
   if (record.expires_at && new Date(`${record.expires_at}T23:59:59Z`).getTime() < Date.now()) {
     return { allowed: false, reason: "authorization_expired" } as const;
   }
   if (!parsePermissions(record.approved_permissions).includes(permission)) {
     return { allowed: false, reason: "permission_not_approved" } as const;
   }
-  return { allowed: true, reason: "authorized" } as const;
+  if (permissionAuthority(permission) === "manager") {
+    return ["manager_approved", "provider_pending", "provider_verified", "provider_declined", "feed_connected", "active"].includes(record.status)
+      ? { allowed: true, reason: "manager_authorized" } as const
+      : { allowed: false, reason: `status_${record.status}` } as const;
+  }
+  if (["provider_verified", "feed_connected", "active"].includes(record.status)) return { allowed: true, reason: "provider_authorized" } as const;
+  if (record.status === "provider_declined") return { allowed: false, reason: "provider_declined" } as const;
+  return { allowed: false, reason: "provider_verification_required" } as const;
 }
 
 export async function getAuthorizationByToken(token: string, env: LotSocialEnvironment) {
   await ensureAuthorizationSchema(env);
   const tokenHash = await hashToken(token);
   return database(env, "authorization")
-    .prepare("SELECT * FROM authorization_requests WHERE approval_token_hash = ? LIMIT 1")
+    .prepare("SELECT * FROM authorization_requests WHERE approval_token_hash = ? OR management_token_hash = ? LIMIT 1")
+    .bind(tokenHash, tokenHash)
+    .first<AuthorizationRequestRecord>();
+}
+
+export async function getAuthorizationByManagementToken(token: string, env: LotSocialEnvironment) {
+  await ensureAuthorizationSchema(env);
+  const tokenHash = await hashToken(token);
+  const record = await database(env, "authorization")
+    .prepare("SELECT * FROM authorization_requests WHERE management_token_hash = ? LIMIT 1")
     .bind(tokenHash)
     .first<AuthorizationRequestRecord>();
+  if (!record) return { record: null, expired: false };
+  const expiresAt = record.management_token_expires_at ? Date.parse(record.management_token_expires_at) : 0;
+  return { record, expired: !expiresAt || expiresAt <= Date.now() };
+}
+
+export async function issueManagementToken(input: { record: AuthorizationRequestRecord; token: string; env: LotSocialEnvironment; actorType?: string; actorEmail?: string }) {
+  const tokenHash = await hashToken(input.token);
+  const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+  await database(input.env, "authorization")
+    .prepare("UPDATE authorization_requests SET management_token_hash = ?, management_token_expires_at = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+    .bind(tokenHash, expiresAt, input.record.id).run();
+  await addAuditEvent(input.record.id, input.actorType ?? "system", input.actorEmail ?? "", "management_link_issued", { expiresAt }, input.env);
+  return expiresAt;
 }
 
 export async function addAuditEvent(
@@ -299,6 +333,7 @@ export async function decideAuthorization(input: {
   providerContactEmail: string;
   expiresAt: string | null;
   managerNotes: string;
+  managementToken?: string;
   env: LotSocialEnvironment;
 }) {
   const record = await getAuthorizationByToken(input.token, input.env);
@@ -306,30 +341,40 @@ export async function decideAuthorization(input: {
   if (record.status !== "requested") return { record, alreadyDecided: true };
 
   const status = input.decision === "approved" ? "manager_approved" : "declined";
+  const managementTokenHash = input.decision === "approved" && input.managementToken
+    ? await hashToken(input.managementToken)
+    : null;
+  const managementTokenExpiresAt = managementTokenHash
+    ? new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString()
+    : null;
+  const retiredApprovalHash = await hashToken(`retired:${record.id}:${crypto.randomUUID()}`);
+
   await database(input.env, "authorization")
     .prepare(`UPDATE authorization_requests SET status = ?, approved_permissions = ?,
       typed_signature = ?, provider_name = ?, provider_contact_name = ?,
       provider_contact_email = ?, expires_at = ?, manager_notes = ?,
+      approval_token_hash = ?, management_token_hash = ?, management_token_expires_at = ?,
       decided_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
     .bind(
-      status,
-      JSON.stringify(input.approvedPermissions),
-      input.typedSignature,
-      input.providerName,
-      input.providerContactName,
-      input.providerContactEmail,
-      input.expiresAt,
-      input.managerNotes,
-      record.id,
+      status, JSON.stringify(input.approvedPermissions), input.typedSignature, input.providerName,
+      input.providerContactName, input.providerContactEmail, input.expiresAt, input.managerNotes,
+      retiredApprovalHash, managementTokenHash, managementTokenExpiresAt, record.id,
     )
     .run();
+
   await addAuditEvent(record.id, "manager", record.manager_email, status, {
     permissions: input.approvedPermissions,
     providerName: input.providerName,
     expiresAt: input.expiresAt,
     termsVersion: record.terms_version,
+    managementTokenExpiresAt,
   }, input.env);
-  return { record: { ...record, status }, alreadyDecided: false };
+
+  return {
+    record: { ...record, status, management_token_hash: managementTokenHash, management_token_expires_at: managementTokenExpiresAt },
+    alreadyDecided: false,
+    managementTokenExpiresAt,
+  };
 }
 
 export async function manageAuthorization(input: {
@@ -340,17 +385,24 @@ export async function manageAuthorization(input: {
   managerNotes: string;
   env: LotSocialEnvironment;
 }) {
-  const record = await getAuthorizationByToken(input.token, input.env);
+  const lookup = await getAuthorizationByManagementToken(input.token, input.env);
+  const record = lookup.record;
   if (!record) return null;
+  if (lookup.expired) return { record, unavailable: true, expired: true };
 
   const manageableStatuses = ["manager_approved", "provider_pending", "provider_verified", "provider_declined", "feed_connected", "active", "suspended"];
-  if (!manageableStatuses.includes(record.status)) return { record, unavailable: true };
+  if (!manageableStatuses.includes(record.status)) return { record, unavailable: true, expired: false };
 
+  let resumeStatus = record.status;
+  if (record.status === "suspended") {
+    const provider = await getProviderVerification(record.id, input.env);
+    resumeStatus = provider?.status === "verified" ? "provider_verified" : provider?.status === "declined" ? "provider_declined" : "manager_approved";
+  }
   const nextStatus = input.action === "revoke"
     ? "revoked"
     : input.action === "suspend"
       ? "suspended"
-      : record.status === "suspended" ? "manager_approved" : record.status;
+      : resumeStatus;
   const nextPermissions = input.action === "revoke" ? [] : input.approvedPermissions;
 
   await database(input.env, "authorization")
@@ -372,7 +424,7 @@ export async function manageAuthorization(input: {
     notes: input.managerNotes,
   }, input.env);
 
-  return { record: { ...record, status: nextStatus, approved_permissions: JSON.stringify(nextPermissions) }, unavailable: false };
+  return { record: { ...record, status: nextStatus, approved_permissions: JSON.stringify(nextPermissions) }, unavailable: false, expired: false };
 }
 
 export function parsePermissions(value: string | null): PermissionId[] {

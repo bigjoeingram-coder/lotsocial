@@ -4,6 +4,8 @@ import { index, integer, primaryKey, sqliteTable, text, uniqueIndex } from "driz
 export const authorizationRequests = sqliteTable("authorization_requests", {
   id: text("id").primaryKey(),
   approvalTokenHash: text("approval_token_hash").notNull().unique(),
+  managementTokenHash: text("management_token_hash").unique(),
+  managementTokenExpiresAt: text("management_token_expires_at"),
   dealershipName: text("dealership_name").notNull(),
   rooftopLocation: text("rooftop_location").notNull(),
   dealershipDomain: text("dealership_domain").notNull().default(""),
@@ -124,6 +126,20 @@ export const creativeRenderJobs = sqliteTable("creative_render_jobs", {
 }, (table) => [
   index("creative_render_jobs_project_idx").on(table.projectId, table.createdAt),
   index("creative_render_jobs_associate_idx").on(table.associateEmail, table.createdAt),
+]);
+
+export const importOutcomes = sqliteTable("import_outcomes", {
+  id: text("id").primaryKey(),
+  associateEmail: text("associate_email").notNull(),
+  sourceHost: text("source_host").notNull(),
+  outcome: text("outcome").notNull(),
+  elapsedMs: integer("elapsed_ms").notNull().default(0),
+  fallback: text("fallback").notNull().default(""),
+  brightDataUsed: integer("bright_data_used").notNull().default(0),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [
+  index("import_outcomes_host_created_idx").on(table.sourceHost, table.createdAt),
+  index("import_outcomes_associate_created_idx").on(table.associateEmail, table.createdAt),
 ]);
 
 export const rateLimitCounters = sqliteTable("rate_limit_counters", {

@@ -18,11 +18,16 @@ export type LotSocialEnvironment = {
   BRIGHTDATA_ZONE?: string;
   SHOTSTACK_API_KEY?: string;
   SHOTSTACK_STAGE?: string;
+  RESEND_API_KEY?: string;
+  EMAIL_FROM?: string;
+  ENFORCEMENT_API_KEY?: string;
   LOTSOCIAL_EXPECTED_SITES_HOSTNAME?: string;
   LOTSOCIAL_ASSOCIATE_ALLOWLIST?: string;
   LOTSOCIAL_DAILY_VDP_IMPORT_CAP?: string;
   LOTSOCIAL_DAILY_AUTHORIZATION_REQUEST_CAP?: string;
   LOTSOCIAL_DAILY_MANAGER_EMAIL_CAP?: string;
+  LOTSOCIAL_DAILY_BRIGHTDATA_ASSOCIATE_CAP?: string;
+  LOTSOCIAL_DAILY_BRIGHTDATA_GLOBAL_CAP?: string;
   LOTSOCIAL_MANAGER_EMAIL_DOMAIN_ALLOWLIST?: string;
 };
 
@@ -38,6 +43,8 @@ export const SCHEMA_BOOTSTRAP_SQL = [
   `CREATE TABLE IF NOT EXISTS authorization_requests (
     id TEXT PRIMARY KEY NOT NULL,
     approval_token_hash TEXT NOT NULL UNIQUE,
+    management_token_hash TEXT UNIQUE,
+    management_token_expires_at TEXT,
     dealership_name TEXT NOT NULL,
     rooftop_location TEXT NOT NULL,
     dealership_domain TEXT NOT NULL DEFAULT '',
@@ -149,6 +156,18 @@ export const SCHEMA_BOOTSTRAP_SQL = [
   )`,
   "CREATE INDEX IF NOT EXISTS creative_render_jobs_project_idx ON creative_render_jobs(project_id, created_at DESC)",
   "CREATE INDEX IF NOT EXISTS creative_render_jobs_associate_idx ON creative_render_jobs(associate_email, created_at DESC)",
+  `CREATE TABLE IF NOT EXISTS import_outcomes (
+    id TEXT PRIMARY KEY NOT NULL,
+    associate_email TEXT NOT NULL,
+    source_host TEXT NOT NULL,
+    outcome TEXT NOT NULL,
+    elapsed_ms INTEGER NOT NULL DEFAULT 0,
+    fallback TEXT NOT NULL DEFAULT '',
+    bright_data_used INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`,
+  "CREATE INDEX IF NOT EXISTS import_outcomes_host_created_idx ON import_outcomes(source_host, created_at DESC)",
+  "CREATE INDEX IF NOT EXISTS import_outcomes_associate_created_idx ON import_outcomes(associate_email, created_at DESC)",
   `CREATE TABLE IF NOT EXISTS rate_limit_counters (
     counter_key TEXT NOT NULL,
     counter_scope TEXT NOT NULL,
@@ -165,7 +184,15 @@ export const SCHEMA_BOOTSTRAP_SQL = [
 export function ensureLotSocialSchema(env: LotSocialEnvironment) {
   const db = database(env, "LotSocial");
   if (!schemaReady.has(db)) {
-    schemaReady.set(db, db.batch(SCHEMA_BOOTSTRAP_SQL.map((statement) => db.prepare(statement))).then(() => undefined));
+    const ready = db.batch(SCHEMA_BOOTSTRAP_SQL.map((statement) => db.prepare(statement)))
+      .then(() => undefined)
+      .catch((error) => {
+        // A transient bootstrap failure must not poison this Worker isolate.
+        // Remove only this attempt so the next request can retry safely.
+        if (schemaReady.get(db) === ready) schemaReady.delete(db);
+        throw error;
+      });
+    schemaReady.set(db, ready);
   }
   return schemaReady.get(db)!;
 }
