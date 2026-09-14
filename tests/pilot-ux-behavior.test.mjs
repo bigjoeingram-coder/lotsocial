@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createCopy } from "../app/lib/creative.ts";
+import { replenishSelectedImages } from "../app/lib/creative-selection.ts";
 import { validateProfilePhotoFile, verifyProfilePhotoForSocial } from "../app/lib/image-moderation.ts";
 import { buildVerticalRenderPlan, checkRender, prepareRenderCompatibleImages } from "../app/lib/rendering.ts";
 import { normalizeVehicleYear } from "../app/lib/vdp.ts";
@@ -53,6 +54,22 @@ test("No, Light, and Extra Gravy create distinct copy without changing the compl
 test("vehicle dates are normalized to a public model year", () => {
   assert.equal(normalizeVehicleYear("2025-01-01"), "2025");
   assert.equal(normalizeVehicleYear("2025"), "2025");
+});
+
+test("a broken selected shot is replaced up to the ten-shot customer limit", () => {
+  const available = Array.from({ length: 12 }, (_, index) => `photo-${index + 1}`);
+  const selected = available.slice(0, 10);
+  assert.deepEqual(
+    replenishSelectedImages(selected, available, ["photo-10"]),
+    [...available.slice(0, 9), "photo-11"],
+  );
+});
+
+test("multiple broken shots are never reintroduced during replenishment", () => {
+  const available = Array.from({ length: 12 }, (_, index) => `photo-${index + 1}`);
+  const selected = available.slice(0, 10);
+  const replenished = replenishSelectedImages(selected, available, ["photo-2", "photo-10"]);
+  assert.deepEqual(replenished, [...available.slice(0, 10).filter((image) => !["photo-2", "photo-10"].includes(image)), "photo-11", "photo-12"]);
 });
 
 test("profile photos use local file validation when moderation is not configured", async () => {

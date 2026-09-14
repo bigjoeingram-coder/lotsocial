@@ -1,7 +1,8 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { PERMISSIONS, PermissionId } from "../lib/authorization-shared";
+import { replenishSelectedImages } from "../lib/creative-selection";
 
 type User = { name: string; email: string };
 
@@ -307,6 +308,7 @@ export function AuthorizationApp({ user }: { user: User }) {
   const [installHelp, setInstallHelp] = useState<"ios" | "android" | null>(null);
   const [creativeVehicle, setCreativeVehicle] = useState<ImportedVehicle | null>(null);
   const [selectedCreativeImages, setSelectedCreativeImages] = useState<string[]>([]);
+  const brokenCreativeImagesRef = useRef(new Set<string>());
   const [brokenCreativeImages, setBrokenCreativeImages] = useState<string[]>([]);
   const [brokenInventoryImages, setBrokenInventoryImages] = useState<Record<string, string[]>>({});
   const [creativeStyle, setCreativeStyle] = useState("walkaround");
@@ -409,6 +411,7 @@ export function AuthorizationApp({ user }: { user: User }) {
 
   function startCreative(vehicle: ImportedVehicle) {
     setCreativeVehicle(vehicle);
+    brokenCreativeImagesRef.current = new Set();
     setBrokenCreativeImages([]);
     setSelectedCreativeImages(vehicle.imageUrls.slice(0, 10));
     setCreativeStyle("walkaround");
@@ -431,16 +434,11 @@ export function AuthorizationApp({ user }: { user: User }) {
   }
 
   function markBrokenCreativeImage(url: string) {
-    setBrokenCreativeImages((current) => current.includes(url) ? current : [...current, url]);
+    brokenCreativeImagesRef.current.add(url);
+    setBrokenCreativeImages(Array.from(brokenCreativeImagesRef.current));
     setSelectedCreativeImages((current) => {
-      const selected = current.filter((image) => image !== url);
-      if (!creativeVehicle) return selected;
-      const broken = new Set([...brokenCreativeImages, url]);
-      for (const candidate of creativeVehicle.imageUrls) {
-        if (selected.length >= 6) break;
-        if (!broken.has(candidate) && !selected.includes(candidate)) selected.push(candidate);
-      }
-      return selected;
+      if (!creativeVehicle) return current.filter((image) => image !== url);
+      return replenishSelectedImages(current, creativeVehicle.imageUrls, brokenCreativeImagesRef.current);
     });
     setCreativeDraft(null);
     setRenderJob(null);
