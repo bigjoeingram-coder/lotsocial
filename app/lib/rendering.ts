@@ -1,6 +1,5 @@
 import type { LotSocialEnvironment } from "./schema-bootstrap.ts";
 import type { CreativeProjectRecord } from "./creative.ts";
-import { normalizeVehicleYear } from "./vdp.ts";
 import type { ImportedVehicleRecord } from "./vdp.ts";
 
 type RenderEnvironment = { SHOTSTACK_API_KEY?: string; SHOTSTACK_STAGE?: string };
@@ -30,14 +29,46 @@ function escapeHtml(value: string) {
   })[character] ?? character);
 }
 
-function vehicleLine(vehicle: ImportedVehicleRecord) {
-  return [normalizeVehicleYear(vehicle.year), vehicle.make, vehicle.model, vehicle.trim].filter(Boolean).join(" ") || vehicle.title;
+function capturedAtLabel(value: string) {
+  const parsed = new Date(value.replace(" ", "T") + (/Z$|[+-]\d\d:\d\d$/.test(value) ? "" : "Z"));
+  if (!Number.isFinite(parsed.getTime())) return "the recorded capture time";
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZone: "UTC",
+    timeZoneName: "short",
+  }).format(parsed);
+}
+
+function styleTreatment(style: string, index: number) {
+  if (style === "energetic") {
+    return {
+      effect: ["zoomInFast", "slideLeftFast", "zoomOutFast", "slideRightFast"][index % 4],
+      transition: index === 0 ? { out: "zoomFast" } : { in: index % 2 ? "wipeLeftFast" : "wipeRightFast", out: "zoomFast" },
+      scale: 0.96,
+    };
+  }
+  if (style === "premium") {
+    return {
+      effect: index % 2 ? "zoomOutSlow" : "zoomInSlow",
+      transition: index === 0 ? { out: "fadeSlow" } : { in: "fadeSlow", out: "fadeSlow" },
+      scale: 0.88,
+    };
+  }
+  return {
+    effect: index % 2 ? "slideRightSlow" : "slideLeftSlow",
+    transition: index === 0 ? { out: "fade" } : { in: "fade", out: "fade" },
+    scale: INSPECTION_IMAGE_SCALE,
+  };
 }
 
 export function buildVerticalRenderPlan(project: CreativeProjectRecord, vehicle: ImportedVehicleRecord) {
   const images = JSON.parse(project.selected_images || "[]") as string[];
   const total = Math.max(15, project.duration_seconds);
-  const endCardLength = Math.min(4, Math.max(3, total * 0.15));
+  const endCardLength = Math.min(6, Math.max(5, total * 0.15));
   const imageLength = (total - endCardLength) / images.length;
   const timedImages = images.map((src, index) => ({
     src,
@@ -62,25 +93,42 @@ export function buildVerticalRenderPlan(project: CreativeProjectRecord, vehicle:
     opacity: WALLPAPER_TINT_OPACITY,
     transition: index === 0 ? { out: "fade" } : { in: "fade", out: "fade" },
   }));
-  const clips = timedImages.map(({ src, start, length }, index) => ({
-    asset: { type: "image", src },
-    start,
-    length,
-    fit: "contain",
-    scale: INSPECTION_IMAGE_SCALE,
-    position: "center",
-    transition: index === 0 ? { out: "fade" } : { in: "fade", out: "fade" },
-  }));
+  const clips = timedImages.map(({ src, start, length }, index) => {
+    const treatment = styleTreatment(project.style, index);
+    return {
+      asset: { type: "image", src },
+      start,
+      length,
+      fit: "contain",
+      scale: treatment.scale,
+      position: "center",
+      effect: treatment.effect,
+      transition: treatment.transition,
+    };
+  });
   const endCardPhone = project.end_card_phone ? `<div class="phone">${escapeHtml(project.end_card_phone)}</div>` : "";
   const endCardEmail = project.end_card_email ? `<div class="email">${escapeHtml(project.end_card_email)}</div>` : "";
-  const endCardProfile = project.end_card_photo_url ? `<img class="profile" src="${escapeHtml(project.end_card_photo_url)}" alt="" />` : "";
-  const endCardHtml = `<div class="end-card"><div class="content"><div class="brand"><span>L</span><b>LotSocial</b></div>${endCardProfile}<p>${escapeHtml(project.end_card_cta)}</p><h1>${escapeHtml(project.end_card_name)}</h1><div class="contact">${endCardPhone}${endCardEmail}</div><small>${escapeHtml(vehicleLine(vehicle))}</small></div></div>`;
-  const endCardCss = "html,body{margin:0}.end-card{box-sizing:border-box;position:relative;width:1080px;height:1920px;font-family:Arial,Helvetica,sans-serif;color:white;text-align:center;background:linear-gradient(180deg,#071116 0%,#101f24 58%,#05090b 100%);overflow:hidden}.content{position:absolute;left:205px;right:205px;top:405px}.brand{display:block;margin:0 auto 78px;color:#c8ff43}.brand span{display:inline-block;width:66px;height:66px;line-height:66px;border-radius:15px;background:#c8ff43;color:#17242a;font-size:43px;font-weight:900;vertical-align:middle;transform:rotate(-4deg)}.brand b{display:inline-block;margin-left:13px;color:#c8ff43;font-size:34px;letter-spacing:.08em;text-transform:uppercase;vertical-align:middle}.profile{display:block;width:250px;height:250px;margin:0 auto 58px;border:8px solid #c8ff43;border-radius:50%;object-fit:cover;background:#17242a;box-shadow:0 24px 70px rgba(0,0,0,.34)}.end-card p{max-width:670px;margin:0 auto 24px;color:#c8ff43;font-size:29px;line-height:1.1;font-weight:900;letter-spacing:.02em;text-transform:uppercase;overflow-wrap:anywhere}.end-card h1{max-width:670px;margin:0 auto 24px;font-size:54px;line-height:1;letter-spacing:-.03em;overflow-wrap:anywhere}.contact{max-width:670px;margin:0 auto}.phone{display:block;margin:10px auto 0;color:#e8f1eb;font-size:31px;line-height:1.22;font-weight:900;overflow-wrap:anywhere}.email{display:block;margin:13px auto 0;color:#e8f1eb;font-size:24px;line-height:1.22;font-weight:650;overflow-wrap:anywhere}.end-card small{display:block;max-width:670px;margin:72px auto 0;color:#9fb0a7;font-size:18px;line-height:1.28;overflow-wrap:anywhere}";
+  const disclaimer = `Pricing and availability as shown on the dealer's website on ${capturedAtLabel(vehicle.imported_at)}; subject to change. Confirm current price with the dealership.`;
+  const endCardHtml = `<div class="end-card"><div class="content"><div class="photo-space"></div><h1>${escapeHtml(project.end_card_name)}</h1><div class="contact">${endCardPhone}${endCardEmail}</div><p>${escapeHtml(project.end_card_cta)}</p><div class="disclaimer">${escapeHtml(disclaimer)}</div><div class="brand"><span>L</span><b>LotSocial</b></div></div></div>`;
+  const endCardCss = "html,body{margin:0}.end-card{box-sizing:border-box;position:relative;width:1080px;height:1920px;font-family:Arial,Helvetica,sans-serif;color:white;text-align:center;background:linear-gradient(180deg,#071116 0%,#101f24 58%,#05090b 100%);overflow:hidden}.content{position:absolute;left:155px;right:155px;top:160px;bottom:95px}.photo-space{height:390px}.end-card h1{max-width:770px;margin:0 auto 52px;font-size:58px;line-height:1.05;letter-spacing:-.03em;overflow-wrap:anywhere}.contact{max-width:770px;margin:0 auto 68px}.phone{display:block;margin:0 auto 24px;color:#e8f1eb;font-size:34px;line-height:1.25;font-weight:850;overflow-wrap:anywhere}.email{display:block;margin:0 auto;color:#e8f1eb;font-size:27px;line-height:1.3;font-weight:650;overflow-wrap:anywhere}.end-card p{max-width:770px;margin:0 auto 95px;color:#c8ff43;font-size:36px;line-height:1.18;font-weight:900;letter-spacing:.02em;text-transform:uppercase;overflow-wrap:anywhere}.disclaimer{max-width:790px;margin:0 auto;color:#c8d2cd;font-size:24px;line-height:1.42;font-weight:650;overflow-wrap:anywhere}.brand{position:absolute;left:0;right:0;bottom:0;color:#c8ff43}.brand span{display:inline-block;width:66px;height:66px;line-height:66px;border-radius:15px;background:#c8ff43;color:#17242a;font-size:43px;font-weight:900;vertical-align:middle;transform:rotate(-4deg)}.brand b{display:inline-block;margin-left:13px;color:#c8ff43;font-size:34px;letter-spacing:.08em;text-transform:uppercase;vertical-align:middle}";
+  const endCardStart = Number((total - endCardLength).toFixed(2));
+  const profileClips = project.end_card_photo_url ? [{
+    asset: { type: "image", src: project.end_card_photo_url },
+    start: endCardStart,
+    length: endCardLength,
+    fit: "crop",
+    width: 300,
+    height: 300,
+    position: "top",
+    offset: { x: 0, y: -0.15 },
+    transition: { in: "fade", out: "fade" },
+  }] : [];
   const render = {
     timeline: {
       background: "#17242a",
       tracks: [
-        { clips: [{ asset: { type: "html", html: endCardHtml, css: endCardCss, width: 1080, height: 1920 }, start: Number((total - endCardLength).toFixed(2)), length: endCardLength }] },
+        { clips: profileClips },
+        { clips: [{ asset: { type: "html", html: endCardHtml, css: endCardCss, width: 1080, height: 1920 }, start: endCardStart, length: endCardLength }] },
         { clips },
         { clips: wallpaperTintClips },
         { clips: wallpaperClips },
@@ -96,7 +144,7 @@ export function buildVerticalRenderPlan(project: CreativeProjectRecord, vehicle:
       photoCount: images.length,
       endCardSeconds: endCardLength,
       style: project.style,
-      fidelity: "Original dealership VDP photos only, inspection-fit framing with darker same-image wallpaper fill and branded salesperson end card",
+      fidelity: "Original dealership VDP photos only, style-specific motion, inspection-fit framing with darker same-image wallpaper fill, and a branded salesperson end card with source-time pricing disclosure",
     },
   };
 }

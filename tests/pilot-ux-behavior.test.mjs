@@ -45,10 +45,38 @@ test("No, Light, and Extra Gravy create distinct copy without changing the compl
   assert.match(lightGravy.socialCaption, /confident presence/i);
   assert.match(extraGravy.socialCaption, /Every angle brings another reason to keep watching/i);
   for (const copy of [noGravy, lightGravy, extraGravy]) {
-    assert.match(copy.socialCaption, /Confirm current price, availability, equipment, and eligibility with the dealership/);
+    assert.match(copy.socialCaption, /Pricing and availability as shown on the dealer's website on .*UTC; subject to change\. Confirm current price with the dealership/);
+    assert.match(copy.socialCaption, /Confirm equipment and eligibility with the dealership/);
     assert.match(copy.socialCaption, /expires 7 days after posting or when the vehicle sells/);
     assert.match(copy.socialCaption, /Total price listed on dealer\.example: \$43,921/);
   }
+});
+
+test("render styles produce genuinely different motion treatments", () => {
+  const vehicle = importedVehicle();
+  const plans = ["energetic", "walkaround", "premium"].map((style) => buildVerticalRenderPlan({ ...project, style }, vehicle));
+  const treatments = plans.map((plan) => {
+    const clip = plan.render.timeline.tracks[2].clips[0];
+    return { effect: clip.effect, transition: clip.transition, scale: clip.scale };
+  });
+  assert.equal(new Set(treatments.map(JSON.stringify)).size, 3);
+  assert.match(treatments[0].effect, /Fast$/);
+  assert.match(treatments[1].effect, /Slow$/);
+  assert.match(treatments[2].effect, /Slow$/);
+});
+
+test("rendered end card uses the associate photo, spaced contact order, and approved disclaimer without a vehicle-title ghost", () => {
+  const withPhoto = { ...project, end_card_photo_url: "https://app.example/api/profile-photos/00000000-0000-4000-8000-000000000000.jpg" };
+  const plan = buildVerticalRenderPlan(withPhoto, importedVehicle({ imported_at: "2026-09-14 16:20:00" }));
+  const profileClip = plan.render.timeline.tracks[0].clips[0];
+  const html = plan.render.timeline.tracks[1].clips[0].asset.html;
+  assert.ok(plan.summary.endCardSeconds >= 5);
+  assert.equal(profileClip.asset.src, withPhoto.end_card_photo_url);
+  assert.ok(html.indexOf("Joe") < html.indexOf("555-0100"));
+  assert.ok(html.indexOf("555-0100") < html.indexOf("Message me for details"));
+  assert.ok(html.indexOf("Message me for details") < html.indexOf("Pricing and availability"));
+  assert.ok(html.indexOf("Pricing and availability") < html.indexOf("LotSocial"));
+  assert.doesNotMatch(html, /2025 Ford/);
 });
 
 test("vehicle dates are normalized to a public model year", () => {

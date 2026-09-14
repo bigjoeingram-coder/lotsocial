@@ -219,7 +219,12 @@ export function createCopy(vehicle: ImportedVehicleRecord, style: string, durati
   const captionHeadline = hasGravy ? [cleanCopyLine(facts.exteriorColor ?? ""), name].filter(Boolean).join(" ") : name;
   const gravyIntro = gravyLevel === "light" ? `${gravyBridge}\n\n` : extraGravy ? `${vibeOpener} ${gravyBridge} Every angle brings another reason to keep watching.\n\n` : "";
   const gravyClose = gravyLevel === "light" ? `Come see why this one stands out in person.\n\n` : extraGravy ? `Give it the spotlight, take the full walkaround, and see how it looks in person.\n\n` : "";
-  const socialCaption = `${captionHeadline}\n\n${gravyIntro}${description ? `${description}\n\n` : ""}${highlights.length ? `${highlights.join(" · ")}\n\n` : ""}${vehicle.price ? `Total price listed on ${cleanCopyLine(vehicle.source_host)}: ${displayPrice(vehicle.price)}.\n\n` : ""}${gravyClose}${endCardCta}. Confirm current price, availability, equipment, and eligibility with the dealership.\n\nThis ad expires 7 days after posting or when the vehicle sells, whichever comes first.\n\n#${makeModelTag} #${salespersonTag} #${dealershipTag} #lotsocial`;
+  const capturedAt = new Date(vehicle.imported_at.replace(" ", "T") + (/Z$|[+-]\d\d:\d\d$/.test(vehicle.imported_at) ? "" : "Z"));
+  const capturedAtText = Number.isFinite(capturedAt.getTime())
+    ? new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit", timeZone: "UTC", timeZoneName: "short" }).format(capturedAt)
+    : "the recorded capture time";
+  const pricingDisclaimer = `Pricing and availability as shown on the dealer's website on ${capturedAtText}; subject to change. Confirm current price with the dealership.`;
+  const socialCaption = `${captionHeadline}\n\n${gravyIntro}${description ? `${description}\n\n` : ""}${highlights.length ? `${highlights.join(" · ")}\n\n` : ""}${vehicle.price ? `Total price listed on ${cleanCopyLine(vehicle.source_host)}: ${displayPrice(vehicle.price)}.\n\n` : ""}${gravyClose}${endCardCta}.\n\n${pricingDisclaimer}\n\nConfirm equipment and eligibility with the dealership. This ad expires 7 days after posting or when the vehicle sells, whichever comes first.\n\n#${makeModelTag} #${salespersonTag} #${dealershipTag} #lotsocial`;
   return { voiceoverScript: cleanCopyBlock(voiceoverScript), socialCaption: cleanCopyBlock(socialCaption) };
 }
 
