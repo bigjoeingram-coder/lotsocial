@@ -104,6 +104,16 @@ export async function getStoredEvidence(storageKey: string, env: LotSocialEnviro
   return env.MEDIA.get(storageKey);
 }
 
+export function evidenceRowsToCsv(rows: Array<ImportEvidenceRecord & { sourceArtifactUrl: string; screenshotArtifactUrl: string | null }>) {
+  const columns = [
+    "id", "vehicle_id", "associate_email", "dealership_tenant", "source_url", "source_host",
+    "captured_at", "content_sha256", "price_at_capture", "currency", "vin_at_capture",
+    "stock_at_capture", "title_at_capture", "purpose_project_id", "purpose_note", "source_type",
+    "screenshot_status", "sourceArtifactUrl", "screenshotArtifactUrl",
+  ] as const;
+  return [columns.join(","), ...rows.map((row) => columns.map((column) => csvCell(row[column])).join(","))].join("\r\n");
+}
+
 export async function createEvidenceArtifactToken(id: string, kind: "source" | "screenshot", expiresAt: number, env: LotSocialEnvironment) {
   if (!env.ENFORCEMENT_API_KEY) throw new Error("Evidence-link signing is not configured.");
   const message = `${id}.${kind}.${expiresAt}`;
@@ -154,4 +164,9 @@ function base64Url(bytes: Uint8Array) {
   let binary = "";
   for (const byte of bytes) binary += String.fromCharCode(byte);
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+function csvCell(value: unknown) {
+  const text = value == null ? "" : String(value);
+  return `"${text.replace(/"/g, '""')}"`;
 }

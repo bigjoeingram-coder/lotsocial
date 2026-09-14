@@ -46,9 +46,12 @@ Optional integrations stay disabled when their credentials are absent:
 - `SHOTSTACK_API_KEY` and `SHOTSTACK_STAGE`
 - `RESEND_API_KEY` and `EMAIL_FROM`
 
+Full-page VDP screenshot evidence additionally requires a Cloudflare Browser Run binding named `BROWSER`. The host must use compatibility date `2026-03-24` or later. Without that binding, imports still retain the exact source payload and SHA-256 hash and truthfully record the screenshot status as `unavailable`.
+
 ## Operations
 
 - `GET /api/ops/import-health` with `Authorization: Bearer <ENFORCEMENT_API_KEY>` returns seven-day success and paid-fallback usage by dealer host.
+- `GET /api/ops/evidence?vehicleId=<id>` is restricted to managers/admins (or the internal enforcement key) and returns append-only import evidence with 15-minute signed artifact links. Add `&format=csv` for a spreadsheet-ready export.
 - Authorization management links expire and rotate; issuing a fresh link invalidates every older management link.
 - Drizzle migrations are canonical. Runtime bootstrap is retained for Sites-provisioned D1 and is checked byte-for-byte against migrations.
 

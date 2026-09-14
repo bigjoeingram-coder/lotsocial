@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import { AssociateAuthError, requireAssociate } from "../../../chatgpt-auth.ts";
-import { createEvidenceArtifactToken, listEvidenceForVehicle } from "../../../lib/evidence.ts";
+import { createEvidenceArtifactToken, evidenceRowsToCsv, listEvidenceForVehicle } from "../../../lib/evidence.ts";
 import { secureEqual } from "../../../lib/telemetry.ts";
 
 export async function GET(request: Request) {
@@ -28,6 +28,16 @@ export async function GET(request: Request) {
     sourceArtifactUrl: await signedUrl(request, row.id, "source", expiresAt),
     screenshotArtifactUrl: row.screenshot_storage_key ? await signedUrl(request, row.id, "screenshot", expiresAt) : null,
   })));
+  if (new URL(request.url).searchParams.get("format") === "csv") {
+    const body = evidenceRowsToCsv(evidence);
+    return new Response(body, {
+      headers: {
+        "content-type": "text/csv; charset=utf-8",
+        "content-disposition": `attachment; filename="lotsocial-evidence-${vehicleId}.csv"`,
+        "cache-control": "private, no-store",
+      },
+    });
+  }
   return Response.json({ vehicleId, evidence, linkExpiresAt: new Date(expiresAt * 1000).toISOString() });
 }
 

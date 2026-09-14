@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createHash } from "node:crypto";
-import { recordImportEvidence } from "../app/lib/evidence.ts";
+import { evidenceRowsToCsv, recordImportEvidence } from "../app/lib/evidence.ts";
 import { importedVehicle, SqliteD1, testEnv } from "./harness.mjs";
 
 class MemoryR2 {
@@ -73,4 +73,19 @@ test("reimporting the same vehicle appends evidence instead of replacing history
       { price_at_capture: "43921", purpose_note: "Price refresh" },
     ]);
   } finally { db.close(); }
+});
+
+test("evidence exports as spreadsheet-safe CSV without flattening commas or quotes", () => {
+  const csv = evidenceRowsToCsv([{
+    id: "ev_1", vehicle_id: "veh_1", associate_email: "joe@example.com", dealership_tenant: "dealer.example",
+    source_url: "https://dealer.example/vdp/1", source_host: "dealer.example", captured_at: "2026-09-14T12:00:00.000Z",
+    content_sha256: "abc", html_storage_key: "source.html", screenshot_storage_key: "page.png", screenshot_status: "captured",
+    price_at_capture: "43921", currency: "USD", vin_at_capture: "VIN1", stock_at_capture: "A1",
+    title_at_capture: '2026 Test, Vehicle "Premium"', purpose_project_id: null,
+    purpose_note: "Manager request, weekend post", source_type: "vdp_one_time", content_type: "text/html", storage_bytes: 100,
+    sourceArtifactUrl: "https://app.example/source", screenshotArtifactUrl: "https://app.example/screenshot",
+  }]);
+  assert.match(csv, /"2026 Test, Vehicle ""Premium"""/);
+  assert.match(csv, /"Manager request, weekend post"/);
+  assert.equal(csv.split("\r\n").length, 2);
 });
