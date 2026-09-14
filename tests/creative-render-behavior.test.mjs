@@ -20,6 +20,7 @@ const cleanProject = {
   end_card_phone: "",
   end_card_email: "joe@example.com",
   end_card_cta: "Message me for details",
+  end_card_photo_url: "",
   status: "storyboard_ready",
   created_at: "2026-08-29 00:00:00",
   updated_at: "2026-08-29 00:00:00",

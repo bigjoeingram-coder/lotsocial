@@ -15,6 +15,7 @@ export type CreativeProjectRecord = {
   end_card_phone: string;
   end_card_email: string;
   end_card_cta: string;
+  end_card_photo_url: string;
   status: string;
   created_at: string;
   updated_at: string;
@@ -40,12 +41,55 @@ async function ensureCreativeSchema(env: LotSocialEnvironment) {
 }
 
 function vehicleName(vehicle: ImportedVehicleRecord) {
-  return [vehicle.year, vehicle.make, vehicle.model, vehicle.trim].filter(Boolean).join(" ") || vehicle.title;
+  return cleanCopyLine([vehicle.year, vehicle.make, vehicle.model, vehicle.trim].filter(Boolean).join(" ") || vehicle.title);
 }
 
 function displayPrice(value: string) {
   const amount = Number(value.replace(/[^\d.]/g, ""));
   return Number.isFinite(amount) ? new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(amount) : value;
+}
+
+function decodeHtmlEntities(value: string) {
+  let decoded = value;
+  for (let index = 0; index < 3; index += 1) {
+    const next = decoded
+      .replace(/&amp;/gi, "&")
+      .replace(/&quot;/gi, '"')
+      .replace(/&apos;|&#0*39;/gi, "'")
+      .replace(/&#x([0-9a-f]+);/gi, (_, hex: string) => {
+        const codePoint = Number.parseInt(hex, 16);
+        return Number.isFinite(codePoint) ? String.fromCodePoint(codePoint) : "";
+      })
+      .replace(/&#0*(\d+);/g, (_, decimal: string) => {
+        const codePoint = Number.parseInt(decimal, 10);
+        return Number.isFinite(codePoint) ? String.fromCodePoint(codePoint) : "";
+      })
+      .replace(/&lt;/gi, "<")
+      .replace(/&gt;/gi, ">")
+      .replace(/&nbsp;/gi, " ");
+    if (next === decoded) break;
+    decoded = next;
+  }
+  return decoded;
+}
+
+function cleanCopyLine(value: string) {
+  return decodeHtmlEntities(value)
+    .replace(/<br\s*\/?>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function cleanCopyBlock(value: string) {
+  return decodeHtmlEntities(value)
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<[^>]+>/g, " ")
+    .split("\n")
+    .map((line) => line.replace(/[ \t]+/g, " ").trim())
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
 
 function groundedHighlights(vehicle: ImportedVehicleRecord) {
@@ -63,12 +107,13 @@ function groundedHighlights(vehicle: ImportedVehicleRecord) {
   };
   return Object.entries(facts)
     .filter(([key, value]) => Object.prototype.hasOwnProperty.call(labels, key) && Boolean(value))
-    .map(([key, value]) => `${labels[key]}: ${value}`)
+    .map(([key, value]) => `${labels[key]}: ${cleanCopyLine(value)}`)
+    .filter((value) => !/&#\d+;|&[a-z]+;/i.test(value))
     .slice(0, 4);
 }
 
 function captionDescription(vehicle: ImportedVehicleRecord) {
-  const description = vehicle.description.replace(/<br\s*\/?>/gi, " ").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+  const description = cleanCopyLine(vehicle.description);
   if (!description) return "";
   const sentences = description.match(/[^.!?]+[.!?]+|[^.!?]+$/g) ?? [description];
   const summary = sentences.slice(0, 2).join(" ").trim();
@@ -81,7 +126,7 @@ function hashtag(value: string, fallback: string) {
 
 function dealershipName(vehicle: ImportedVehicleRecord) {
   const facts = JSON.parse(vehicle.facts || "{}") as Record<string, string>;
-  if (facts.dealershipName) return facts.dealershipName;
+  if (facts.dealershipName) return cleanCopyLine(facts.dealershipName);
   return vehicle.source_host.replace(/^www\./i, "").split(".")[0] || "Dealership";
 }
 
@@ -159,11 +204,11 @@ function createCopy(vehicle: ImportedVehicleRecord, style: string, durationSecon
   const vibePool = vibeOpeners[vibeKey];
   const vibeOpener = vibePool[vibeSeed % vibePool.length];
   const flavorBridge = `This ${[vehicle.year, vehicle.make, vehicle.model].filter(Boolean).join(" ")} brings the look, the stance, and the hardware.`;
-  const captionHeadline = flavor ? [facts.exteriorColor, name].filter(Boolean).join(" ") : name;
+  const captionHeadline = flavor ? [cleanCopyLine(facts.exteriorColor ?? ""), name].filter(Boolean).join(" ") : name;
   const flavorIntro = flavor ? `${vibeOpener} ${flavorBridge}\n\n` : "";
   const flavorClose = flavor ? `Come see why this one stands out in person.\n\n` : "";
   const socialCaption = `${captionHeadline}\n\n${flavorIntro}${description ? `${description}\n\n` : ""}${highlights.length ? `${highlights.join(" · ")}\n\n` : ""}${vehicle.price ? `Total price listed on the VDP: ${displayPrice(vehicle.price)}.\n\n` : ""}${flavorClose}${endCardCta}. Confirm current price, availability, equipment, and eligibility with the dealership.\n\nThis ad expires 7 days after posting or when the vehicle sells, whichever comes first.\n\n#${makeModelTag} #${salespersonTag} #${dealershipTag} #lotsocial`;
-  return { voiceoverScript, socialCaption };
+  return { voiceoverScript: cleanCopyBlock(voiceoverScript), socialCaption: cleanCopyBlock(socialCaption) };
 }
 
 export async function saveCreativeProject(input: {
@@ -176,6 +221,7 @@ export async function saveCreativeProject(input: {
   endCardPhone: string;
   endCardEmail: string;
   endCardCta: string;
+  endCardPhotoUrl: string;
   flavor?: boolean;
   env: LotSocialEnvironment;
 }) {
@@ -186,11 +232,12 @@ export async function saveCreativeProject(input: {
   await db.prepare(`INSERT INTO creative_projects (
     id, vehicle_id, associate_email, selected_images, style, duration_seconds,
     voiceover_script, social_caption, end_card_name, end_card_phone, end_card_email,
-    end_card_cta, status
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'storyboard_ready')`)
+    end_card_cta, end_card_photo_url, status
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'storyboard_ready')`)
     .bind(id, input.vehicle.id, input.associateEmail, JSON.stringify(input.selectedImages),
       input.style, input.durationSeconds, copy.voiceoverScript, copy.socialCaption,
-      input.endCardName, input.endCardPhone, input.endCardEmail, input.endCardCta).run();
+      input.endCardName, input.endCardPhone, input.endCardEmail, input.endCardCta,
+      input.endCardPhotoUrl).run();
   return db.prepare("SELECT * FROM creative_projects WHERE id = ? LIMIT 1").bind(id).first<CreativeProjectRecord>();
 }
 
@@ -207,6 +254,7 @@ export function serializeCreativeProject(record: CreativeProjectRecord) {
     endCardPhone: record.end_card_phone,
     endCardEmail: record.end_card_email,
     endCardCta: record.end_card_cta,
+    endCardPhotoUrl: record.end_card_photo_url,
     status: record.status,
     createdAt: record.created_at,
   };

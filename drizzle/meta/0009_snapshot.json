@@ -456,6 +456,14 @@
           "autoincrement": false,
           "default": "'Message me for details'"
         },
+        "end_card_photo_url": {
+          "name": "end_card_photo_url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "''"
+        },
         "status": {
           "name": "status",
           "type": "text",

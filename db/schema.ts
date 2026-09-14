@@ -110,6 +110,7 @@ export const creativeProjects = sqliteTable("creative_projects", {
   endCardPhone: text("end_card_phone").notNull().default(""),
   endCardEmail: text("end_card_email").notNull().default(""),
   endCardCta: text("end_card_cta").notNull().default("Message me for details"),
+  endCardPhotoUrl: text("end_card_photo_url").notNull().default(""),
   status: text("status").notNull().default("draft"),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),

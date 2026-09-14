@@ -112,12 +112,13 @@ CREATE TABLE creative_projects__i22 (
     end_card_phone TEXT NOT NULL DEFAULT '',
     end_card_email TEXT NOT NULL DEFAULT '',
     end_card_cta TEXT NOT NULL DEFAULT 'Message me for details',
+    end_card_photo_url TEXT NOT NULL DEFAULT '',
     status TEXT NOT NULL DEFAULT 'draft',
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
   );
 
-INSERT INTO creative_projects__i22 (id, vehicle_id, associate_email, selected_images, style, duration_seconds, voiceover_script, social_caption, end_card_name, end_card_phone, end_card_email, end_card_cta, status, created_at, updated_at) SELECT id, vehicle_id, associate_email, selected_images, style, duration_seconds, voiceover_script, social_caption, end_card_name, end_card_phone, end_card_email, end_card_cta, status, created_at, updated_at FROM creative_projects;
+INSERT INTO creative_projects__i22 (id, vehicle_id, associate_email, selected_images, style, duration_seconds, voiceover_script, social_caption, end_card_name, end_card_phone, end_card_email, end_card_cta, end_card_photo_url, status, created_at, updated_at) SELECT id, vehicle_id, associate_email, selected_images, style, duration_seconds, voiceover_script, social_caption, end_card_name, end_card_phone, end_card_email, end_card_cta, end_card_photo_url, status, created_at, updated_at FROM creative_projects;
 
 DROP TABLE creative_projects;
 

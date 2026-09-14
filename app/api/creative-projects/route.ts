@@ -7,6 +7,18 @@ function clean(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
 }
 
+function cleanProfilePhotoUrl(value: unknown, request: Request) {
+  const raw = clean(value);
+  if (!raw) return "";
+  try {
+    const url = new URL(raw, request.url);
+    if (url.origin !== new URL(request.url).origin) return "";
+    return /^\/api\/profile-photos\/[a-f0-9-]{36}\.(?:jpg|jpeg|png|webp)$/i.test(url.pathname) ? url.toString() : "";
+  } catch {
+    return "";
+  }
+}
+
 export async function POST(request: Request) {
   let user;
   try {
@@ -37,6 +49,7 @@ export async function POST(request: Request) {
     endCardPhone: clean(payload.endCardPhone),
     endCardEmail: clean(payload.endCardEmail) || user.email,
     endCardCta,
+    endCardPhotoUrl: cleanProfilePhotoUrl(payload.endCardPhotoUrl, request),
     flavor,
     env,
   });

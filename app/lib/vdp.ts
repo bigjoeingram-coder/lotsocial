@@ -69,7 +69,7 @@ const IMPORT_DEADLINE_MS = 36_000;
 const DIRECT_FETCH_MS = 8_000;
 const READER_FETCH_MS = 14_000;
 const BRIGHTDATA_FETCH_MS = 25_000;
-const MAX_READER_ATTEMPTS = 6;
+const MAX_READER_ATTEMPTS = 12;
 
 async function ensureVdpSchema(env: LotSocialEnvironment) {
   return ensureLotSocialSchema(env);

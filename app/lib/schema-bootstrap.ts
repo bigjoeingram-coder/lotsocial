@@ -27,6 +27,8 @@ export type LotSocialEnvironment = {
   LOTSOCIAL_DAILY_BRIGHTDATA_GLOBAL_CAP?: string;
   LOTSOCIAL_MANAGER_EMAIL_DOMAIN_ALLOWLIST?: string;
   LOTSOCIAL_MANAGEMENT_LINK_TTL_HOURS?: string;
+  OPENAI_API_KEY?: string;
+  IMAGE_MODERATION_API_KEY?: string;
   ENFORCEMENT_API_KEY?: string;
   RESEND_API_KEY?: string;
   EMAIL_FROM?: string;
@@ -141,6 +143,7 @@ export const SCHEMA_BOOTSTRAP_SQL = [
     end_card_phone TEXT NOT NULL DEFAULT '',
     end_card_email TEXT NOT NULL DEFAULT '',
     end_card_cta TEXT NOT NULL DEFAULT 'Message me for details',
+    end_card_photo_url TEXT NOT NULL DEFAULT '',
     status TEXT NOT NULL DEFAULT 'draft',
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
