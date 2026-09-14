@@ -220,6 +220,7 @@ export function AuthorizationApp({ user }: { user: User }) {
   const [detailLoading, setDetailLoading] = useState(false);
   const [providerDraft, setProviderDraft] = useState({ providerName: "", contactName: "", contactEmail: "" });
   const [providerInvite, setProviderInvite] = useState<{ providerUrl: string; emailDeliveryStatus: string; emailPreview?: string } | null>(null);
+  const [managementInvite, setManagementInvite] = useState<{ managementUrl: string; expiresAt: string; emailDeliveryStatus: string; emailPreview?: string } | null>(null);
   const [vehicles, setVehicles] = useState<ImportedVehicle[]>([]);
   const [inventoryLoading, setInventoryLoading] = useState(true);
   const [vdpUrl, setVdpUrl] = useState("");
@@ -422,10 +423,28 @@ export function AuthorizationApp({ user }: { user: User }) {
       setDetail({ request: payload.request, auditEvents: payload.auditEvents ?? [] });
       setProviderDraft({ providerName: payload.request.providerName === "Unknown" ? "" : payload.request.providerName, contactName: payload.request.providerContactName, contactEmail: payload.request.providerContactEmail });
       setProviderInvite(null);
+      setManagementInvite(null);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Unable to load authorization details.");
     } finally {
       setDetailLoading(false);
+    }
+  }
+
+  async function sendManagementLink() {
+    if (!detail) return;
+    setSubmitting(true);
+    setError("");
+    try {
+      const response = await fetch(`/api/authorization-details/${detail.request.id}/management-link`, { method: "POST" });
+      const payload = await response.json() as { error?: string; managementUrl?: string; expiresAt?: string; emailDeliveryStatus?: string; emailPreview?: string };
+      if (!response.ok || !payload.managementUrl || !payload.expiresAt || !payload.emailDeliveryStatus) throw new Error(payload.error ?? "Unable to send a management link.");
+      setManagementInvite({ managementUrl: payload.managementUrl, expiresAt: payload.expiresAt, emailDeliveryStatus: payload.emailDeliveryStatus, emailPreview: payload.emailPreview });
+      await loadDetail(detail.request.id);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Unable to send a management link.");
+    } finally {
+      setSubmitting(false);
     }
   }
 
@@ -726,6 +745,7 @@ export function AuthorizationApp({ user }: { user: User }) {
           <div className="detail-grid"><div><span>Associate</span><strong>{detail.request.associateName}</strong><small>{detail.request.associateEmail}</small></div><div><span>Manager</span><strong>{detail.request.managerName}</strong><small>{detail.request.managerEmail}</small></div><div><span>Provider</span><strong>{detail.request.providerName || "Unknown"}</strong><small>{detail.request.providerContactEmail || "Contact not added"}</small></div><div><span>Expiration</span><strong>{detail.request.expiresAt || "No expiration"}</strong><small>Checked on every connector request</small></div></div>
           <section className="detail-section"><div className="detail-section-title"><h3>Approved permissions</h3><span>{detail.request.approvedPermissions.length}</span></div>{detail.request.approvedPermissions.length === 0 ? <p className="detail-empty">No permissions are currently approved.</p> : <div className="detail-permissions">{detail.request.approvedPermissions.map((id) => { const permission = PERMISSIONS.find((item) => item.id === id)!; const effective = detail.request.effectiveAccess.find((item) => item.permission === id); return <div key={id}><span className={effective?.allowed ? "permission-live" : "permission-blocked"}>{effective?.allowed ? "Allowed" : "Blocked"}</span><strong>{permission.label}</strong><p>{permission.detail}</p></div>; })}</div>}</section>
           {detail.request.managerNotes && <section className="detail-section"><h3>Manager restrictions</h3><p className="manager-note">{detail.request.managerNotes}</p></section>}
+          {["manager_approved", "provider_pending", "provider_verified", "provider_declined", "feed_connected", "active", "suspended"].includes(detail.request.status) && <section className="detail-section provider-invite-card"><div className="detail-section-title"><h3>Manager access link</h3><span>30 days</span></div><p>Send the manager a fresh secure link to review permissions, pause access, or revoke authorization.</p><button className="primary-button provider-invite-button" disabled={submitting} onClick={() => void sendManagementLink()}>{submitting ? "Preparing..." : "Send fresh management link"}</button>{managementInvite && <div className="provider-invite-result"><strong>{managementInvite.emailDeliveryStatus === "sent" ? "Management email sent" : "Management link ready"}</strong><div><code>{managementInvite.managementUrl}</code><button onClick={() => void navigator.clipboard.writeText(managementInvite.managementUrl)}>Copy</button></div><small>Expires {formatDate(managementInvite.expiresAt)}</small>{managementInvite.emailPreview && <details><summary>Preview email</summary><pre>{managementInvite.emailPreview}</pre></details>}</div>}</section>}
           {["manager_approved", "provider_pending", "provider_declined"].includes(detail.request.status) && <section className="detail-section provider-invite-card"><div className="detail-section-title"><h3>Provider verification</h3><span>Next</span></div><p>Send the feed company a secure rights-and-delivery confirmation. A new invitation replaces any older provider link.</p><div className="provider-invite-grid"><label><span>Provider company</span><input value={providerDraft.providerName} onChange={(event) => setProviderDraft((current) => ({ ...current, providerName: event.target.value }))} placeholder="HomeNet, DealerOn, vAuto..." /></label><label><span>Contact name</span><input value={providerDraft.contactName} onChange={(event) => setProviderDraft((current) => ({ ...current, contactName: event.target.value }))} placeholder="Feed operations contact" /></label><label className="provider-email"><span>Contact email</span><input type="email" value={providerDraft.contactEmail} onChange={(event) => setProviderDraft((current) => ({ ...current, contactEmail: event.target.value }))} placeholder="feeds@provider.com" /></label></div><button className="primary-button provider-invite-button" disabled={submitting} onClick={() => void inviteProvider()}>{submitting ? "Preparing..." : detail.request.status === "provider_pending" ? "Replace & resend verification" : "Create provider verification"}</button>{providerInvite && <div className="provider-invite-result"><strong>{providerInvite.emailDeliveryStatus === "sent" ? "Verification email sent" : "Verification link ready"}</strong><div><code>{providerInvite.providerUrl}</code><button onClick={() => void navigator.clipboard.writeText(providerInvite.providerUrl)}>Copy</button></div>{providerInvite.emailPreview && <details><summary>Preview email</summary><pre>{providerInvite.emailPreview}</pre></details>}</div>}</section>}
           {detail.request.status === "provider_verified" && detail.request.providerVerification && <section className="detail-section provider-verified-card"><div><span className="permission-live">Verified</span><h3>Provider rights confirmed</h3><p>{detail.request.providerVerification.deliveryMethod} · {detail.request.providerVerification.feedFormat}</p></div><p>{detail.request.providerVerification.connectionNotes || "No additional connection notes were supplied."}</p><small>Technical feed testing is the final gate before activation.</small></section>}
           <section className="detail-section"><div className="detail-section-title"><h3>Audit history</h3><span>{detail.auditEvents.length}</span></div><div className="audit-list">{detail.auditEvents.map((event) => <div className="audit-event" key={event.id}><span className="audit-dot" /><div><strong>{formatAuditAction(event.action)}</strong><p>{event.actorType} · {event.actorEmail || "system"}</p></div><time>{formatDate(event.createdAt)}</time></div>)}</div></section>

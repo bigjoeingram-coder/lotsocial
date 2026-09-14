@@ -4,6 +4,8 @@ import { index, integer, primaryKey, sqliteTable, text, uniqueIndex } from "driz
 export const authorizationRequests = sqliteTable("authorization_requests", {
   id: text("id").primaryKey(),
   approvalTokenHash: text("approval_token_hash").notNull().unique(),
+  managementTokenHash: text("management_token_hash").unique(),
+  managementTokenExpiresAt: text("management_token_expires_at"),
   dealershipName: text("dealership_name").notNull(),
   rooftopLocation: text("rooftop_location").notNull(),
   dealershipDomain: text("dealership_domain").notNull().default(""),

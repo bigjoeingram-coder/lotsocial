@@ -43,6 +43,8 @@ export const SCHEMA_BOOTSTRAP_SQL = [
   `CREATE TABLE IF NOT EXISTS authorization_requests (
     id TEXT PRIMARY KEY NOT NULL,
     approval_token_hash TEXT NOT NULL UNIQUE,
+    management_token_hash TEXT UNIQUE,
+    management_token_expires_at TEXT,
     dealership_name TEXT NOT NULL,
     rooftop_location TEXT NOT NULL,
     dealership_domain TEXT NOT NULL DEFAULT '',
