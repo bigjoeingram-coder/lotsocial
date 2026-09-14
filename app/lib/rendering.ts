@@ -1,5 +1,6 @@
 import type { LotSocialEnvironment } from "./schema-bootstrap.ts";
 import type { CreativeProjectRecord } from "./creative.ts";
+import { normalizeVehicleYear } from "./vdp.ts";
 import type { ImportedVehicleRecord } from "./vdp.ts";
 
 type RenderEnvironment = { SHOTSTACK_API_KEY?: string; SHOTSTACK_STAGE?: string };
@@ -8,6 +9,7 @@ const INSPECTION_IMAGE_SCALE = 0.92;
 const WALLPAPER_BACKGROUND_SCALE = 1.18;
 const WALLPAPER_BACKGROUND_OPACITY = 0.38;
 const WALLPAPER_TINT_OPACITY = 0.94;
+const INGEST_POLL_ATTEMPTS = 30;
 
 function renderEnvironment(env: LotSocialEnvironment) {
   const runtime = env as RenderEnvironment;
@@ -29,7 +31,7 @@ function escapeHtml(value: string) {
 }
 
 function vehicleLine(vehicle: ImportedVehicleRecord) {
-  return [vehicle.year, vehicle.make, vehicle.model, vehicle.trim].filter(Boolean).join(" ") || vehicle.title;
+  return [normalizeVehicleYear(vehicle.year), vehicle.make, vehicle.model, vehicle.trim].filter(Boolean).join(" ") || vehicle.title;
 }
 
 export function buildVerticalRenderPlan(project: CreativeProjectRecord, vehicle: ImportedVehicleRecord) {
@@ -99,6 +101,66 @@ export function buildVerticalRenderPlan(project: CreativeProjectRecord, vehicle:
   };
 }
 
+function providerMessage(value: unknown): string {
+  if (typeof value === "string") return value.trim();
+  if (value && typeof value === "object" && "message" in value && typeof value.message === "string") return value.message.trim();
+  return "";
+}
+
+function needsImageRendition(src: string) {
+  try {
+    return /\.avif$/i.test(new URL(src).pathname);
+  } catch {
+    return /\.avif(?:$|[?#])/i.test(src);
+  }
+}
+
+async function imageRendition(src: string, apiKey: string, stage: ShotstackStage) {
+  const queued = await fetch(`https://api.shotstack.io/ingest/${stage}/sources`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "application/json", "x-api-key": apiKey },
+    body: JSON.stringify({
+      url: src,
+      outputs: { renditions: [{ format: "jpg", resolution: "fhd", fit: "contain", quality: 82 }] },
+    }),
+  });
+  const queuedPayload = await queued.json() as { data?: { id?: string }; message?: string; error?: unknown };
+  const sourceId = queuedPayload.data?.id;
+  if (!queued.ok || !sourceId) throw new Error(providerMessage(queuedPayload.error) || queuedPayload.message || "The renderer could not prepare this dealership image.");
+
+  for (let attempt = 0; attempt < INGEST_POLL_ATTEMPTS; attempt += 1) {
+    const response = await fetch(`https://api.shotstack.io/ingest/${stage}/sources/${encodeURIComponent(sourceId)}`, {
+      headers: { Accept: "application/json", "x-api-key": apiKey },
+    });
+    const payload = await response.json() as {
+      data?: { attributes?: { status?: string; error?: unknown; outputs?: { renditions?: Array<{ status?: string; url?: string; error?: unknown }> } } };
+      message?: string;
+      error?: unknown;
+    };
+    const attributes = payload.data?.attributes;
+    const rendition = attributes?.outputs?.renditions?.[0];
+    if (response.ok && rendition?.status === "ready" && rendition.url) return rendition.url;
+    if (!response.ok || attributes?.status === "failed" || rendition?.status === "failed") {
+      throw new Error(providerMessage(rendition?.error) || providerMessage(attributes?.error) || providerMessage(payload.error) || payload.message || "The renderer could not convert this dealership image.");
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+  }
+  throw new Error("The renderer timed out while converting an AVIF dealership image. Retry the render.");
+}
+
+export async function prepareRenderCompatibleImages(plan: ReturnType<typeof buildVerticalRenderPlan>, apiKey: string, stage: ShotstackStage) {
+  const compatiblePlan = structuredClone(plan);
+  type MutableRenderClip = { asset: { src?: string; [key: string]: unknown }; [key: string]: unknown };
+  const clips = compatiblePlan.render.timeline.tracks.flatMap((track) => track.clips as unknown as MutableRenderClip[]);
+  const sources = [...new Set(clips.map((clip) => clip.asset.src ?? "").filter((src) => needsImageRendition(src)))];
+  if (sources.length === 0) return compatiblePlan;
+  const replacements = new Map(await Promise.all(sources.map(async (src) => [src, await imageRendition(src, apiKey, stage)] as const)));
+  for (const clip of clips) {
+    if (clip.asset.src && replacements.has(clip.asset.src)) clip.asset.src = replacements.get(clip.asset.src)!;
+  }
+  return compatiblePlan;
+}
+
 export async function submitRender(plan: ReturnType<typeof buildVerticalRenderPlan>, env: LotSocialEnvironment) {
   const { apiKey, stage } = renderEnvironment(env);
   if (!apiKey) return { status: "awaiting_provider_setup", providerRenderId: "", errorMessage: "The production renderer is not connected yet." };
@@ -107,10 +169,16 @@ export async function submitRender(plan: ReturnType<typeof buildVerticalRenderPl
   let latestMessage = "The renderer rejected this job.";
   let rendererAuthRejected = false;
   for (const candidateStage of stages) {
+    let compatiblePlan;
+    try {
+      compatiblePlan = await prepareRenderCompatibleImages(plan, apiKey, candidateStage);
+    } catch (caught) {
+      return { status: "provider_error", providerRenderId: "", errorMessage: caught instanceof Error ? caught.message : "The renderer could not prepare the dealership images." };
+    }
     const response = await fetch(`https://api.shotstack.io/edit/${candidateStage}/render`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-api-key": apiKey },
-      body: JSON.stringify(plan.render),
+      body: JSON.stringify(compatiblePlan.render),
     });
     const payload = await response.json() as { response?: { id?: string; message?: string }; message?: string };
     if (response.ok && payload.response?.id) {
@@ -142,15 +210,16 @@ export async function checkRender(providerRenderId: string, env: LotSocialEnviro
     headers: { "x-api-key": apiKey },
   });
   const payload = await response.json() as {
-    response?: { status?: string; url?: string; error?: string; message?: string };
+    response?: { status?: string; url?: string; error?: unknown; message?: string };
     message?: string;
+    error?: unknown;
   };
   if (!response.ok || !payload.response?.status) throw new Error(payload.response?.message ?? payload.message ?? "Unable to check the render status.");
   const providerStatus = payload.response.status;
-  const normalizedStatus = providerStatus === "done" ? "completed" : providerStatus === "failed" ? "failed" : providerStatus;
+  const normalizedStatus = providerStatus === "done" ? "completed" : providerStatus === "failed" ? "failed" : providerStatus === "preprocessing" ? "fetching" : providerStatus;
   return {
     status: normalizedStatus,
     outputUrl: payload.response.url ?? "",
-    errorMessage: payload.response.error ?? "",
+    errorMessage: providerMessage(payload.response.error) || providerMessage(payload.error) || payload.response.message || payload.message || (normalizedStatus === "failed" ? "The renderer could not process one or more dealership images." : ""),
   };
 }

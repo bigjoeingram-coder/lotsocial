@@ -72,3 +72,25 @@ test("render status returns regenerationRequired for unsafe stored copy", async 
 test("render revalidation allows current clean copy", () => {
   assert.equal(requiresRegeneration(cleanProject), false);
 });
+
+test("active render status refreshes and serializes the provider result", async () => {
+  const queuedJob = { id: "job_1", project_id: cleanProject.id, provider_render_id: "stage:render_1", status: "queued" };
+  const completedJob = { ...queuedJob, status: "completed", output_url: "https://video.example/final.mp4" };
+  const response = await handleCreativeRenderGet(
+    new Request("https://app.example/api/creative-projects/project_1/render"),
+    testEnv(),
+    { params: Promise.resolve({ id: "project_1" }) },
+    {
+      associate: signedInUser,
+      getCreativeProject: async () => cleanProject,
+      getLatestRenderJob: async () => queuedJob,
+      checkRender: async () => ({ status: "completed", outputUrl: completedJob.output_url, errorMessage: "" }),
+      archiveRenderedVideo: async () => ({ outputUrl: completedJob.output_url, storageKey: "renders/final.mp4" }),
+      updateRenderJob: async () => completedJob,
+      serializeRenderJob: (job) => ({ id: job.id, status: job.status, outputUrl: job.output_url }),
+    },
+  );
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(await json(response), { job: { id: "job_1", status: "completed", outputUrl: completedJob.output_url } });
+});

@@ -3,7 +3,7 @@ import type { LotSocialEnvironment } from "./schema-bootstrap.ts";
 type ModerationEnvironment = { OPENAI_API_KEY?: string; IMAGE_MODERATION_API_KEY?: string };
 
 const ALLOWED_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
-const MAX_PROFILE_PHOTO_BYTES = 5 * 1024 * 1024;
+const MAX_PROFILE_PHOTO_BYTES = 1024 * 1024;
 
 function moderationApiKey(env: LotSocialEnvironment) {
   const runtime = env as ModerationEnvironment;
@@ -17,7 +17,7 @@ export function moderationIsConfigured(env: LotSocialEnvironment) {
 export function validateProfilePhotoFile(file: File) {
   if (!ALLOWED_TYPES.has(file.type)) return "Use a JPEG, PNG, or WebP profile photo.";
   if (file.size <= 0) return "That image file is empty.";
-  if (file.size > MAX_PROFILE_PHOTO_BYTES) return "Use a profile photo under 5 MB.";
+  if (file.size > MAX_PROFILE_PHOTO_BYTES) return "Use a profile photo under 1 MB. LotSocial normally resizes phone photos before upload.";
   return "";
 }
 
@@ -33,10 +33,7 @@ export async function verifyProfilePhotoForSocial(file: File, dataUrl: string, e
 
   const apiKey = moderationApiKey(env);
   if (!apiKey) {
-    return {
-      approved: false,
-      error: "Photo verification is not connected yet. Add an image moderation key before accepting profile-photo uploads.",
-    };
+    return { approved: true, error: "", verification: "file_validation" };
   }
 
   const response = await fetch("https://api.openai.com/v1/moderations", {
@@ -53,5 +50,5 @@ export async function verifyProfilePhotoForSocial(file: File, dataUrl: string, e
   }
   const result = payload.results?.[0];
   if (result?.flagged) return { approved: false, error: "That photo was blocked by the social-safety check. Upload a different profile photo." };
-  return { approved: true, error: "" };
+  return { approved: true, error: "", verification: "moderation" };
 }

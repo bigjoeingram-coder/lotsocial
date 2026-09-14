@@ -1,5 +1,6 @@
 import { database, ensureLotSocialSchema } from "./schema-bootstrap.ts";
 import type { LotSocialEnvironment } from "./schema-bootstrap.ts";
+import { normalizeVehicleYear } from "./vdp.ts";
 import type { ImportedVehicleRecord } from "./vdp.ts";
 
 export type CreativeProjectRecord = {
@@ -41,7 +42,7 @@ async function ensureCreativeSchema(env: LotSocialEnvironment) {
 }
 
 function vehicleName(vehicle: ImportedVehicleRecord) {
-  return cleanCopyLine([vehicle.year, vehicle.make, vehicle.model, vehicle.trim].filter(Boolean).join(" ") || vehicle.title);
+  return cleanCopyLine([normalizeVehicleYear(vehicle.year), vehicle.make, vehicle.model, vehicle.trim].filter(Boolean).join(" ") || vehicle.title);
 }
 
 function displayPrice(value: string) {
@@ -130,7 +131,7 @@ function dealershipName(vehicle: ImportedVehicleRecord) {
   return vehicle.source_host.replace(/^www\./i, "").split(".")[0] || "Dealership";
 }
 
-function createCopy(vehicle: ImportedVehicleRecord, style: string, durationSeconds: number, endCardName: string, endCardCta: string, flavor = false) {
+export function createCopy(vehicle: ImportedVehicleRecord, style: string, durationSeconds: number, endCardName: string, endCardCta: string, flavor = false) {
   const name = vehicleName(vehicle);
   const highlights = groundedHighlights(vehicle);
   const description = captionDescription(vehicle);
@@ -203,11 +204,11 @@ function createCopy(vehicle: ImportedVehicleRecord, style: string, durationSecon
   const vibeSeed = Array.from(vehicle.vin || vehicle.id).reduce((sum, character) => sum + character.charCodeAt(0), 0);
   const vibePool = vibeOpeners[vibeKey];
   const vibeOpener = vibePool[vibeSeed % vibePool.length];
-  const flavorBridge = `This ${[vehicle.year, vehicle.make, vehicle.model].filter(Boolean).join(" ")} brings the look, the stance, and the hardware.`;
+  const flavorBridge = `This ${[normalizeVehicleYear(vehicle.year), vehicle.make, vehicle.model].filter(Boolean).join(" ")} brings the look, the stance, and the hardware.`;
   const captionHeadline = flavor ? [cleanCopyLine(facts.exteriorColor ?? ""), name].filter(Boolean).join(" ") : name;
   const flavorIntro = flavor ? `${vibeOpener} ${flavorBridge}\n\n` : "";
   const flavorClose = flavor ? `Come see why this one stands out in person.\n\n` : "";
-  const socialCaption = `${captionHeadline}\n\n${flavorIntro}${description ? `${description}\n\n` : ""}${highlights.length ? `${highlights.join(" · ")}\n\n` : ""}${vehicle.price ? `Total price listed on the VDP: ${displayPrice(vehicle.price)}.\n\n` : ""}${flavorClose}${endCardCta}. Confirm current price, availability, equipment, and eligibility with the dealership.\n\nThis ad expires 7 days after posting or when the vehicle sells, whichever comes first.\n\n#${makeModelTag} #${salespersonTag} #${dealershipTag} #lotsocial`;
+  const socialCaption = `${captionHeadline}\n\n${flavorIntro}${description ? `${description}\n\n` : ""}${highlights.length ? `${highlights.join(" · ")}\n\n` : ""}${vehicle.price ? `Total price listed on ${cleanCopyLine(vehicle.source_host)}: ${displayPrice(vehicle.price)}.\n\n` : ""}${flavorClose}${endCardCta}. Confirm current price, availability, equipment, and eligibility with the dealership.\n\nThis ad expires 7 days after posting or when the vehicle sells, whichever comes first.\n\n#${makeModelTag} #${salespersonTag} #${dealershipTag} #lotsocial`;
   return { voiceoverScript: cleanCopyBlock(voiceoverScript), socialCaption: cleanCopyBlock(socialCaption) };
 }
 

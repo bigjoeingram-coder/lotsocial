@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { PERMISSIONS, PermissionId } from "../lib/authorization-shared";
 
 type User = { name: string; email: string };
@@ -157,6 +157,7 @@ function statusTone(status: string) {
 const renderStatusLabels: Record<string, string> = {
   queued: "Queued",
   fetching: "Collecting VDP photos",
+  preprocessing: "Preparing compatible photos",
   rendering: "Rendering video",
   saving: "Finalizing video",
   completed: "Video ready",
@@ -164,6 +165,10 @@ const renderStatusLabels: Record<string, string> = {
   provider_error: "Renderer needs attention",
   awaiting_provider_setup: "Production plan ready",
 };
+
+function renderIsActive(status: string | undefined) {
+  return Boolean(status && ["queued", "fetching", "preprocessing", "rendering", "saving"].includes(status));
+}
 
 function formatDate(value: string | null) {
   if (!value) return "—";
@@ -194,6 +199,68 @@ function chunkImages(images: string[], size = 4) {
   const pages: string[][] = [];
   for (let index = 0; index < images.length; index += size) pages.push(images.slice(index, index + size));
   return pages;
+}
+
+const PROFILE_PHOTO_UPLOAD_BYTES = 850 * 1024;
+const PROFILE_PHOTO_MAX_DIMENSION = 1400;
+const PROFILE_PHOTO_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"]);
+
+async function imageSource(file: File) {
+  if (typeof createImageBitmap === "function") {
+    try {
+      const bitmap = await createImageBitmap(file, { imageOrientation: "from-image" });
+      return { source: bitmap as CanvasImageSource, width: bitmap.width, height: bitmap.height, close: () => bitmap.close() };
+    } catch {
+      // Safari's image element decoder can handle some iPhone formats that createImageBitmap cannot.
+    }
+  }
+  return new Promise<{ source: CanvasImageSource; width: number; height: number; close: () => void }>((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const image = new Image();
+    image.onload = () => resolve({ source: image, width: image.naturalWidth, height: image.naturalHeight, close: () => URL.revokeObjectURL(url) });
+    image.onerror = () => { URL.revokeObjectURL(url); reject(new Error("This browser could not read that photo. On iPhone, choose a JPEG/PNG or export the HEIC photo as Most Compatible.")); };
+    image.src = url;
+  });
+}
+
+function jpegBlob(canvas: HTMLCanvasElement, quality: number) {
+  return new Promise<Blob>((resolve, reject) => canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error("LotSocial could not prepare that photo.")), "image/jpeg", quality));
+}
+
+async function prepareProfilePhoto(file: File) {
+  if (!PROFILE_PHOTO_TYPES.has(file.type.toLowerCase()) && !/\.(?:jpe?g|png|webp|heic|heif)$/i.test(file.name)) {
+    throw new Error("Choose a JPEG, PNG, WebP, or HEIC profile photo.");
+  }
+  const decoded = await imageSource(file);
+  try {
+    const scale = Math.min(1, PROFILE_PHOTO_MAX_DIMENSION / Math.max(decoded.width, decoded.height));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(decoded.width * scale));
+    canvas.height = Math.max(1, Math.round(decoded.height * scale));
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error("LotSocial could not prepare that photo.");
+    context.drawImage(decoded.source, 0, 0, canvas.width, canvas.height);
+    let quality = 0.86;
+    let blob = await jpegBlob(canvas, quality);
+    while (blob.size > PROFILE_PHOTO_UPLOAD_BYTES && quality > 0.5) {
+      quality -= 0.08;
+      blob = await jpegBlob(canvas, quality);
+    }
+    if (blob.size > PROFILE_PHOTO_UPLOAD_BYTES) throw new Error("That photo is still too large after resizing. Choose a smaller image.");
+    return new File([blob], "lotsocial-profile.jpg", { type: "image/jpeg" });
+  } finally {
+    decoded.close();
+  }
+}
+
+async function photoUploadPayload(response: Response) {
+  const text = await response.text();
+  if (response.status === 413) return { error: "That photo was too large to upload. LotSocial now resizes phone photos first; choose a smaller image if this repeats." };
+  try {
+    return JSON.parse(text) as { photoUrl?: string; error?: string };
+  } catch {
+    return { error: response.ok ? "LotSocial received an invalid photo response." : `Photo upload failed (${response.status}). Try a JPEG or PNG.` };
+  }
 }
 
 function initialForm(user: User): FormState {
@@ -258,6 +325,8 @@ export function AuthorizationApp({ user }: { user: User }) {
   const [renderJob, setRenderJob] = useState<RenderJob | null>(null);
   const [preparingRender, setPreparingRender] = useState(false);
   const [renderShareStatus, setRenderShareStatus] = useState("");
+  const [previewFrameIndex, setPreviewFrameIndex] = useState(0);
+  const [previewPlaying, setPreviewPlaying] = useState(false);
 
   function apiHeaders(extra?: HeadersInit): HeadersInit {
     return { ...(extra as Record<string, string> | undefined) };
@@ -341,7 +410,7 @@ export function AuthorizationApp({ user }: { user: User }) {
   function startCreative(vehicle: ImportedVehicle) {
     setCreativeVehicle(vehicle);
     setBrokenCreativeImages([]);
-    setSelectedCreativeImages(vehicle.imageUrls.slice(0, 6));
+    setSelectedCreativeImages(vehicle.imageUrls.slice(0, 10));
     setCreativeStyle("walkaround");
     setCaptionFlavor(false);
     setCreativeDuration(30);
@@ -349,6 +418,8 @@ export function AuthorizationApp({ user }: { user: User }) {
     setRenderJob(null);
     setCreativeError("");
     setEndCardPhotoStatus("");
+    setPreviewFrameIndex(0);
+    setPreviewPlaying(false);
     setView("creative");
   }
 
@@ -417,13 +488,14 @@ export function AuthorizationApp({ user }: { user: User }) {
     setEndCardPhotoStatus("Verifying photo...");
     setCreativeError("");
     try {
+      const prepared = await prepareProfilePhoto(file);
       const form = new FormData();
-      form.append("photo", file);
+      form.append("photo", prepared);
       const response = await fetch("/api/profile-photos", { method: "POST", headers: apiHeaders(), body: form });
-      const payload = await response.json() as { photoUrl?: string; error?: string };
+      const payload = await photoUploadPayload(response);
       if (!response.ok || !payload.photoUrl) throw new Error(payload.error ?? "Unable to verify that profile photo.");
       setEndCardPhotoUrl(payload.photoUrl);
-      setEndCardPhotoStatus("Profile photo approved for the end card.");
+      setEndCardPhotoStatus("Profile photo added to the end card.");
       setCreativeDraft(null);
       setRenderJob(null);
     } catch (caught) {
@@ -451,7 +523,43 @@ export function AuthorizationApp({ user }: { user: User }) {
     }
   }
 
+  const refreshRenderStatus = useCallback(async (showError = false) => {
+    if (!creativeDraft) return;
+    try {
+      const response = await fetch(`/api/creative-projects/${creativeDraft.id}/render`, { cache: "no-store" });
+      const payload = await response.json() as { job?: RenderJob; error?: string; warning?: string };
+      if (!response.ok || !payload.job) throw new Error(payload.error ?? "Unable to check the render status.");
+      setRenderJob(payload.job);
+      if (showError && payload.warning) setCreativeError(payload.warning);
+    } catch (caught) {
+      if (showError) setCreativeError(caught instanceof Error ? caught.message : "Unable to check the render status.");
+    }
+  }, [creativeDraft]);
+
   const renderJobStatus = renderJob?.status;
+
+  const previewIsEndCard = previewFrameIndex >= selectedCreativeImages.length;
+  const previewImage = selectedCreativeImages[previewFrameIndex] ?? "";
+
+  useEffect(() => {
+    setPreviewFrameIndex(0);
+    setPreviewPlaying(false);
+  }, [creativeVehicle?.id, selectedCreativeImages.length]);
+
+  useEffect(() => {
+    if (!previewPlaying || selectedCreativeImages.length === 0) return;
+    const frameCount = selectedCreativeImages.length + 1;
+    const frameMs = Math.max(900, Math.round((creativeDuration * 1000) / frameCount));
+    const timer = window.setInterval(() => setPreviewFrameIndex((current) => {
+      const next = current + 1;
+      if (next >= frameCount) {
+        setPreviewPlaying(false);
+        return frameCount - 1;
+      }
+      return next;
+    }), frameMs);
+    return () => window.clearInterval(timer);
+  }, [previewPlaying, selectedCreativeImages.length, creativeDuration]);
 
   async function saveRenderedVideoToPhotos() {
     if (!renderJob?.outputUrl) return;
@@ -475,21 +583,13 @@ export function AuthorizationApp({ user }: { user: User }) {
   }
 
   useEffect(() => {
-    if (!creativeDraft || !renderJobStatus || !["queued", "fetching", "rendering", "saving"].includes(renderJobStatus)) return;
+    if (!creativeDraft || !renderIsActive(renderJobStatus)) return;
     let stopped = false;
-    const poll = async () => {
-      try {
-        const response = await fetch(`/api/creative-projects/${creativeDraft.id}/render`, { cache: "no-store", headers: apiHeaders() });
-        const payload = await response.json() as { job?: RenderJob };
-        if (!stopped && response.ok && payload.job) setRenderJob(payload.job);
-      } catch {
-        // A later poll will retry while the current durable status remains visible.
-      }
-    };
+    const poll = async () => { if (!stopped) await refreshRenderStatus(false); };
     const timer = window.setInterval(() => void poll(), 5000);
     void poll();
     return () => { stopped = true; window.clearInterval(timer); };
-  }, [creativeDraft, renderJobStatus]);
+  }, [creativeDraft, renderJobStatus, refreshRenderStatus]);
 
   async function openDetails(id: string) {
     setDetailLoading(true);
@@ -803,13 +903,13 @@ export function AuthorizationApp({ user }: { user: User }) {
                 <main className="creative-editor">
                   <section className="creative-step"><div className="creative-step-title"><span>1</span><div><h2>{hasCreativeImages ? "Select the shots" : "Caption-only draft"}</h2><p>{hasCreativeImages ? "Choose 2–10 photos. Swipe groups of four, then tap the shots you want in order." : "LotSocial captured grounded vehicle facts but no usable VDP photos. Create copy now; video needs source imagery."}</p></div><strong>{selectedCreativeImages.length} selected</strong></div>{hasCreativeImages ? <div className="creative-photo-grid" aria-label="Swipeable VDP photo groups">{chunkImages(usableCreativeImages).map((page, pageIndex) => <div className="creative-photo-page" key={`photo-page-${pageIndex}`} aria-label={`Photo group ${pageIndex + 1}`}>{page.map((image, imageIndex) => { const index = pageIndex * 4 + imageIndex; return <button type="button" key={image} className={selectedCreativeImages.includes(image) ? "selected" : ""} onClick={() => toggleCreativeImage(image)}><img src={image} alt={`VDP photo ${index + 1}`} loading="lazy" referrerPolicy="no-referrer" onError={() => markBrokenCreativeImage(image)} /><span>{selectedCreativeImages.includes(image) ? selectedCreativeImages.indexOf(image) + 1 : "+"}</span></button>; })}</div>)}</div> : <div className="caption-only-note">You can generate and copy the caption now. A video render needs at least two source vehicle photos.</div>}</section>
                   <section className="creative-step"><div className="creative-step-title"><span>2</span><div><h2>Choose the pacing</h2><p>The script uses only facts captured from the source VDP.</p></div></div><div className="creative-options"><label className={creativeStyle === "energetic" ? "selected" : ""}><input type="radio" name="style" value="energetic" checked={creativeStyle === "energetic"} onChange={() => { setCreativeStyle("energetic"); setCreativeDraft(null); }} /><strong>Fast cuts</strong><p>Quick hooks and energetic pacing</p></label><label className={creativeStyle === "walkaround" ? "selected" : ""}><input type="radio" name="style" value="walkaround" checked={creativeStyle === "walkaround"} onChange={() => { setCreativeStyle("walkaround"); setCreativeDraft(null); }} /><strong>Walkaround</strong><p>Clear, conversational vehicle tour</p></label><label className={creativeStyle === "premium" ? "selected" : ""}><input type="radio" name="style" value="premium" checked={creativeStyle === "premium"} onChange={() => { setCreativeStyle("premium"); setCreativeDraft(null); }} /><strong>Premium</strong><p>Slower, polished presentation</p></label></div><div className="duration-options"><span>Target length</span>{[15,30,45].map((duration) => <button type="button" key={duration} className={creativeDuration === duration ? "active" : ""} onClick={() => { setCreativeDuration(duration); setCreativeDraft(null); }}>{duration}s</button>)}</div></section>
-                  <section className="creative-step"><div className="creative-step-title"><span>3</span><div><h2>Salesperson end card</h2><p>This becomes the final shot. The selected CTA also appears in the generated post wording.</p></div></div><div className="end-card-builder"><label className="profile-upload"><span>{endCardPhotoUrl ? <img src={endCardPhotoUrl} alt="Approved end-card profile" /> : "Photo"}</span><input type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => void uploadEndCardPhoto(event.target.files?.[0] ?? null)} disabled={uploadingEndCardPhoto} /><strong>{uploadingEndCardPhoto ? "Checking..." : endCardPhotoUrl ? "Replace profile photo" : "Upload profile photo"}</strong><small>Verified before it can appear on the final card.</small></label><div className="form-grid compact"><label className="field"><span>Display name</span><input name="name" autoComplete="name" value={endCardName} onChange={(event) => { setEndCardName(event.target.value); setCreativeDraft(null); }} required /></label><label className="field"><span>Phone</span><input type="tel" name="phone" autoComplete="tel" inputMode="tel" value={endCardPhone} onChange={(event) => { setEndCardPhone(event.target.value); setCreativeDraft(null); }} placeholder="Optional" /></label><label className="field"><span>Email</span><input type="email" name="email" autoComplete="email" value={endCardEmail} onChange={(event) => { setEndCardEmail(event.target.value); setCreativeDraft(null); }} /></label><label className="field"><span>Call to action</span><select value={endCardCta} onChange={(event) => { setEndCardCta(event.target.value); setCreativeDraft(null); }}><option>Message me for details</option><option>Schedule your test drive</option><option>Ask me for today's availability</option><option>Contact me for current pricing</option></select></label></div></div>{endCardPhotoStatus && <p className={`profile-upload-status ${endCardPhotoUrl ? "approved" : "blocked"}`}>{endCardPhotoStatus}</p>}</section>
+                  <section className="creative-step"><div className="creative-step-title"><span>3</span><div><h2>Salesperson end card</h2><p>This becomes the final shot. The selected CTA also appears in the generated post wording.</p></div></div><div className="end-card-builder"><label className="profile-upload"><span>{endCardPhotoUrl ? <img src={endCardPhotoUrl} alt="End-card profile" /> : "Photo"}</span><input type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif,.jpg,.jpeg,.png,.webp,.heic,.heif" onChange={(event) => void uploadEndCardPhoto(event.target.files?.[0] ?? null)} disabled={uploadingEndCardPhoto} /><strong>{uploadingEndCardPhoto ? "Preparing..." : endCardPhotoUrl ? "Replace profile photo" : "Upload profile photo"}</strong><small>JPEG, PNG, WebP, or HEIC. Large phone photos are resized automatically.</small></label><div className="form-grid compact"><label className="field"><span>Display name</span><input name="name" autoComplete="section-end-card name" value={endCardName} onChange={(event) => { setEndCardName(event.target.value); setCreativeDraft(null); }} required /></label><label className="field"><span>Phone</span><input type="tel" name="tel" autoComplete="section-end-card tel" inputMode="tel" enterKeyHint="next" value={endCardPhone} onChange={(event) => { setEndCardPhone(event.target.value); setCreativeDraft(null); }} placeholder="Mobile or dealership phone" /></label><label className="field"><span>Email</span><input type="email" name="email" autoComplete="section-end-card email" inputMode="email" enterKeyHint="next" autoCapitalize="off" spellCheck={false} value={endCardEmail} onChange={(event) => { setEndCardEmail(event.target.value); setCreativeDraft(null); }} /></label><label className="field"><span>Call to action</span><select value={endCardCta} onChange={(event) => { setEndCardCta(event.target.value); setCreativeDraft(null); }}><option>Message me for details</option><option>Schedule your test drive</option><option>Ask me for today's availability</option><option>Contact me for current pricing</option></select></label></div></div>{endCardPhotoStatus && <p className={`profile-upload-status ${endCardPhotoUrl ? "approved" : "blocked"}`}>{endCardPhotoStatus}</p>}</section>
                   {creativeError && <div className="form-error" role="alert">{creativeError}</div>}
                   <button className="primary-button creative-generate" type="submit" disabled={generatingCreative}>{generatingCreative ? "Building creative..." : creativeDraft ? "Regenerate creative draft" : selectedCreativeImages.length < 2 ? "Generate social caption" : "Generate creative draft"}</button>
                 </main>
-                <aside className="creative-preview"><div className="phone-preview"><div className="phone-screen">{selectedCreativeImages[0] ? <img src={selectedCreativeImages[0]} alt="First storyboard frame" referrerPolicy="no-referrer" onError={() => markBrokenCreativeImage(selectedCreativeImages[0])} /> : <div /> }<div className="preview-overlay"><span>{creativeStyle}</span><strong>{creativeVehicle.year} {creativeVehicle.make}<br />{creativeVehicle.model}</strong><small>{creativeVehicle.price ? `${formatPrice(creativeVehicle.price, creativeVehicle.currency)} as listed` : "Contact for pricing"}</small></div></div></div><div className="preview-sequence">{selectedCreativeImages.slice(0,6).map((image,index) => <div key={image}><img src={image} alt="" referrerPolicy="no-referrer" onError={() => markBrokenCreativeImage(image)} /><span>{index + 1}</span></div>)}<div className="end-frame">{endCardPhotoUrl && <img src={endCardPhotoUrl} alt="" />}<strong>{endCardName || "Your name"}</strong><span>{endCardCta}</span></div></div><p className="preview-note">Storyboard preview · Final rendering will animate these shots and splice the end card.</p></aside>
+                <aside className="creative-preview"><div className="phone-preview"><div className="phone-screen">{previewIsEndCard ? <div className="preview-end-card">{endCardPhotoUrl && <img src={endCardPhotoUrl} alt="" />}<small>LotSocial</small><strong>{endCardName || "Your name"}</strong><span>{endCardPhone || endCardEmail || endCardCta}</span></div> : previewImage ? <><img src={previewImage} alt={`Storyboard frame ${previewFrameIndex + 1}`} referrerPolicy="no-referrer" onError={() => markBrokenCreativeImage(previewImage)} /><div className="preview-overlay"><span>{creativeStyle}</span><strong>{creativeVehicle.year} {creativeVehicle.make}<br />{creativeVehicle.model}</strong><small>{creativeVehicle.price ? `${formatPrice(creativeVehicle.price, creativeVehicle.currency)} as listed` : "Contact for pricing"}</small></div></> : <div />}</div></div><div className="preview-controls"><button type="button" onClick={() => { if (previewIsEndCard) setPreviewFrameIndex(0); setPreviewPlaying((current) => !current); }}>{previewPlaying ? "Pause preview" : "Play storyboard"}</button><span>{previewIsEndCard ? "End card" : `Shot ${previewFrameIndex + 1} of ${selectedCreativeImages.length}`}</span></div><div className="preview-sequence">{selectedCreativeImages.map((image,index) => <button type="button" className={previewFrameIndex === index ? "active" : ""} key={image} onClick={() => { setPreviewPlaying(false); setPreviewFrameIndex(index); }}><img src={image} alt={`Shot ${index + 1}`} referrerPolicy="no-referrer" onError={() => markBrokenCreativeImage(image)} /><span>{index + 1}</span></button>)}<button type="button" className={`end-frame ${previewIsEndCard ? "active" : ""}`} onClick={() => { setPreviewPlaying(false); setPreviewFrameIndex(selectedCreativeImages.length); }}>{endCardPhotoUrl && <img src={endCardPhotoUrl} alt="" />}<strong>{endCardName || "Your name"}</strong><span>{endCardCta}</span></button></div><p className="preview-note">Playable storyboard preview · All {selectedCreativeImages.length} selected shots plus the end card.</p></aside>
               </div>
-              {creativeDraft && <section className="creative-output"><div className="output-heading"><div><p className="eyebrow">{selectedCreativeImages.length < 2 ? "Caption ready" : "Storyboard ready"}</p><h2>Grounded copy and production brief</h2></div><div className="output-heading-actions"><button type="button" className={`flavor-toggle ${captionFlavor ? "active" : ""}`} disabled={generatingCreative} onClick={() => { const next = !captionFlavor; setCaptionFlavor(next); void generateCreative(undefined, next); }}>{captionFlavor ? "Flavor on - make it factual" : "Add some flavor"}</button><span>Saved draft</span></div></div><div className="output-grid"><article><div><h3>Voiceover script</h3><button type="button" onClick={() => void navigator.clipboard.writeText(creativeDraft.voiceoverScript)}>Copy</button></div><p>{creativeDraft.voiceoverScript}</p></article><article><div><h3>Social caption</h3><button type="button" onClick={() => void navigator.clipboard.writeText(creativeDraft.socialCaption)}>Copy</button></div><pre>{creativeDraft.socialCaption}</pre></article></div><div className="render-gate"><div><span>Production render</span><strong>{selectedCreativeImages.length < 2 ? "Add two vehicle photos to render video." : "Prepare a source-faithful 9:16 video."}</strong><p>{selectedCreativeImages.length < 2 ? "The caption is ready to post now; video remains unavailable without source imagery." : "Original VDP photos, deterministic motion, exact listing copy, and the salesperson end card."}</p></div><button type="button" onClick={() => void prepareRender()} disabled={selectedCreativeImages.length < 2 || preparingRender || Boolean(renderJob && ["queued", "fetching", "rendering", "saving", "completed"].includes(renderJob.status))}>{selectedCreativeImages.length < 2 ? "Video needs 2 photos" : preparingRender ? "Preparing..." : renderJob?.status === "completed" ? "Video ready" : renderJob && ["queued", "fetching", "rendering", "saving"].includes(renderJob.status) ? "Rendering..." : renderJob?.status === "awaiting_provider_setup" ? "Check connection" : "Prepare vertical video"}</button></div>{renderJob && <div className={`render-result ${renderJob.status}`} role="status"><div><span className="render-status-dot" /><div><strong>{renderStatusLabels[renderJob.status] ?? "Render update"}</strong><p>{renderJob.status === "completed" ? renderJob.stored ? "Your source-faithful video is saved permanently and ready to download." : renderJob.errorMessage || "Your source-faithful vertical video is ready to review and download." : ["queued", "fetching", "rendering", "saving"].includes(renderJob.status) ? "This page checks progress automatically. You will not be charged for duplicate clicks." : renderJob.errorMessage}</p></div></div>{renderJob.summary && <dl><div><dt>Output</dt><dd>{renderJob.summary.format}</dd></div><div><dt>Length</dt><dd>{renderJob.summary.durationSeconds}s</dd></div><div><dt>Shots</dt><dd>{renderJob.summary.photoCount} + end card</dd></div><div><dt>Storage</dt><dd>{renderJob.stored ? "Saved permanently" : "Provider copy"}</dd></div></dl>}{renderJob.status === "completed" && renderJob.outputUrl && <div className="completed-video"><video controls playsInline preload="metadata" poster={selectedCreativeImages[0]}><source src={renderJob.outputUrl} type="video/mp4" />Your browser cannot preview this video.</video><div><strong>Final vertical video</strong><p>Review every vehicle detail before publishing.</p><div className="completed-actions"><button type="button" onClick={() => void saveRenderedVideoToPhotos()}>Save to Photos</button><a href={renderJob.stored ? `${renderJob.outputUrl}?download=1` : renderJob.outputUrl} target="_blank" rel="noreferrer">Download MP4 ↗</a></div>{renderShareStatus && <small className="share-status">{renderShareStatus}</small>}</div></div>}</div>}</section>}
+              {creativeDraft && <section className="creative-output"><div className="output-heading"><div><p className="eyebrow">{selectedCreativeImages.length < 2 ? "Caption ready" : "Storyboard ready"}</p><h2>Grounded copy and production brief</h2></div><div className="output-heading-actions"><button type="button" className={`flavor-toggle ${captionFlavor ? "active" : ""}`} disabled={generatingCreative} onClick={() => { const next = !captionFlavor; setCaptionFlavor(next); void generateCreative(undefined, next); }}>{captionFlavor ? "Flavor on - make it factual" : "Add some flavor"}</button><span>Saved draft</span></div></div><div className="output-grid"><article><div><h3>Voiceover script</h3><button type="button" onClick={() => void navigator.clipboard.writeText(creativeDraft.voiceoverScript)}>Copy</button></div><p>{creativeDraft.voiceoverScript}</p></article><article><div><h3>Social caption</h3><button type="button" onClick={() => void navigator.clipboard.writeText(creativeDraft.socialCaption)}>Copy</button></div><pre>{creativeDraft.socialCaption}</pre></article></div><div className="render-gate"><div><span>Production render</span><strong>{selectedCreativeImages.length < 2 ? "Add two vehicle photos to render video." : "Prepare a source-faithful 9:16 video."}</strong><p>{selectedCreativeImages.length < 2 ? "The caption is ready to post now; video remains unavailable without source imagery." : "Original dealership photos, deterministic motion, exact listing copy, and the salesperson end card."}</p></div><button type="button" onClick={() => void prepareRender()} disabled={selectedCreativeImages.length < 2 || preparingRender || Boolean(renderJob && ["queued", "fetching", "rendering", "saving", "completed"].includes(renderJob.status))}>{selectedCreativeImages.length < 2 ? "Video needs 2 photos" : preparingRender ? "Preparing..." : renderJob?.status === "completed" ? "Video ready" : renderJob && ["queued", "fetching", "rendering", "saving"].includes(renderJob.status) ? "Rendering..." : renderJob?.status === "awaiting_provider_setup" ? "Check connection" : renderJob?.status === "failed" ? "Retry vertical video" : "Prepare vertical video"}</button></div>{renderJob && <div className={`render-result ${renderJob.status}`} role="status"><div><span className="render-status-dot" /><div><strong>{renderStatusLabels[renderJob.status] ?? "Render update"}</strong><p>{renderJob.status === "completed" ? renderJob.stored ? "Your source-faithful video is saved permanently and ready to download." : renderJob.errorMessage || "Your source-faithful vertical video is ready to review and download." : ["queued", "fetching", "rendering", "saving"].includes(renderJob.status) ? "This page checks progress automatically. You will not be charged for duplicate clicks." : renderJob.errorMessage || (renderJob.status === "failed" ? "The renderer could not process one or more dealership photos. Retry now; LotSocial will convert incompatible images first." : "The production renderer needs attention.")}</p></div>{["queued", "fetching", "rendering", "saving"].includes(renderJob.status) && <button type="button" className="render-refresh" onClick={() => void refreshRenderStatus(true)}>Check status now</button>}</div>{renderJob.summary && <dl><div><dt>Output</dt><dd>{renderJob.summary.format}</dd></div><div><dt>Length</dt><dd>{renderJob.summary.durationSeconds}s</dd></div><div><dt>Shots</dt><dd>{renderJob.summary.photoCount} + end card</dd></div><div><dt>Storage</dt><dd>{renderJob.stored ? "Saved permanently" : "Provider copy"}</dd></div></dl>}{renderJob.status === "completed" && renderJob.outputUrl && <div className="completed-video"><video controls playsInline preload="metadata" poster={selectedCreativeImages[0]}><source src={renderJob.outputUrl} type="video/mp4" />Your browser cannot preview this video.</video><div><strong>Final vertical video</strong><p>Review every vehicle detail before publishing.</p><div className="completed-actions"><button type="button" onClick={() => void saveRenderedVideoToPhotos()}>Save to Photos</button><a href={renderJob.stored ? `${renderJob.outputUrl}?download=1` : renderJob.outputUrl} target="_blank" rel="noreferrer">Download MP4 ↗</a></div>{renderShareStatus && <small className="share-status">{renderShareStatus}</small>}</div></div>}</div>}</section>}
             </form>}
           </section>
         )}

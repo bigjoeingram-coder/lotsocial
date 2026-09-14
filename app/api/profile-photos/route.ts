@@ -30,5 +30,5 @@ export async function POST(request: Request) {
   const photoId = `${crypto.randomUUID()}.${profilePhotoExtension(file.type)}`;
   await storeProfilePhoto({ associateEmail: user.email, photoId, body, contentType: file.type }, env);
   const url = new URL(request.url);
-  return Response.json({ photoUrl: `${url.origin}/api/profile-photos/${photoId}`, status: "approved" }, { status: 201 });
+  return Response.json({ photoUrl: `${url.origin}/api/profile-photos/${photoId}`, status: verification.verification ?? "validated" }, { status: 201 });
 }

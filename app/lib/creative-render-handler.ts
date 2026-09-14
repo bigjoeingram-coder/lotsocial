@@ -56,7 +56,7 @@ export async function handleCreativeRenderPost(
     return Response.json({ error: "This saved draft predates the current LotSocial safety rules. Regenerate the creative draft before rendering or publishing." }, { status: 409 });
   }
   const existing = await (dependencies.getLatestRenderJob ?? getLatestRenderJob)(project.id, user.email, env);
-  const reusableStatuses = ["queued", "fetching", "rendering", "saving", "completed"];
+  const reusableStatuses = ["queued", "fetching", "preprocessing", "rendering", "saving", "completed"];
   const isConfigured = dependencies.rendererIsConfigured ?? rendererIsConfigured;
   const serialize = dependencies.serializeRenderJob ?? serializeRenderJob;
   if (existing && (reusableStatuses.includes(existing.status) || (existing.status === "awaiting_provider_setup" && !isConfigured(env)))) {
@@ -87,6 +87,7 @@ export async function handleCreativeRenderGet(
   dependencies: CreativeRenderDependencies,
 ) {
   const user = dependencies.associate;
+  const serialize = dependencies.serializeRenderJob ?? serializeRenderJob;
   const { id } = await context.params;
   const project = await (dependencies.getCreativeProject ?? getCreativeProject)(id, user.email, env);
   if (!project) return Response.json({ error: "That creative project was not found." }, { status: 404 });
@@ -96,7 +97,7 @@ export async function handleCreativeRenderGet(
   const job = await (dependencies.getLatestRenderJob ?? getLatestRenderJob)(project.id, user.email, env);
   if (!job) return Response.json({ error: "No render job exists for this creative project." }, { status: 404 });
 
-  if (job.provider_render_id && ["queued", "fetching", "rendering", "saving"].includes(job.status)) {
+  if (job.provider_render_id && ["queued", "fetching", "preprocessing", "rendering", "saving"].includes(job.status)) {
     try {
       const providerState = await (dependencies.checkRender ?? checkRender)(job.provider_render_id, env);
       if (providerState) {

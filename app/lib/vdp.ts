@@ -25,6 +25,10 @@ export type ImportedVehicleRecord = {
   updated_at: string;
 };
 
+export function normalizeVehicleYear(value: string) {
+  return value.match(/\b(20\d{2}|19\d{2})\b/)?.[1] ?? value.trim();
+}
+
 export type ExtractedVehicle = {
   sourceUrl: string;
   sourceHost: string;
@@ -590,7 +594,7 @@ export async function parseVehicleHtml(html: string, finalUrl: URL): Promise<Ext
   ].filter(usableImageUrl);
   const uniqueImages = Array.from(new Set(images)).slice(0, 24);
   const vin = textValue(vehicleNode.vehicleIdentificationNumber) || textValue(vehicleNode.vin) || visibleText.match(/\b[A-HJ-NPR-Z0-9]{17}\b/i)?.[0]?.toUpperCase() || "";
-  const year = textValue(vehicleNode.vehicleModelDate) || name.match(/\b(20\d{2}|19\d{2})\b/)?.[1] || "";
+  const year = normalizeVehicleYear(textValue(vehicleNode.vehicleModelDate) || name.match(/\b(20\d{2}|19\d{2})\b/)?.[1] || "");
   const labeledPrice = visibleText.match(/(?:Total Price|Dealer Price|Sale Price|Selling Price|Internet Price|Today's Price|Our Price|MSRP)\s*[:\-]?\s*\$\s*([\d,]+(?:\.\d{1,2})?)/i)?.[1];
   const price = [
     offers.price,
@@ -703,7 +707,7 @@ export function serializeVehicle(record: ImportedVehicleRecord) {
     title: record.title,
     vin: record.vin,
     stockNumber: record.stock_number,
-    year: record.year,
+    year: normalizeVehicleYear(record.year),
     make: record.make,
     model: record.model,
     trim: record.trim,
