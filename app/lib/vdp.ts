@@ -1,5 +1,7 @@
 import { database, ensureLotSocialSchema } from "./schema-bootstrap.ts";
 import type { LotSocialEnvironment } from "./schema-bootstrap.ts";
+import { reserveBrightDataBudget } from "./telemetry.ts";
+import type { ImportTelemetry } from "./telemetry.ts";
 
 export type ImportedVehicleRecord = {
   id: string;
@@ -46,6 +48,13 @@ const DIRECT_FETCH_MS = 8_000;
 const READER_FETCH_MS = 14_000;
 const BRIGHTDATA_FETCH_MS = 25_000;
 const MAX_READER_ATTEMPTS = 6;
+
+export type VdpExtractionContext = {
+  associateEmail: string;
+  report?: (telemetry: ImportTelemetry) => void;
+};
+
+const BUDGET_NOTICE = "Bright Data daily budget reached. LotSocial continued with the free inventory fallback.";
 
 async function ensureVdpSchema(env: LotSocialEnvironment) {
   return ensureLotSocialSchema(env);
@@ -392,26 +401,32 @@ async function extractFromDealerInspireListing(sourceUrl: URL, deadline: { expir
   return null;
 }
 
-async function fetchViaBrightData(url: URL, deadline: { expiresAt: number }, env: LotSocialEnvironment): Promise<{ html: string; finalUrl: URL } | null> {
+async function fetchViaBrightData(
+  url: URL,
+  deadline: { expiresAt: number },
+  env: LotSocialEnvironment,
+  context?: VdpExtractionContext,
+): Promise<{ page: { html: string; finalUrl: URL } | null; attempted: boolean; skippedBudget: boolean }> {
   const apiKey = env?.BRIGHTDATA_API_KEY;
   const zone = env?.BRIGHTDATA_ZONE;
   const envPresent = Boolean(apiKey);
   const zonePresent = Boolean(zone);
   const startedAt = Date.now();
   function logBranch(branch: string, extra: Record<string, unknown> = {}) {
-    // Redacted: never logs apiKey/zone values, only presence booleans.
     console.warn("LotSocial Bright Data branch", {
-      url: url.href,
-      envPresent,
-      zonePresent,
-      elapsedMs: Date.now() - startedAt,
-      branch,
-      ...extra,
+      url: url.href, envPresent, zonePresent, elapsedMs: Date.now() - startedAt, branch, ...extra,
     });
   }
   if (!apiKey || !zone) {
     logBranch("skipped_no_credentials");
-    return null;
+    return { page: null, attempted: false, skippedBudget: false };
+  }
+  if (context?.associateEmail) {
+    const budget = await reserveBrightDataBudget(env, context.associateEmail);
+    if (!budget.allowed) {
+      logBranch("skipped_budget", { reason: budget.reason });
+      return { page: null, attempted: false, skippedBudget: true };
+    }
   }
   const timeout = timeoutFor(deadline, BRIGHTDATA_FETCH_MS);
   try {
@@ -423,37 +438,63 @@ async function fetchViaBrightData(url: URL, deadline: { expiresAt: number }, env
     });
     if (!response.ok) {
       logBranch("non_2xx", { status: response.status });
-      return null;
+      return { page: null, attempted: true, skippedBudget: false };
     }
     const html = await response.text();
     if (!html || html.length > 3_000_000) {
       logBranch("success_unparseable", { length: html?.length ?? 0 });
-      return null;
+      return { page: null, attempted: true, skippedBudget: false };
     }
     logBranch("success_parsed", { length: html.length });
-    return { html, finalUrl: url };
+    return { page: { html, finalUrl: url }, attempted: true, skippedBudget: false };
   } catch (caught) {
     const isAbort = caught instanceof Error && caught.name === "AbortError";
     logBranch(isAbort ? "timeout_abort" : "fetch_error", { message: caught instanceof Error ? caught.message : "unknown" });
-    return null;
+    return { page: null, attempted: true, skippedBudget: false };
   } finally {
     timeout.cleanup();
   }
 }
 
-export async function extractVehicleFromVdp(value: string, env: LotSocialEnvironment): Promise<ExtractedVehicle> {
+export async function extractVehicleFromVdp(
+  value: string,
+  env: LotSocialEnvironment,
+  context?: VdpExtractionContext,
+): Promise<ExtractedVehicle> {
   const requestedUrl = validatePublicUrl(value);
   const deadline = createDeadline();
+  let reported = false;
+  const report = (telemetry: ImportTelemetry) => {
+    if (reported) return;
+    reported = true;
+    context?.report?.(telemetry);
+  };
 
-  async function viaListingOrThrow(reason: string): Promise<{ html: string; finalUrl: URL }> {
-    const viaBrightData = await fetchViaBrightData(requestedUrl, deadline, env);
-    if (viaBrightData) return viaBrightData;
+  async function viaListingOrThrow(reason: string, failureOutcome: ImportTelemetry["outcome"]): Promise<{ html: string; finalUrl: URL; telemetry: ImportTelemetry }> {
+    const bright = await fetchViaBrightData(requestedUrl, deadline, env, context);
+    if (bright.page) {
+      return { ...bright.page, telemetry: { outcome: "brightdata_success", fallback: "brightdata", brightDataUsed: true } };
+    }
     const listingVehicle = await extractFromDealerInspireListing(requestedUrl, deadline);
-    if (listingVehicle) throw new ResolvedVehicle(listingVehicle);
-    throw new Error(`LotSocial could not scrape that VDP yet. ${reason} and no matching public inventory listing was found.`);
+    if (listingVehicle) {
+      throw new ResolvedVehicle(listingVehicle, {
+        outcome: bright.skippedBudget ? "skipped_budget" : "listing_guess_success",
+        fallback: "listing_guess",
+        brightDataUsed: bright.attempted,
+        budgetSkipped: bright.skippedBudget,
+        notice: bright.skippedBudget ? BUDGET_NOTICE : undefined,
+      });
+    }
+    throw new ExtractionFailure(`LotSocial could not scrape that VDP yet. ${reason} and no matching public inventory listing was found.`, {
+      outcome: bright.skippedBudget ? "skipped_budget" : failureOutcome,
+      fallback: "listing_guess_failed",
+      brightDataUsed: bright.attempted,
+      budgetSkipped: bright.skippedBudget,
+      notice: bright.skippedBudget ? BUDGET_NOTICE : undefined,
+    });
   }
 
-  let resolved: { html: string; finalUrl: URL };
+  let resolved: { html: string; finalUrl: URL; telemetry?: ImportTelemetry };
   try {
     const timeout = timeoutFor(deadline, DIRECT_FETCH_MS);
     let response: Response;
@@ -470,24 +511,30 @@ export async function extractVehicleFromVdp(value: string, env: LotSocialEnviron
         redirect: "follow",
         signal: timeout.signal,
       });
-    } catch {
-      resolved = await viaListingOrThrow("This store blocks the direct page");
-      return await parseVehicleHtml(resolved.html, resolved.finalUrl);
+    } catch (caught) {
+      const outcome = caught instanceof Error && caught.name === "AbortError" ? "network_timeout" : "parse_failure";
+      resolved = await viaListingOrThrow("This store blocks the direct page", outcome);
+      try {
+        const vehicle = await parseVehicleHtml(resolved.html, resolved.finalUrl);
+        report(resolved.telemetry ?? { outcome: "brightdata_success", fallback: "brightdata", brightDataUsed: true });
+        return vehicle;
+      } catch (error) {
+        report({ ...(resolved.telemetry ?? { outcome: "parse_failure", fallback: "brightdata", brightDataUsed: true }), outcome: "parse_failure" });
+        throw error;
+      }
     } finally {
       timeout.cleanup();
     }
     if (!response.ok) {
       console.warn("LotSocial VDP direct fetch failed", {
-        url: requestedUrl.href,
-        status: response.status,
-        statusText: response.statusText,
-        cfRay: response.headers.get("cf-ray") ?? "",
-        cfMitigated: response.headers.get("cf-mitigated") ?? "",
-        server: response.headers.get("server") ?? "",
-        contentType: response.headers.get("content-type") ?? "",
+        url: requestedUrl.href, status: response.status, statusText: response.statusText,
+        cfRay: response.headers.get("cf-ray") ?? "", cfMitigated: response.headers.get("cf-mitigated") ?? "",
+        server: response.headers.get("server") ?? "", contentType: response.headers.get("content-type") ?? "",
       });
-      resolved = await viaListingOrThrow("This store blocks the direct page");
-      return await parseVehicleHtml(resolved.html, resolved.finalUrl);
+      resolved = await viaListingOrThrow("This store blocks the direct page", "parse_failure");
+      const vehicle = await parseVehicleHtml(resolved.html, resolved.finalUrl);
+      report(resolved.telemetry ?? { outcome: "brightdata_success", fallback: "brightdata", brightDataUsed: true });
+      return vehicle;
     }
     const finalUrl = validatePublicUrl(response.url);
     const contentType = response.headers.get("content-type") ?? "";
@@ -497,22 +544,43 @@ export async function extractVehicleFromVdp(value: string, env: LotSocialEnviron
     const html = await response.text();
     if (html.length > 3_000_000) throw new Error("That VDP is too large to import safely.");
     if (isCloudflareChallenge(html, response.headers)) {
-      resolved = await viaListingOrThrow("This store returned a Cloudflare challenge");
-      return await parseVehicleHtml(resolved.html, resolved.finalUrl);
+      resolved = await viaListingOrThrow("This store returned a Cloudflare challenge", "parse_failure");
+      const vehicle = await parseVehicleHtml(resolved.html, resolved.finalUrl);
+      report(resolved.telemetry ?? { outcome: "brightdata_success", fallback: "brightdata", brightDataUsed: true });
+      return vehicle;
     }
     resolved = { html, finalUrl };
   } catch (caught) {
-    if (caught instanceof ResolvedVehicle) return caught.vehicle;
+    if (caught instanceof ResolvedVehicle) { report(caught.telemetry); return caught.vehicle; }
+    if (caught instanceof ExtractionFailure) report(caught.telemetry);
+    else report({ outcome: caught instanceof Error && caught.name === "AbortError" ? "network_timeout" : "parse_failure", fallback: "none", brightDataUsed: false });
     throw caught;
   }
-  return await parseVehicleHtml(resolved.html, resolved.finalUrl);
+  try {
+    const vehicle = await parseVehicleHtml(resolved.html, resolved.finalUrl);
+    report({ outcome: "direct_success", fallback: "none", brightDataUsed: false });
+    return vehicle;
+  } catch (error) {
+    report({ outcome: "parse_failure", fallback: "none", brightDataUsed: false });
+    throw error;
+  }
 }
 
 class ResolvedVehicle extends Error {
   vehicle: ExtractedVehicle;
-  constructor(vehicle: ExtractedVehicle) {
+  telemetry: ImportTelemetry;
+  constructor(vehicle: ExtractedVehicle, telemetry: ImportTelemetry) {
     super("resolved-via-listing-guess");
     this.vehicle = vehicle;
+    this.telemetry = telemetry;
+  }
+}
+
+class ExtractionFailure extends Error {
+  telemetry: ImportTelemetry;
+  constructor(message: string, telemetry: ImportTelemetry) {
+    super(message);
+    this.telemetry = telemetry;
   }
 }
 

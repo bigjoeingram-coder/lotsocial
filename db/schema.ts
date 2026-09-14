@@ -126,6 +126,20 @@ export const creativeRenderJobs = sqliteTable("creative_render_jobs", {
   index("creative_render_jobs_associate_idx").on(table.associateEmail, table.createdAt),
 ]);
 
+export const importOutcomes = sqliteTable("import_outcomes", {
+  id: text("id").primaryKey(),
+  associateEmail: text("associate_email").notNull(),
+  sourceHost: text("source_host").notNull(),
+  outcome: text("outcome").notNull(),
+  elapsedMs: integer("elapsed_ms").notNull().default(0),
+  fallback: text("fallback").notNull().default(""),
+  brightDataUsed: integer("bright_data_used").notNull().default(0),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [
+  index("import_outcomes_host_created_idx").on(table.sourceHost, table.createdAt),
+  index("import_outcomes_associate_created_idx").on(table.associateEmail, table.createdAt),
+]);
+
 export const rateLimitCounters = sqliteTable("rate_limit_counters", {
   counterKey: text("counter_key").notNull(),
   counterScope: text("counter_scope").notNull(),
