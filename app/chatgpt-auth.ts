@@ -85,6 +85,7 @@ export async function requireChatGPTUser(
     return await requireAssociate(await headers(), env);
   } catch (error) {
     if (error instanceof AssociateAuthError) {
+      console.warn("associate_auth_rejected", { reason: error.message });
       redirect(chatGPTSignInPath(returnTo));
     }
     throw error;
