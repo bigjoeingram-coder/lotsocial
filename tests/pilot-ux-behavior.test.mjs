@@ -3,7 +3,7 @@ import test from "node:test";
 import { createCopy } from "../app/lib/creative.ts";
 import { replenishSelectedImages } from "../app/lib/creative-selection.ts";
 import { validateProfilePhotoFile, verifyProfilePhotoForSocial } from "../app/lib/image-moderation.ts";
-import { buildVerticalRenderPlan, checkRender, prepareRenderCompatibleImages } from "../app/lib/rendering.ts";
+import { buildSignedRenderSourceUrls, buildVerticalRenderPlan, checkRender, prepareRenderCompatibleImages } from "../app/lib/rendering.ts";
 import { serveRenderSourceImage } from "../app/lib/render-source.ts";
 import { normalizeVehicleYear } from "../app/lib/vdp.ts";
 import { FakeD1, importedVehicle, testEnv } from "./harness.mjs";
@@ -91,6 +91,19 @@ test("production plans relay dealership images through the LotSocial source endp
     "https://lotsocial.example/api/render-source-images/project_1/1",
   ]);
   assert.equal(imageSources.length, 4, "each relayed source is reused for foreground and wallpaper tracks");
+});
+
+test("production render sources use expiring signed URLs on the public media proxy", async () => {
+  const urls = await buildSignedRenderSourceUrls(project, testEnv({
+    LOTSOCIAL_RENDER_PROXY_ORIGIN: "https://lotsocial-render-source.bigjoe-ingram.workers.dev/",
+    LOTSOCIAL_RENDER_PROXY_SECRET: "test-secret",
+  }), 1_700_000_000_000);
+  assert.equal(urls.length, 2);
+  assert.match(urls[0], /^https:\/\/lotsocial-render-source\.bigjoe-ingram\.workers\.dev\/image\?e=1700007200&u=[A-Za-z0-9_-]+&s=[A-Za-z0-9_-]+$/);
+  assert.notEqual(urls[0], urls[1]);
+  const plan = buildVerticalRenderPlan(project, importedVehicle(), urls);
+  const imageSources = plan.render.timeline.tracks.flatMap((track) => track.clips).map((clip) => clip.asset.src).filter(Boolean);
+  assert.deepEqual([...new Set(imageSources)].sort(), [...urls].sort());
 });
 
 test("the render source relay validates, caches, and serves the captured dealership image", async () => {

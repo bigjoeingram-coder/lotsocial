@@ -67,9 +67,11 @@ function styleTreatment(style: string, index: number) {
   };
 }
 
-export function buildVerticalRenderPlan(project: CreativeProjectRecord, vehicle: ImportedVehicleRecord, sourceOrigin = "") {
+export function buildVerticalRenderPlan(project: CreativeProjectRecord, vehicle: ImportedVehicleRecord, sourceOrigin: string | string[] = "") {
   const images = JSON.parse(project.selected_images || "[]") as string[];
-  const renderImages = sourceOrigin
+  const renderImages = Array.isArray(sourceOrigin)
+    ? sourceOrigin
+    : sourceOrigin
     ? images.map((_src, index) => `${sourceOrigin.replace(/\/$/, "")}/api/render-source-images/${encodeURIComponent(project.id)}/${index}`)
     : images;
   const total = Math.max(15, project.duration_seconds);
@@ -158,6 +160,27 @@ function providerMessage(value: unknown): string {
   if (typeof value === "string") return value.trim();
   if (value && typeof value === "object" && "message" in value && typeof value.message === "string") return value.message.trim();
   return "";
+}
+
+function base64Url(bytes: ArrayBuffer) {
+  let binary = "";
+  for (const byte of new Uint8Array(bytes)) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+export async function buildSignedRenderSourceUrls(project: CreativeProjectRecord, env: LotSocialEnvironment, now = Date.now()) {
+  const origin = env.LOTSOCIAL_RENDER_PROXY_ORIGIN?.trim().replace(/\/$/, "");
+  const secret = env.LOTSOCIAL_RENDER_PROXY_SECRET?.trim();
+  if (!origin || !secret) return [];
+  const images = JSON.parse(project.selected_images || "[]") as string[];
+  const expires = Math.floor(now / 1000) + 60 * 60 * 2;
+  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  return Promise.all(images.map(async (source) => {
+    const encoded = base64Url(new TextEncoder().encode(source).buffer);
+    const message = `${expires}.${encoded}`;
+    const signature = base64Url(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(message)));
+    return `${origin}/image?e=${expires}&u=${encoded}&s=${signature}`;
+  }));
 }
 
 function needsImageRendition(src: string) {

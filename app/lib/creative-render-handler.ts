@@ -5,6 +5,7 @@ import type { LotSocialEnvironment } from "./schema-bootstrap.ts";
 import { getImportedVehicle } from "./vdp.ts";
 import {
   buildVerticalRenderPlan,
+  buildSignedRenderSourceUrls,
   checkRender,
   rendererIsConfigured,
   submitRender,
@@ -65,8 +66,9 @@ export async function handleCreativeRenderPost(
   const vehicle = await (dependencies.getImportedVehicle ?? getImportedVehicle)(project.vehicle_id, user.email, env);
   if (!vehicle) return Response.json({ error: "The source vehicle is no longer available." }, { status: 404 });
 
+  const signedSources = await buildSignedRenderSourceUrls(project, env);
   const sourceHostname = env.LOTSOCIAL_EXPECTED_SITES_HOSTNAME?.trim();
-  const sourceOrigin = sourceHostname ? `https://${sourceHostname}` : "";
+  const sourceOrigin = signedSources.length ? signedSources : sourceHostname ? `https://${sourceHostname}` : "";
   const plan = (dependencies.buildVerticalRenderPlan ?? buildVerticalRenderPlan)(project, vehicle, sourceOrigin);
   const submission = await (dependencies.submitRender ?? submitRender)(plan, env);
   const job = await (dependencies.createRenderJob ?? createRenderJob)({
