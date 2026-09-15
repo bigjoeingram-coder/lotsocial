@@ -56,7 +56,7 @@ test("render styles produce genuinely different motion treatments", () => {
   const vehicle = importedVehicle();
   const plans = ["energetic", "walkaround", "premium"].map((style) => buildVerticalRenderPlan({ ...project, style }, vehicle));
   const treatments = plans.map((plan) => {
-    const clip = plan.render.timeline.tracks[2].clips[0];
+    const clip = plan.render.timeline.tracks.flatMap((track) => track.clips).find((candidate) => "effect" in candidate);
     return { effect: clip.effect, transition: clip.transition, scale: clip.scale };
   });
   assert.equal(new Set(treatments.map(JSON.stringify)).size, 3);
@@ -67,12 +67,19 @@ test("render styles produce genuinely different motion treatments", () => {
 
 test("energetic render plans use Shotstack-valid fast transitions", () => {
   const plan = buildVerticalRenderPlan({ ...project, style: "energetic" }, importedVehicle());
-  const vehicleClips = plan.render.timeline.tracks[2].clips;
+  const vehicleClips = plan.render.timeline.tracks.flatMap((track) => track.clips).filter((clip) => "effect" in clip);
 
   assert.equal(vehicleClips[0].transition.out, "fadeFast");
   assert.equal(vehicleClips[1].transition.in, "wipeLeftFast");
   assert.equal(vehicleClips[1].transition.out, "fadeFast");
   assert.doesNotMatch(JSON.stringify(plan), /zoom(?:Fast)?"/);
+});
+
+test("render plans omit the optional profile track when no salesperson photo is supplied", () => {
+  const plan = buildVerticalRenderPlan({ ...project, end_card_photo_url: "" }, importedVehicle());
+
+  assert.ok(plan.render.timeline.tracks.every((track) => track.clips.length > 0));
+  assert.equal(plan.render.timeline.tracks.length, 4);
 });
 
 test("rendered end card uses the associate photo, spaced contact order, and approved disclaimer without a vehicle-title ghost", () => {

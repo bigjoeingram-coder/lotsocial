@@ -129,7 +129,7 @@ export function buildVerticalRenderPlan(project: CreativeProjectRecord, vehicle:
     timeline: {
       background: "#17242a",
       tracks: [
-        { clips: profileClips },
+        ...(profileClips.length ? [{ clips: profileClips }] : []),
         { clips: [{ asset: { type: "html", html: endCardHtml, css: endCardCss, width: 1080, height: 1920 }, start: endCardStart, length: endCardLength }] },
         { clips },
         { clips: wallpaperTintClips },
