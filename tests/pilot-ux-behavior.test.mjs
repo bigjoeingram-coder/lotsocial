@@ -4,8 +4,9 @@ import { createCopy } from "../app/lib/creative.ts";
 import { replenishSelectedImages } from "../app/lib/creative-selection.ts";
 import { validateProfilePhotoFile, verifyProfilePhotoForSocial } from "../app/lib/image-moderation.ts";
 import { buildVerticalRenderPlan, checkRender, prepareRenderCompatibleImages } from "../app/lib/rendering.ts";
+import { serveRenderSourceImage } from "../app/lib/render-source.ts";
 import { normalizeVehicleYear } from "../app/lib/vdp.ts";
-import { importedVehicle, testEnv } from "./harness.mjs";
+import { FakeD1, importedVehicle, testEnv } from "./harness.mjs";
 
 const project = {
   id: "project_1",
@@ -80,6 +81,50 @@ test("render plans omit the optional profile track when no salesperson photo is 
 
   assert.ok(plan.render.timeline.tracks.every((track) => track.clips.length > 0));
   assert.equal(plan.render.timeline.tracks.length, 4);
+});
+
+test("production plans relay dealership images through the LotSocial source endpoint", () => {
+  const plan = buildVerticalRenderPlan(project, importedVehicle(), "https://lotsocial.example/");
+  const imageSources = plan.render.timeline.tracks.flatMap((track) => track.clips).map((clip) => clip.asset.src).filter(Boolean);
+  assert.deepEqual([...new Set(imageSources)].sort(), [
+    "https://lotsocial.example/api/render-source-images/project_1/0",
+    "https://lotsocial.example/api/render-source-images/project_1/1",
+  ]);
+  assert.equal(imageSources.length, 4, "each relayed source is reused for foreground and wallpaper tracks");
+});
+
+test("the render source relay validates, caches, and serves the captured dealership image", async () => {
+  const originalFetch = globalThis.fetch;
+  const objects = new Map();
+  const media = {
+    get: async (key) => objects.get(key) ?? null,
+    put: async (key, body, options) => objects.set(key, { body, httpMetadata: options.httpMetadata }),
+  };
+  const db = new FakeD1({ creativeProjects: [project] });
+  let upstreamFetches = 0;
+  try {
+    globalThis.fetch = async (url) => {
+      upstreamFetches += 1;
+      assert.equal(String(url), "https://dealer.example/photo.avif");
+      return new Response(new Uint8Array([1, 2, 3]), { headers: { "Content-Type": "image/avif", "Content-Length": "3" } });
+    };
+    const env = testEnv({ DB: db, MEDIA: media });
+    const first = await serveRenderSourceImage("00000000-0000-4000-8000-000000000001", "0", env);
+    assert.equal(first.status, 404, "unknown projects fail closed");
+    const served = await serveRenderSourceImage("project_1", "0", env);
+    assert.equal(served.status, 404, "non-UUID project identifiers fail closed");
+
+    const uuidProject = { ...project, id: "00000000-0000-4000-8000-000000000000" };
+    db.creativeProjects.push(uuidProject);
+    const fresh = await serveRenderSourceImage(uuidProject.id, "0", env);
+    assert.equal(fresh.status, 200);
+    assert.equal(fresh.headers.get("content-type"), "image/avif");
+    const cached = await serveRenderSourceImage(uuidProject.id, "0", env);
+    assert.equal(cached.status, 200);
+    assert.equal(upstreamFetches, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test("rendered end card uses the associate photo, spaced contact order, and approved disclaimer without a vehicle-title ghost", () => {

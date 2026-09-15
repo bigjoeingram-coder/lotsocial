@@ -73,8 +73,8 @@ test("render revalidation allows current clean copy", () => {
   assert.equal(requiresRegeneration(cleanProject), false);
 });
 
-test("retrying a failed render forces compatibility conversion for every image", async () => {
-  let submitOptions;
+test("render jobs use the LotSocial source relay instead of provider hotlinks", async () => {
+  let submittedPlan;
   const failedJob = { id: "job_failed", project_id: cleanProject.id, provider_render_id: "v1:failed", status: "failed" };
   const response = await handleCreativeRenderPost(
     new Request("https://app.example/api/creative-projects/project_1/render", { method: "POST" }),
@@ -85,9 +85,9 @@ test("retrying a failed render forces compatibility conversion for every image",
       getCreativeProject: async () => cleanProject,
       getLatestRenderJob: async () => failedJob,
       getImportedVehicle: async () => ({ id: "vehicle_1" }),
-      buildVerticalRenderPlan: () => ({ render: { timeline: { tracks: [] } }, summary: {} }),
-      submitRender: async (_plan, _env, options) => {
-        submitOptions = options;
+      buildVerticalRenderPlan: (_project, _vehicle, origin) => ({ render: { timeline: { tracks: [] } }, summary: { origin } }),
+      submitRender: async (plan) => {
+        submittedPlan = plan;
         return { status: "queued", providerRenderId: "v1:retry", errorMessage: "" };
       },
       createRenderJob: async () => ({ id: "job_retry", status: "queued" }),
@@ -96,7 +96,7 @@ test("retrying a failed render forces compatibility conversion for every image",
   );
 
   assert.equal(response.status, 201);
-  assert.deepEqual(submitOptions, { convertAllImages: true });
+  assert.equal(submittedPlan.summary.origin, "https://lotsocial.test");
 });
 
 test("active render status refreshes and serializes the provider result", async () => {

@@ -98,6 +98,11 @@ export class FakeD1 {
   }
 
   first(sql, values) {
+    if (matches(sql, "SELECT selected_images FROM creative_projects")) {
+      const [projectId] = values;
+      const project = this.creativeProjects.find((candidate) => candidate.id === projectId);
+      return project ? { selected_images: project.selected_images } : null;
+    }
     if (matches(sql, "INSERT INTO rate_limit_counters")) {
       const [counterKey, counterScope, counterSubject, counterDay] = values;
       const key = `${counterKey}:${counterDay}`;

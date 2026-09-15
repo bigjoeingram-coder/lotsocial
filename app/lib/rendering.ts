@@ -67,12 +67,15 @@ function styleTreatment(style: string, index: number) {
   };
 }
 
-export function buildVerticalRenderPlan(project: CreativeProjectRecord, vehicle: ImportedVehicleRecord) {
+export function buildVerticalRenderPlan(project: CreativeProjectRecord, vehicle: ImportedVehicleRecord, sourceOrigin = "") {
   const images = JSON.parse(project.selected_images || "[]") as string[];
+  const renderImages = sourceOrigin
+    ? images.map((_src, index) => `${sourceOrigin.replace(/\/$/, "")}/api/render-source-images/${encodeURIComponent(project.id)}/${index}`)
+    : images;
   const total = Math.max(15, project.duration_seconds);
   const endCardLength = Math.min(6, Math.max(5, total * 0.15));
   const imageLength = (total - endCardLength) / images.length;
-  const timedImages = images.map((src, index) => ({
+  const timedImages = renderImages.map((src, index) => ({
     src,
     start: Number((index * imageLength).toFixed(2)),
     length: Number((imageLength + (index < images.length - 1 ? 0.25 : 0)).toFixed(2)),

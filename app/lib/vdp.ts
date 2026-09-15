@@ -82,7 +82,7 @@ async function ensureVdpSchema(env: LotSocialEnvironment) {
   return ensureLotSocialSchema(env);
 }
 
-function validatePublicUrl(value: string) {
+export function validatePublicUrl(value: string) {
   let url: URL;
   try { url = new URL(value); } catch { throw new Error("Enter a complete public VDP URL."); }
   if (!["http:", "https:"].includes(url.protocol) || (url.port && !["80", "443"].includes(url.port))) throw new Error("Only public HTTP or HTTPS vehicle pages are supported.");

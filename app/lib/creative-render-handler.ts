@@ -65,10 +65,10 @@ export async function handleCreativeRenderPost(
   const vehicle = await (dependencies.getImportedVehicle ?? getImportedVehicle)(project.vehicle_id, user.email, env);
   if (!vehicle) return Response.json({ error: "The source vehicle is no longer available." }, { status: 404 });
 
-  const plan = (dependencies.buildVerticalRenderPlan ?? buildVerticalRenderPlan)(project, vehicle);
-  const submission = await (dependencies.submitRender ?? submitRender)(plan, env, {
-    convertAllImages: existing?.status === "failed",
-  });
+  const sourceHostname = env.LOTSOCIAL_EXPECTED_SITES_HOSTNAME?.trim();
+  const sourceOrigin = sourceHostname ? `https://${sourceHostname}` : "";
+  const plan = (dependencies.buildVerticalRenderPlan ?? buildVerticalRenderPlan)(project, vehicle, sourceOrigin);
+  const submission = await (dependencies.submitRender ?? submitRender)(plan, env);
   const job = await (dependencies.createRenderJob ?? createRenderJob)({
     projectId: project.id,
     associateEmail: user.email,
