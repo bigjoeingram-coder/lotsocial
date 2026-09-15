@@ -76,6 +76,7 @@ const DIRECT_FETCH_MS = 8_000;
 const READER_FETCH_MS = 14_000;
 const BRIGHTDATA_FETCH_MS = 25_000;
 const MAX_READER_ATTEMPTS = 12;
+const BRIGHTDATA_MAX_ATTEMPTS = 2;
 
 async function ensureVdpSchema(env: LotSocialEnvironment) {
   return ensureLotSocialSchema(env);
@@ -427,12 +428,17 @@ async function extractFromDealerInspireListing(sourceUrl: URL, deadline: { expir
           signal: timeout.signal,
         });
         if (!response.ok) {
+          const retryAfter = response.headers.get("retry-after") ?? "";
           console.warn("LotSocial reader branch", {
             surface: inventoryUrl.pathname,
             readerTargetProtocol: new URL(readerUrl).pathname.startsWith("/https://") ? "https" : "http",
             branch: "non_2xx",
             status: response.status,
+            retryAfter,
           });
+          // A reader-wide rate limit will reject every alternate surface too.
+          // Stop here instead of multiplying the throttled requests.
+          if (response.status === 429) return null;
           continue;
         }
         const markdown = await response.text();
@@ -501,33 +507,43 @@ async function fetchViaBrightData(
     return null;
   }
   context.trace.brightDataUsed = true;
-  const timeout = timeoutFor(deadline, BRIGHTDATA_FETCH_MS);
-  try {
-    const response = await fetch("https://api.brightdata.com/request", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ zone, url: url.href, format: "raw" }),
-      signal: timeout.signal,
-    });
-    if (!response.ok) {
-      logBranch("non_2xx", { status: response.status });
-      return null;
+  for (let attempt = 1; attempt <= BRIGHTDATA_MAX_ATTEMPTS; attempt += 1) {
+    const timeout = timeoutFor(deadline, BRIGHTDATA_FETCH_MS);
+    try {
+      const response = await fetch("https://api.brightdata.com/request", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ zone, url: url.href, format: "raw", method: "GET", country: "us" }),
+        signal: timeout.signal,
+      });
+      if (!response.ok) {
+        logBranch("non_2xx", {
+          attempt,
+          status: response.status,
+          providerCode: response.headers.get("x-brd-err-code") ?? "",
+          providerError: response.headers.get("x-brd-error") ?? response.headers.get("x-brd-err-msg") ?? "",
+          proxyStatus: response.headers.get("proxy-status") ?? "",
+        });
+        if (response.status < 500 || attempt === BRIGHTDATA_MAX_ATTEMPTS) return null;
+        continue;
+      }
+      const html = await response.text();
+      if (!html || html.length > 3_000_000) {
+        logBranch("success_unparseable", { attempt, length: html?.length ?? 0 });
+        return null;
+      }
+      logBranch("success_parsed", { attempt, length: html.length });
+      context.trace.fallback = "bright_data";
+      return { html, finalUrl: url };
+    } catch (caught) {
+      const isAbort = caught instanceof Error && caught.name === "AbortError";
+      logBranch(isAbort ? "timeout_abort" : "fetch_error", { attempt, message: caught instanceof Error ? caught.message : "unknown" });
+      if (isAbort || attempt === BRIGHTDATA_MAX_ATTEMPTS) return null;
+    } finally {
+      timeout.cleanup();
     }
-    const html = await response.text();
-    if (!html || html.length > 3_000_000) {
-      logBranch("success_unparseable", { length: html?.length ?? 0 });
-      return null;
-    }
-    logBranch("success_parsed", { length: html.length });
-    context.trace.fallback = "bright_data";
-    return { html, finalUrl: url };
-  } catch (caught) {
-    const isAbort = caught instanceof Error && caught.name === "AbortError";
-    logBranch(isAbort ? "timeout_abort" : "fetch_error", { message: caught instanceof Error ? caught.message : "unknown" });
-    return null;
-  } finally {
-    timeout.cleanup();
   }
+  return null;
 }
 
 export async function extractVehicleFromVdp(
