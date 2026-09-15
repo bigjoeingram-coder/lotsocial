@@ -73,6 +73,32 @@ test("render revalidation allows current clean copy", () => {
   assert.equal(requiresRegeneration(cleanProject), false);
 });
 
+test("retrying a failed render forces compatibility conversion for every image", async () => {
+  let submitOptions;
+  const failedJob = { id: "job_failed", project_id: cleanProject.id, provider_render_id: "v1:failed", status: "failed" };
+  const response = await handleCreativeRenderPost(
+    new Request("https://app.example/api/creative-projects/project_1/render", { method: "POST" }),
+    testEnv(),
+    { params: Promise.resolve({ id: "project_1" }) },
+    {
+      associate: signedInUser,
+      getCreativeProject: async () => cleanProject,
+      getLatestRenderJob: async () => failedJob,
+      getImportedVehicle: async () => ({ id: "vehicle_1" }),
+      buildVerticalRenderPlan: () => ({ render: { timeline: { tracks: [] } }, summary: {} }),
+      submitRender: async (_plan, _env, options) => {
+        submitOptions = options;
+        return { status: "queued", providerRenderId: "v1:retry", errorMessage: "" };
+      },
+      createRenderJob: async () => ({ id: "job_retry", status: "queued" }),
+      serializeRenderJob: (job) => ({ id: job.id, status: job.status }),
+    },
+  );
+
+  assert.equal(response.status, 201);
+  assert.deepEqual(submitOptions, { convertAllImages: true });
+});
+
 test("active render status refreshes and serializes the provider result", async () => {
   const queuedJob = { id: "job_1", project_id: cleanProject.id, provider_render_id: "stage:render_1", status: "queued" };
   const completedJob = { ...queuedJob, status: "completed", output_url: "https://video.example/final.mp4" };

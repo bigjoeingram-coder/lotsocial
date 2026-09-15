@@ -160,6 +160,33 @@ test("AVIF dealership images are converted once and replaced in every render tra
   }
 });
 
+test("failed-render recovery can convert every image format once before retrying", async () => {
+  const originalFetch = globalThis.fetch;
+  let ingestPosts = 0;
+  try {
+    globalThis.fetch = async (input, init = {}) => {
+      const url = String(input);
+      if (url.endsWith("/sources") && init.method === "POST") {
+        ingestPosts += 1;
+        return Response.json({ data: { id: `source_${ingestPosts}` } }, { status: 201 });
+      }
+      if (url.includes("/sources/source_")) {
+        const sourceId = url.match(/source_\d+$/)?.[0];
+        return Response.json({ data: { attributes: { status: "ready", outputs: { renditions: [{ status: "ready", url: `https://shotstack.example/${sourceId}.jpg` }] } } } });
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    };
+    const jpegProject = { ...project, selected_images: JSON.stringify(["https://dealer.example/photo.jpg"]) };
+    const plan = buildVerticalRenderPlan(jpegProject, importedVehicle());
+    const compatible = await prepareRenderCompatibleImages(plan, "test-key", "stage", true);
+    const imageSources = compatible.render.timeline.tracks.flatMap((track) => track.clips).map((clip) => clip.asset.src).filter(Boolean);
+    assert.equal(ingestPosts, 1, "the duplicated foreground and wallpaper source is ingested once");
+    assert.equal(imageSources.filter((src) => src === "https://shotstack.example/source_1.jpg").length, 2);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("failed renderer status keeps the provider's actionable error", async () => {
   const originalFetch = globalThis.fetch;
   try {

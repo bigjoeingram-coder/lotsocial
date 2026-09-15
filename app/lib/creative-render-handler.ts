@@ -66,7 +66,9 @@ export async function handleCreativeRenderPost(
   if (!vehicle) return Response.json({ error: "The source vehicle is no longer available." }, { status: 404 });
 
   const plan = (dependencies.buildVerticalRenderPlan ?? buildVerticalRenderPlan)(project, vehicle);
-  const submission = await (dependencies.submitRender ?? submitRender)(plan, env);
+  const submission = await (dependencies.submitRender ?? submitRender)(plan, env, {
+    convertAllImages: existing?.status === "failed",
+  });
   const job = await (dependencies.createRenderJob ?? createRenderJob)({
     projectId: project.id,
     associateEmail: user.email,

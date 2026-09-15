@@ -198,11 +198,20 @@ async function imageRendition(src: string, apiKey: string, stage: ShotstackStage
   throw new Error("The renderer timed out while converting an AVIF dealership image. Retry the render.");
 }
 
-export async function prepareRenderCompatibleImages(plan: ReturnType<typeof buildVerticalRenderPlan>, apiKey: string, stage: ShotstackStage) {
+export async function prepareRenderCompatibleImages(
+  plan: ReturnType<typeof buildVerticalRenderPlan>,
+  apiKey: string,
+  stage: ShotstackStage,
+  convertAllImages = false,
+) {
   const compatiblePlan = structuredClone(plan);
   type MutableRenderClip = { asset: { src?: string; [key: string]: unknown }; [key: string]: unknown };
   const clips = compatiblePlan.render.timeline.tracks.flatMap((track) => track.clips as unknown as MutableRenderClip[]);
-  const sources = [...new Set(clips.map((clip) => clip.asset.src ?? "").filter((src) => needsImageRendition(src)))];
+  const sources = [...new Set(
+    clips
+      .map((clip) => clip.asset.src ?? "")
+      .filter((src) => src && (convertAllImages || needsImageRendition(src))),
+  )];
   if (sources.length === 0) return compatiblePlan;
   const replacements = new Map(await Promise.all(sources.map(async (src) => [src, await imageRendition(src, apiKey, stage)] as const)));
   for (const clip of clips) {
@@ -211,7 +220,11 @@ export async function prepareRenderCompatibleImages(plan: ReturnType<typeof buil
   return compatiblePlan;
 }
 
-export async function submitRender(plan: ReturnType<typeof buildVerticalRenderPlan>, env: LotSocialEnvironment) {
+export async function submitRender(
+  plan: ReturnType<typeof buildVerticalRenderPlan>,
+  env: LotSocialEnvironment,
+  options: { convertAllImages?: boolean } = {},
+) {
   const { apiKey, stage } = renderEnvironment(env);
   if (!apiKey) return { status: "awaiting_provider_setup", providerRenderId: "", errorMessage: "The production renderer is not connected yet." };
 
@@ -221,7 +234,7 @@ export async function submitRender(plan: ReturnType<typeof buildVerticalRenderPl
   for (const candidateStage of stages) {
     let compatiblePlan;
     try {
-      compatiblePlan = await prepareRenderCompatibleImages(plan, apiKey, candidateStage);
+      compatiblePlan = await prepareRenderCompatibleImages(plan, apiKey, candidateStage, Boolean(options.convertAllImages));
     } catch (caught) {
       return { status: "provider_error", providerRenderId: "", errorMessage: caught instanceof Error ? caught.message : "The renderer could not prepare the dealership images." };
     }
