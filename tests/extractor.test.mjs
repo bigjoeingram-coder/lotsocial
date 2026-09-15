@@ -8,6 +8,7 @@ import {
   normalizeListedPrice,
   parseDealerInspireMarkdown,
   parseVehicleHtml,
+  readerUrls,
   slugMakeAndModel,
   vehicleBlockBounds,
   vinFromUrl,
@@ -245,6 +246,13 @@ test("a Ram or Jeep URL still generates candidate inventory paths (was silently 
 test("a no-VIN URL still yields the generic inventory surfaces, in a stable order", () => {
   const paths = candidateInventoryPaths(new URL("https://dealer.example/vdp/12345/")).map((url) => url.pathname);
   assert.deepEqual(paths, ["/llm/inventory/", "/new-vehicles/crossovers-suvs/", "/new-vehicles/suvs/", "/new-vehicles/", "/used-vehicles/"]);
+});
+
+test("reader fallback tries distinct HTTP and HTTPS target forms", () => {
+  const urls = readerUrls(new URL("https://dealer.example/new/vehicle.htm"));
+  assert.equal(new Set(urls).size, urls.length);
+  assert.equal(urls[0], "https://r.jina.ai/http://dealer.example/new/vehicle.htm");
+  assert.equal(urls[1], "https://r.jina.ai/https://dealer.example/new/vehicle.htm");
 });
 
 // ---------- price normalization ----------

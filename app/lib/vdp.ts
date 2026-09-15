@@ -277,12 +277,11 @@ function fallbackVehicleSurfaces(url: URL) {
   return [url, ...candidateInventoryPaths(url)];
 }
 
-function readerUrls(targetUrl: URL) {
+export function readerUrls(targetUrl: URL) {
   const hrefWithoutProtocol = targetUrl.href.replace(/^https?:\/\//i, "");
-  const originPath = `${targetUrl.hostname}${targetUrl.pathname}${targetUrl.search}`;
   return [
     `https://r.jina.ai/http://${hrefWithoutProtocol}`,
-    `https://r.jina.ai/http://${originPath}`,
+    `https://r.jina.ai/https://${hrefWithoutProtocol}`,
     // This nested reader shape is intentionally retained because it returned real
     // Dealer Inspire inventory markdown for Newport Lexus and Newport Beach Maserati.
     `https://r.jina.ai/http://r.jina.ai/http://${targetUrl.href}`,
@@ -427,11 +426,32 @@ async function extractFromDealerInspireListing(sourceUrl: URL, deadline: { expir
           },
           signal: timeout.signal,
         });
-        if (!response.ok) continue;
+        if (!response.ok) {
+          console.warn("LotSocial reader branch", {
+            surface: inventoryUrl.pathname,
+            readerTargetProtocol: new URL(readerUrl).pathname.startsWith("/https://") ? "https" : "http",
+            branch: "non_2xx",
+            status: response.status,
+          });
+          continue;
+        }
         const markdown = await response.text();
         const extracted = parseDealerInspireMarkdown(markdown, sourceUrl, inventoryUrl);
         if (extracted) return extracted;
-      } catch {
+        console.warn("LotSocial reader branch", {
+          surface: inventoryUrl.pathname,
+          readerTargetProtocol: new URL(readerUrl).pathname.startsWith("/https://") ? "https" : "http",
+          branch: "unmatched",
+          length: markdown.length,
+          challenge: isReaderChallengeMarkdown(markdown),
+          sourceVinPresent: Boolean(vinFromUrl(sourceUrl)),
+        });
+      } catch (caught) {
+        console.warn("LotSocial reader branch", {
+          surface: inventoryUrl.pathname,
+          readerTargetProtocol: new URL(readerUrl).pathname.startsWith("/https://") ? "https" : "http",
+          branch: caught instanceof Error && caught.name === "AbortError" ? "timeout" : "fetch_error",
+        });
         // Try the next reader and public inventory surface.
       } finally {
         timeout.cleanup();
