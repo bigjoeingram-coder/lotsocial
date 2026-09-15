@@ -1,6 +1,6 @@
 import { createRenderJob, getCreativeProject, getLatestRenderJob, serializeRenderJob, updateRenderJob } from "./creative.ts";
 import type { CreativeProjectRecord, CreativeRenderJobRecord } from "./creative.ts";
-import { archiveRenderedVideo, getProfilePhotoDataUri } from "./media.ts";
+import { archiveRenderedVideo } from "./media.ts";
 import type { LotSocialEnvironment } from "./schema-bootstrap.ts";
 import { getImportedVehicle } from "./vdp.ts";
 import {
@@ -68,20 +68,15 @@ export async function handleCreativeRenderPost(
   if (!vehicle) return Response.json({ error: "The source vehicle is no longer available." }, { status: 404 });
 
   let signedSources: string[];
-  let profilePhotoSource = "";
   try {
     signedSources = await buildSignedRenderSourceUrls(project, env);
     await validateSignedRenderSourceUrls(signedSources);
-    profilePhotoSource = project.end_card_photo_url ? await getProfilePhotoDataUri(project.end_card_photo_url, env) : "";
   } catch (caught) {
     return Response.json({ error: caught instanceof Error ? caught.message : "The selected photos could not be prepared. No render was submitted or charged." }, { status: 422 });
   }
-  if (project.end_card_photo_url && !profilePhotoSource) {
-    return Response.json({ error: "The salesperson photo could not be prepared. Upload it again before rendering. No render was submitted or charged." }, { status: 422 });
-  }
   const sourceHostname = env.LOTSOCIAL_EXPECTED_SITES_HOSTNAME?.trim();
   const sourceOrigin = signedSources.length ? signedSources : sourceHostname ? `https://${sourceHostname}` : "";
-  const plan = (dependencies.buildVerticalRenderPlan ?? buildVerticalRenderPlan)(project, vehicle, sourceOrigin, profilePhotoSource);
+  const plan = (dependencies.buildVerticalRenderPlan ?? buildVerticalRenderPlan)(project, vehicle, sourceOrigin, project.end_card_photo_url);
   const submission = await (dependencies.submitRender ?? submitRender)(plan, env);
   const job = await (dependencies.createRenderJob ?? createRenderJob)({
     projectId: project.id,

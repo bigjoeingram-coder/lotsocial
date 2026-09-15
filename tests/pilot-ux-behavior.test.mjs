@@ -142,12 +142,12 @@ test("the render source relay validates, caches, and serves the captured dealers
 
 test("rendered end card uses the associate photo, spaced contact order, and approved disclaimer without a vehicle-title ghost", () => {
   const withPhoto = { ...project, end_card_photo_url: "https://app.example/api/profile-photos/00000000-0000-4000-8000-000000000000.jpg" };
-  const embeddedPhoto = "data:image/jpeg;base64,AQID";
-  const plan = buildVerticalRenderPlan(withPhoto, importedVehicle({ imported_at: "2026-09-14 16:20:00" }), "", embeddedPhoto);
+  const plan = buildVerticalRenderPlan(withPhoto, importedVehicle({ imported_at: "2026-09-14 16:20:00" }));
   const html = plan.render.timeline.tracks[0].clips[0].asset.html;
   assert.ok(plan.summary.endCardSeconds >= 5);
-  assert.match(html, /<img class="profile-photo" src="data:image\/jpeg;base64,AQID"/);
-  assert.doesNotMatch(JSON.stringify(plan), /https:\/\/app\.example\/api\/profile-photos/);
+  assert.match(html, /<img class="profile-photo" src="https:\/\/app\.example\/api\/profile-photos\/00000000-0000-4000-8000-000000000000\.jpg"/);
+  const imageAssetSources = plan.render.timeline.tracks.flatMap((track) => track.clips).filter((clip) => clip.asset.type === "image").map((clip) => clip.asset.src);
+  assert.ok(!imageAssetSources.includes(withPhoto.end_card_photo_url), "the profile photo stays inside the proven HTML end card instead of a separate provider image track");
   assert.ok(html.indexOf("Joe") < html.indexOf("555-0100"));
   assert.ok(html.indexOf("555-0100") < html.indexOf("Message me for details"));
   assert.ok(html.indexOf("Message me for details") < html.indexOf("Pricing and availability"));
