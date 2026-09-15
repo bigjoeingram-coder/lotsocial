@@ -333,9 +333,19 @@ export function vehicleBlockBounds(content: string, vinIndex: number) {
   return { start, end };
 }
 
-export function parseDealerInspireMarkdown(markdown: string, sourceUrl: URL): ExtractedVehicle | null {
+function singleVehicleVin(markdown: string) {
+  const vins = Array.from(new Set(
+    Array.from(markdown.matchAll(/\b[A-HJ-NPR-Z0-9]{17}\b/gi))
+      .map((match) => match[0].toUpperCase())
+      .filter((value) => /[A-Z]/.test(value) && /\d/.test(value)),
+  ));
+  return vins.length === 1 ? vins[0] : "";
+}
+
+export function parseDealerInspireMarkdown(markdown: string, sourceUrl: URL, capturedUrl: URL = sourceUrl): ExtractedVehicle | null {
   if (isReaderChallengeMarkdown(markdown)) return null;
-  const vin = vinFromUrl(sourceUrl);
+  const isExactVdpSurface = normalizeSourceUrl(capturedUrl.href) === normalizeSourceUrl(sourceUrl.href);
+  const vin = vinFromUrl(sourceUrl) || (isExactVdpSurface ? singleVehicleVin(markdown) : "");
   if (!vin) return null;
   const content = markdownContent(markdown);
   const vinIndex = vehicleEvidenceIndex(content, vin);
@@ -343,6 +353,7 @@ export function parseDealerInspireMarkdown(markdown: string, sourceUrl: URL): Ex
   const bounds = vehicleBlockBounds(content, vinIndex);
   const before = content.slice(bounds.start, vinIndex);
   const after = content.slice(vinIndex, bounds.end);
+  const vehicleBlock = `${before}\n${after}`;
   const linkedTitle = (before.match(/## \[([^\]]+)\]\([^)]+\)\s*$/m) ?? Array.from(before.matchAll(/## \[([^\]]+)\]\([^)]+\)/g)).at(-1))?.[1];
   const plainHeadingTitle = Array.from(before.matchAll(/^##\s+(?!Visit our Store|Vehicle Information|Highlighted Features|Dealer Comments|Eligible Benefits|Package & Accessories|All Features)([^\n#][^\n]+)$/gim)).at(-1)?.[1];
   const title = decodeEntities(
@@ -352,13 +363,21 @@ export function parseDealerInspireMarkdown(markdown: string, sourceUrl: URL): Ex
     ?? ""
   );
   if (!title || isInventoryPageTitle(title)) return null;
-  const stockNumber = markdownField(after, "Stock");
+  const stockNumber = markdownField(after, "Stock")
+    || decodeEntities(vehicleBlock.match(/\bStock(?:\s+Number)?\s*:?[ \t]*([A-Z0-9-]+)/i)?.[1] ?? "");
   const mileage = markdownField(before, "Mileage") || markdownField(after, "Mileage");
   const exteriorColor = markdownField(before, "Exterior") || markdownField(after, "Exterior");
   const interiorColor = markdownField(before, "Interior") || markdownField(after, "Interior");
   const dealershipName = markdownField(before, "Location") || markdownField(after, "Location") || decodeEntities(markdown.match(/^Title:\s*([^\n|]+)/m)?.[1] ?? "");
-  const price = normalizeListedPrice(after.match(/(?:Cash|Total Price|Total SRP|Price excl\. tax, gov\. fees)\**\s*:?\s*\$?([\d,]+)/i)?.[1] || after.match(/(?:Sale Price|Your Price|MSRP \+ DPH|MSRP)\**\s*:?\s*\$?([\d,]+)/i)?.[1]);
-  const markdownImages = Array.from(`${before}\n${after}`.matchAll(/!\[[^\]]*\]\((https?:\/\/[^)]+)\)/gi))
+  const price = [
+    vehicleBlock.match(/Net Sale Price\**\s*:?\s*\$?([\d,]+)/i)?.[1],
+    vehicleBlock.match(/\$\s*([\d,]+(?:\.\d{1,2})?)\s+Net Sale Price/i)?.[1],
+    vehicleBlock.match(/(?:Sale Price|Selling Price|Your Price|Cash|Total Price|Total SRP|Price excl\. tax, gov\. fees)\**\s*:?\s*\$?([\d,]+)/i)?.[1],
+    vehicleBlock.match(/\$\s*([\d,]+(?:\.\d{1,2})?)\s+(?:Sale Price|Selling Price|Your Price)/i)?.[1],
+    vehicleBlock.match(/(?:MSRP \+ DPH|MSRP)\**\s*:?\s*\$?([\d,]+)/i)?.[1],
+    vehicleBlock.match(/\$\s*([\d,]+(?:\.\d{1,2})?)\s+(?:MSRP \+ DPH|MSRP)/i)?.[1],
+  ].map(normalizeListedPrice).find(Boolean) || "";
+  const markdownImages = Array.from(vehicleBlock.matchAll(/!\[[^\]]*\]\((https?:\/\/[^)]+)\)/gi))
     .flatMap((match) => resolveImage(match[1], sourceUrl))
     .filter(usableImageUrl);
   const imageUrls = Array.from(new Set(markdownImages)).slice(0, 24);
@@ -410,7 +429,7 @@ async function extractFromDealerInspireListing(sourceUrl: URL, deadline: { expir
         });
         if (!response.ok) continue;
         const markdown = await response.text();
-        const extracted = parseDealerInspireMarkdown(markdown, sourceUrl);
+        const extracted = parseDealerInspireMarkdown(markdown, sourceUrl, inventoryUrl);
         if (extracted) return extracted;
       } catch {
         // Try the next reader and public inventory surface.

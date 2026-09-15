@@ -73,6 +73,20 @@ Mileage: 8
 Sale Price: $64,120
 `;
 
+const vinlessUrlVdpMarkdown = `Title: New 2026 Ford Super Duty F-250 SRW XL Truck Oxford White For Sale | Stock: TEC22448
+URL Source: https://www.freewayford.example/new/Ford/2026-Ford-Super-Duty-F-250-SRW-fresno-CA-page-id.htm
+Markdown Content:
+![Image 1: 2026 Ford Super Duty F-250 SRW XL](https://cdn.example/f250-1.jpg)
+2026 Ford Super Duty F-250 SRW XL
+## 2026 Ford Super Duty F-250 SRW XL
+$71,590 MSRP
+$69,675 Net Sale Price
+MSRP 1$71,590 Doc Fee$85 Selling Price$71,675 Retail Customer Cash-$2,000 Net Sale Price$69,675
+### The overview
+Exterior Color Oxford White Interior Color Medium Dark Slate Transmission Automatic Drivetrain 4WD
+Engine 6.7L 8 Cylinder Engine VIN 1FT8W2BT7TEC22448 Stock Number TEC22448
+`;
+
 // ---------- JSON-LD ----------
 
 test("JSON-LD VDP: every field comes from the structured node", async () => {
@@ -130,6 +144,24 @@ test("Cloudflare challenge page is detected as blocked, not parsed as a vehicle"
 test("Cloudflare challenge rendered through the reader is rejected by the listing parser", () => {
   const markdown = `Title: Just a moment...\nURL Source: https://dealer.example/x\nMarkdown Content:\nChecking if the site connection is secure\nVIN: ${VIN_A}`;
   assert.equal(parseDealerInspireMarkdown(markdown, new URL(`https://dealer.example/new-2025-ford-f150-${VIN_A}/`)), null);
+});
+
+test("an exact reader-rendered VDP may recover its sole VIN when the dealer URL omits it", () => {
+  const sourceUrl = new URL("https://www.freewayford.example/new/Ford/2026-Ford-Super-Duty-F-250-SRW-fresno-CA-page-id.htm");
+  const vehicle = parseDealerInspireMarkdown(vinlessUrlVdpMarkdown, sourceUrl, sourceUrl);
+  assert.ok(vehicle);
+  assert.equal(vehicle.vin, "1FT8W2BT7TEC22448");
+  assert.equal(vehicle.title, "2026 Ford Super Duty F-250 SRW XL");
+  assert.equal(vehicle.price, "69675");
+  assert.equal(vehicle.stockNumber, "TEC22448");
+  assert.deepEqual(vehicle.imageUrls, ["https://cdn.example/f250-1.jpg"]);
+});
+
+test("VIN recovery is refused on fallback inventory surfaces or ambiguous pages", () => {
+  const sourceUrl = new URL("https://www.freewayford.example/new/Ford/2026-Ford-Super-Duty-F-250-SRW-fresno-CA-page-id.htm");
+  const inventoryUrl = new URL("https://www.freewayford.example/new-vehicles/");
+  assert.equal(parseDealerInspireMarkdown(vinlessUrlVdpMarkdown, sourceUrl, inventoryUrl), null);
+  assert.equal(parseDealerInspireMarkdown(`${vinlessUrlVdpMarkdown}\nVIN: ${VIN_B}`, sourceUrl, sourceUrl), null);
 });
 
 // ---------- the wrong-neighbor price bug (I-07) ----------
