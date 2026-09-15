@@ -1,5 +1,52 @@
 import { sql } from "drizzle-orm";
-import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { index, integer, primaryKey, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+
+export const pilotInvites = sqliteTable("pilot_invites", {
+  id: text("id").primaryKey(),
+  tokenHash: text("token_hash").notNull().unique(),
+  email: text("email").notNull(),
+  dealershipName: text("dealership_name").notNull(),
+  dealershipDomain: text("dealership_domain").notNull(),
+  expiresAt: text("expires_at").notNull(),
+  usedAt: text("used_at"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [index("pilot_invites_email_idx").on(table.email, table.createdAt)]);
+
+export const associateAccounts = sqliteTable("associate_accounts", {
+  id: text("id").primaryKey(),
+  email: text("email").notNull().unique(),
+  displayName: text("display_name").notNull(),
+  phone: text("phone").notNull().default(""),
+  dealershipName: text("dealership_name").notNull(),
+  dealershipDomain: text("dealership_domain").notNull(),
+  rooftopLocation: text("rooftop_location").notNull().default(""),
+  profilePhotoUrl: text("profile_photo_url").notNull().default(""),
+  role: text("role").notNull().default("associate"),
+  status: text("status").notNull().default("active"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});
+
+export const associateSessions = sqliteTable("associate_sessions", {
+  id: text("id").primaryKey(),
+  accountId: text("account_id").notNull(),
+  tokenHash: text("token_hash").notNull().unique(),
+  expiresAt: text("expires_at").notNull(),
+  revokedAt: text("revoked_at"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [
+  index("associate_sessions_account_idx").on(table.accountId, table.createdAt),
+  index("associate_sessions_expiry_idx").on(table.expiresAt),
+]);
+
+export const accountLoginLinks = sqliteTable("account_login_links", {
+  id: text("id").primaryKey(),
+  accountId: text("account_id").notNull(),
+  tokenHash: text("token_hash").notNull().unique(),
+  expiresAt: text("expires_at").notNull(),
+  usedAt: text("used_at"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [index("account_login_links_account_idx").on(table.accountId, table.createdAt)]);
 
 export const authorizationRequests = sqliteTable("authorization_requests", {
   id: text("id").primaryKey(),
@@ -23,7 +70,7 @@ export const authorizationRequests = sqliteTable("authorization_requests", {
   emailMessageId: text("email_message_id"),
   typedSignature: text("typed_signature"),
   managerNotes: text("manager_notes").notNull().default(""),
-  termsVersion: text("terms_version").notNull().default("2026-07-18-v1"),
+  termsVersion: text("terms_version").notNull().default("2026-09-14-v2"),
   requestedAt: text("requested_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   decidedAt: text("decided_at"),
   expiresAt: text("expires_at"),
@@ -61,6 +108,16 @@ export const providerVerifications = sqliteTable("provider_verifications", {
   updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 });
 
+export const authorizationManagementLinks = sqliteTable("authorization_management_links", {
+  requestId: text("request_id").primaryKey(),
+  tokenHash: text("token_hash").notNull().unique(),
+  expiresAt: text("expires_at").notNull(),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [
+  index("authorization_management_links_expiry_idx").on(table.expiresAt),
+]);
+
 export const importedVehicles = sqliteTable("imported_vehicles", {
   id: text("id").primaryKey(),
   associateEmail: text("associate_email").notNull(),
@@ -87,6 +144,34 @@ export const importedVehicles = sqliteTable("imported_vehicles", {
   uniqueIndex("imported_vehicles_associate_source_unique").on(table.associateEmail, table.sourceUrl),
 ]);
 
+export const importEvidence = sqliteTable("import_evidence", {
+  id: text("id").primaryKey(),
+  vehicleId: text("vehicle_id").notNull(),
+  associateEmail: text("associate_email").notNull(),
+  dealershipTenant: text("dealership_tenant").notNull(),
+  sourceUrl: text("source_url").notNull(),
+  sourceHost: text("source_host").notNull(),
+  capturedAt: text("captured_at").notNull(),
+  contentSha256: text("content_sha256").notNull(),
+  htmlStorageKey: text("html_storage_key").notNull(),
+  screenshotStorageKey: text("screenshot_storage_key").notNull().default(""),
+  screenshotStatus: text("screenshot_status").notNull().default("unavailable"),
+  priceAtCapture: text("price_at_capture").notNull().default(""),
+  currency: text("currency").notNull().default("USD"),
+  vinAtCapture: text("vin_at_capture").notNull().default(""),
+  stockAtCapture: text("stock_at_capture").notNull().default(""),
+  titleAtCapture: text("title_at_capture").notNull(),
+  purposeProjectId: text("purpose_project_id"),
+  purposeNote: text("purpose_note").notNull(),
+  sourceType: text("source_type").notNull().default("vdp_one_time"),
+  contentType: text("content_type").notNull().default("text/html; charset=utf-8"),
+  storageBytes: integer("storage_bytes").notNull().default(0),
+}, (table) => [
+  index("import_evidence_vehicle_idx").on(table.vehicleId, table.capturedAt),
+  index("import_evidence_tenant_idx").on(table.dealershipTenant, table.capturedAt),
+  index("import_evidence_associate_idx").on(table.associateEmail, table.capturedAt),
+]);
+
 export const creativeProjects = sqliteTable("creative_projects", {
   id: text("id").primaryKey(),
   vehicleId: text("vehicle_id").notNull(),
@@ -100,6 +185,8 @@ export const creativeProjects = sqliteTable("creative_projects", {
   endCardPhone: text("end_card_phone").notNull().default(""),
   endCardEmail: text("end_card_email").notNull().default(""),
   endCardCta: text("end_card_cta").notNull().default("Message me for details"),
+  endCardPhotoUrl: text("end_card_photo_url").notNull().default(""),
+  disclaimerVersion: text("disclaimer_version").notNull().default("2026-09-14-v1"),
   status: text("status").notNull().default("draft"),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
@@ -124,4 +211,32 @@ export const creativeRenderJobs = sqliteTable("creative_render_jobs", {
 }, (table) => [
   index("creative_render_jobs_project_idx").on(table.projectId, table.createdAt),
   index("creative_render_jobs_associate_idx").on(table.associateEmail, table.createdAt),
+]);
+
+export const rateLimitCounters = sqliteTable("rate_limit_counters", {
+  counterKey: text("counter_key").notNull(),
+  counterScope: text("counter_scope").notNull(),
+  counterSubject: text("counter_subject").notNull(),
+  counterDay: text("counter_day").notNull(),
+  count: integer("count").notNull().default(0),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [
+  primaryKey({ columns: [table.counterKey, table.counterDay] }),
+  index("rate_limit_counters_scope_day_idx").on(table.counterScope, table.counterDay),
+]);
+
+export const importOutcomes = sqliteTable("import_outcomes", {
+  id: text("id").primaryKey(),
+  associateEmail: text("associate_email").notNull(),
+  sourceHost: text("source_host").notNull(),
+  outcome: text("outcome").notNull(),
+  elapsedMs: integer("elapsed_ms").notNull(),
+  fallback: text("fallback").notNull().default("none"),
+  brightDataUsed: integer("bright_data_used").notNull().default(0),
+  notice: text("notice").notNull().default(""),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [
+  index("import_outcomes_created_idx").on(table.createdAt),
+  index("import_outcomes_host_created_idx").on(table.sourceHost, table.createdAt),
 ]);

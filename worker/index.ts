@@ -41,7 +41,10 @@ const worker = {
       }, allowedWidths);
     }
 
-    return handler.fetch(request, env, ctx);
+    const forwardedHeaders = new Headers(request.headers);
+    forwardedHeaders.set("x-forwarded-host", url.host);
+    forwardedHeaders.set("x-forwarded-proto", url.protocol.replace(":", ""));
+    return handler.fetch(new Request(request, { headers: forwardedHeaders }), env, ctx);
   },
 };
 

@@ -1,5 +1,6 @@
 import { env } from "cloudflare:workers";
-import { PERMISSIONS, PermissionId, evaluateAuthorization, getAuthorizationById } from "../../../lib/authorization";
+import { PERMISSIONS, evaluateAuthorization, getAuthorizationById } from "../../../lib/authorization";
+import type { PermissionId } from "../../../lib/authorization";
 
 function secureEqual(left: string, right: string) {
   const a = new TextEncoder().encode(left);
@@ -24,7 +25,7 @@ export async function POST(request: Request) {
     : null;
   if (!authorizationId || !permission) return Response.json({ error: "A valid authorizationId and permission are required." }, { status: 400 });
 
-  const record = await getAuthorizationById(authorizationId);
+  const record = await getAuthorizationById(authorizationId, env);
   const decision = evaluateAuthorization(record, permission);
   return Response.json({
     authorizationId,

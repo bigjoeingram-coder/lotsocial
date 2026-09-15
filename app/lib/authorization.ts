@@ -1,5 +1,8 @@
-import { env } from "cloudflare:workers";
-import { PERMISSIONS, PermissionId } from "./authorization-shared";
+import { database, ensureLotSocialSchema } from "./schema-bootstrap.ts";
+import type { LotSocialEnvironment } from "./schema-bootstrap.ts";
+import { TERMS_VERSION } from "./evidence.ts";
+import { PERMISSIONS } from "./authorization-shared.ts";
+import type { PermissionId } from "./authorization-shared.ts";
 
 export { PERMISSIONS };
 export type { PermissionId };
@@ -31,6 +34,7 @@ export type AuthorizationRequestRecord = {
   expires_at: string | null;
   created_at: string;
   updated_at: string;
+  management_link_expires_at?: string | null;
 };
 
 export type AuthorizationAuditEvent = {
@@ -59,75 +63,8 @@ export type ProviderVerificationRecord = {
   updated_at: string;
 };
 
-let schemaReady: Promise<void> | null = null;
-
-function database() {
-  if (!env.DB) throw new Error("The authorization database is unavailable.");
-  return env.DB;
-}
-
-export function ensureAuthorizationSchema() {
-  if (!schemaReady) {
-    const db = database();
-    schemaReady = db.batch([
-      db.prepare(`CREATE TABLE IF NOT EXISTS authorization_requests (
-        id TEXT PRIMARY KEY,
-        approval_token_hash TEXT NOT NULL UNIQUE,
-        dealership_name TEXT NOT NULL,
-        rooftop_location TEXT NOT NULL,
-        dealership_domain TEXT NOT NULL DEFAULT '',
-        associate_name TEXT NOT NULL,
-        associate_email TEXT NOT NULL,
-        manager_name TEXT NOT NULL,
-        manager_title TEXT NOT NULL,
-        manager_email TEXT NOT NULL,
-        manager_phone TEXT NOT NULL DEFAULT '',
-        provider_name TEXT NOT NULL DEFAULT 'Unknown',
-        provider_contact_name TEXT NOT NULL DEFAULT '',
-        provider_contact_email TEXT NOT NULL DEFAULT '',
-        requested_permissions TEXT NOT NULL,
-        approved_permissions TEXT,
-        status TEXT NOT NULL DEFAULT 'requested',
-        email_delivery_status TEXT NOT NULL DEFAULT 'pending',
-        email_message_id TEXT,
-        typed_signature TEXT,
-        manager_notes TEXT NOT NULL DEFAULT '',
-        terms_version TEXT NOT NULL DEFAULT '2026-07-18-v1',
-        requested_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        decided_at TEXT,
-        expires_at TEXT,
-        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-      )`),
-      db.prepare(`CREATE TABLE IF NOT EXISTS authorization_audit_events (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        request_id TEXT NOT NULL,
-        actor_type TEXT NOT NULL,
-        actor_email TEXT NOT NULL DEFAULT '',
-        action TEXT NOT NULL,
-        metadata TEXT NOT NULL DEFAULT '{}',
-        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-      )`),
-      db.prepare(`CREATE TABLE IF NOT EXISTS provider_verifications (
-        request_id TEXT PRIMARY KEY,
-        verification_token_hash TEXT NOT NULL UNIQUE,
-        provider_name TEXT NOT NULL,
-        contact_name TEXT NOT NULL,
-        contact_email TEXT NOT NULL,
-        delivery_method TEXT NOT NULL DEFAULT '',
-        feed_format TEXT NOT NULL DEFAULT '',
-        connection_notes TEXT NOT NULL DEFAULT '',
-        status TEXT NOT NULL DEFAULT 'pending',
-        typed_signature TEXT,
-        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        decided_at TEXT,
-        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-      )`),
-      db.prepare("CREATE INDEX IF NOT EXISTS authorization_requests_status_idx ON authorization_requests(status, requested_at DESC)"),
-      db.prepare("CREATE INDEX IF NOT EXISTS authorization_audit_request_idx ON authorization_audit_events(request_id, created_at ASC)"),
-    ]).then(() => undefined);
-  }
-  return schemaReady;
+export function ensureAuthorizationSchema(env: LotSocialEnvironment) {
+  return ensureLotSocialSchema(env);
 }
 
 export function createSecureToken() {
@@ -140,9 +77,9 @@ export async function hashToken(token: string) {
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-export async function listAuthorizationRequests(associateEmail: string, limit = 20) {
-  await ensureAuthorizationSchema();
-  const result = await database()
+export async function listAuthorizationRequests(associateEmail: string, limit = 20, env: LotSocialEnvironment) {
+  await ensureAuthorizationSchema(env);
+  const result = await database(env, "authorization")
     .prepare(`SELECT id, dealership_name, rooftop_location, associate_name, associate_email,
       manager_name, manager_title, manager_email, provider_name, requested_permissions,
       approved_permissions, status, email_delivery_status, requested_at, decided_at, expires_at
@@ -153,34 +90,34 @@ export async function listAuthorizationRequests(associateEmail: string, limit = 
   return result.results;
 }
 
-export async function getAuthorizationById(id: string) {
-  await ensureAuthorizationSchema();
-  return database()
+export async function getAuthorizationById(id: string, env: LotSocialEnvironment) {
+  await ensureAuthorizationSchema(env);
+  return database(env, "authorization")
     .prepare("SELECT * FROM authorization_requests WHERE id = ? LIMIT 1")
     .bind(id)
     .first<AuthorizationRequestRecord>();
 }
 
-export async function getAuthorizationByIdForAssociate(id: string, associateEmail: string) {
-  await ensureAuthorizationSchema();
-  return database()
+export async function getAuthorizationByIdForAssociate(id: string, associateEmail: string, env: LotSocialEnvironment) {
+  await ensureAuthorizationSchema(env);
+  return database(env, "authorization")
     .prepare("SELECT * FROM authorization_requests WHERE id = ? AND LOWER(associate_email) = LOWER(?) LIMIT 1")
     .bind(id, associateEmail)
     .first<AuthorizationRequestRecord>();
 }
 
-export async function listAuditEvents(requestId: string) {
-  await ensureAuthorizationSchema();
-  const result = await database()
+export async function listAuditEvents(requestId: string, env: LotSocialEnvironment) {
+  await ensureAuthorizationSchema(env);
+  const result = await database(env, "authorization")
     .prepare("SELECT * FROM authorization_audit_events WHERE request_id = ? ORDER BY created_at DESC, id DESC")
     .bind(requestId)
     .all<AuthorizationAuditEvent>();
   return result.results;
 }
 
-export async function getProviderVerification(requestId: string) {
-  await ensureAuthorizationSchema();
-  return database()
+export async function getProviderVerification(requestId: string, env: LotSocialEnvironment) {
+  await ensureAuthorizationSchema(env);
+  return database(env, "authorization")
     .prepare("SELECT * FROM provider_verifications WHERE request_id = ? LIMIT 1")
     .bind(requestId)
     .first<ProviderVerificationRecord>();
@@ -192,10 +129,12 @@ export async function createProviderVerificationInvite(input: {
   providerName: string;
   contactName: string;
   contactEmail: string;
+  env: LotSocialEnvironment;
 }) {
-  await ensureAuthorizationSchema();
-  await database().batch([
-    database().prepare(`INSERT INTO provider_verifications (
+  await ensureAuthorizationSchema(input.env);
+  const db = database(input.env, "authorization");
+  await db.batch([
+    db.prepare(`INSERT INTO provider_verifications (
       request_id, verification_token_hash, provider_name, contact_name, contact_email, status
     ) VALUES (?, ?, ?, ?, ?, 'pending') ON CONFLICT(request_id) DO UPDATE SET
       verification_token_hash = excluded.verification_token_hash,
@@ -206,7 +145,7 @@ export async function createProviderVerificationInvite(input: {
       status = 'pending', typed_signature = NULL, decided_at = NULL,
       updated_at = CURRENT_TIMESTAMP`)
       .bind(input.record.id, input.tokenHash, input.providerName, input.contactName, input.contactEmail),
-    database().prepare(`UPDATE authorization_requests SET provider_name = ?,
+    db.prepare(`UPDATE authorization_requests SET provider_name = ?,
       provider_contact_name = ?, provider_contact_email = ?, status = 'provider_pending',
       updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
       .bind(input.providerName, input.contactName, input.contactEmail, input.record.id),
@@ -214,13 +153,13 @@ export async function createProviderVerificationInvite(input: {
   await addAuditEvent(input.record.id, "associate", input.record.associate_email, "provider_verification_invited", {
     providerName: input.providerName,
     contactEmail: input.contactEmail,
-  });
+  }, input.env);
 }
 
-export async function getProviderVerificationByToken(token: string) {
-  await ensureAuthorizationSchema();
+export async function getProviderVerificationByToken(token: string, env: LotSocialEnvironment) {
+  await ensureAuthorizationSchema(env);
   const tokenHash = await hashToken(token);
-  return database()
+  return database(env, "authorization")
     .prepare(`SELECT pv.*, ar.dealership_name, ar.rooftop_location, ar.associate_name,
       ar.requested_permissions, ar.approved_permissions, ar.manager_name
       FROM provider_verifications pv JOIN authorization_requests ar ON ar.id = pv.request_id
@@ -239,21 +178,23 @@ export async function decideProviderVerification(input: {
   feedFormat: string;
   connectionNotes: string;
   typedSignature: string;
+  env: LotSocialEnvironment;
 }) {
-  const verification = await getProviderVerificationByToken(input.token);
+  const verification = await getProviderVerificationByToken(input.token, input.env);
   if (!verification) return null;
   if (verification.status !== "pending") return { verification, alreadyDecided: true };
 
   const requestStatus = input.decision === "verified" ? "provider_verified" : "provider_declined";
-  await database().batch([
-    database().prepare(`UPDATE provider_verifications SET status = ?, provider_name = ?,
+  const db = database(input.env, "authorization");
+  await db.batch([
+    db.prepare(`UPDATE provider_verifications SET status = ?, provider_name = ?,
       contact_name = ?, contact_email = ?, delivery_method = ?, feed_format = ?,
       connection_notes = ?, typed_signature = ?, decided_at = CURRENT_TIMESTAMP,
       updated_at = CURRENT_TIMESTAMP WHERE request_id = ?`)
       .bind(input.decision, input.providerName, input.contactName, input.contactEmail,
         input.deliveryMethod, input.feedFormat, input.connectionNotes, input.typedSignature,
         verification.request_id),
-    database().prepare(`UPDATE authorization_requests SET status = ?, provider_name = ?,
+    db.prepare(`UPDATE authorization_requests SET status = ?, provider_name = ?,
       provider_contact_name = ?, provider_contact_email = ?, updated_at = CURRENT_TIMESTAMP
       WHERE id = ?`)
       .bind(requestStatus, input.providerName, input.contactName, input.contactEmail, verification.request_id),
@@ -263,29 +204,69 @@ export async function decideProviderVerification(input: {
       providerName: input.providerName,
       deliveryMethod: input.deliveryMethod,
       feedFormat: input.feedFormat,
-    });
+    }, input.env);
   return { verification: { ...verification, status: input.decision }, alreadyDecided: false };
 }
 
 export function evaluateAuthorization(record: AuthorizationRequestRecord | null, permission: PermissionId) {
   if (!record) return { allowed: false, reason: "authorization_not_found" } as const;
-  if (record.status !== "active") return { allowed: false, reason: `status_${record.status}` } as const;
   if (record.expires_at && new Date(`${record.expires_at}T23:59:59Z`).getTime() < Date.now()) {
     return { allowed: false, reason: "authorization_expired" } as const;
   }
   if (!parsePermissions(record.approved_permissions).includes(permission)) {
     return { allowed: false, reason: "permission_not_approved" } as const;
   }
-  return { allowed: true, reason: "authorized" } as const;
+  if (["requested", "declined", "suspended", "revoked", "expired"].includes(record.status)) {
+    return { allowed: false, reason: `status_${record.status}` } as const;
+  }
+  const tier = PERMISSIONS.find((item) => item.id === permission)?.tier;
+  if (tier === "manager" && ["manager_approved", "provider_pending", "provider_verified", "provider_declined", "feed_connected", "active"].includes(record.status)) {
+    return { allowed: true, reason: "manager_authorized" } as const;
+  }
+  if (tier === "provider" && ["provider_verified", "feed_connected", "active"].includes(record.status)) {
+    return { allowed: true, reason: "provider_verified" } as const;
+  }
+  return { allowed: false, reason: `provider_rights_${record.status}` } as const;
 }
 
-export async function getAuthorizationByToken(token: string) {
-  await ensureAuthorizationSchema();
+export function isManagementLinkExpired(record: AuthorizationRequestRecord, env: LotSocialEnvironment, now = new Date()) {
+  if (record.status === "requested") return false;
+  const expiresAt = Date.parse(record.management_link_expires_at ?? "");
+  return !Number.isFinite(expiresAt) || now.getTime() > expiresAt;
+}
+
+export function managementLinkExpiry(env: LotSocialEnvironment, now = new Date()) {
+  const configuredTtl = Number(env.LOTSOCIAL_MANAGEMENT_LINK_TTL_HOURS || "72");
+  const ttlHours = Number.isFinite(configuredTtl) && configuredTtl > 0 ? configuredTtl : 72;
+  return new Date(now.getTime() + ttlHours * 60 * 60 * 1000).toISOString();
+}
+
+export async function getAuthorizationByToken(token: string, env: LotSocialEnvironment) {
+  await ensureAuthorizationSchema(env);
   const tokenHash = await hashToken(token);
-  return database()
+  const db = database(env, "authorization");
+  const request = await db
     .prepare("SELECT * FROM authorization_requests WHERE approval_token_hash = ? LIMIT 1")
     .bind(tokenHash)
     .first<AuthorizationRequestRecord>();
+  if (request?.status === "requested") return request;
+  return db.prepare(`SELECT ar.*, ml.expires_at AS management_link_expires_at
+      FROM authorization_management_links ml
+      JOIN authorization_requests ar ON ar.id = ml.request_id
+      WHERE ml.token_hash = ? LIMIT 1`)
+    .bind(tokenHash)
+    .first<AuthorizationRequestRecord>();
+}
+
+export async function rotateManagementLink(requestId: string, tokenHash: string, env: LotSocialEnvironment) {
+  await ensureAuthorizationSchema(env);
+  const expiresAt = managementLinkExpiry(env);
+  await database(env, "authorization").prepare(`INSERT INTO authorization_management_links (
+      request_id, token_hash, expires_at
+    ) VALUES (?, ?, ?) ON CONFLICT(request_id) DO UPDATE SET
+      token_hash = excluded.token_hash, expires_at = excluded.expires_at, updated_at = CURRENT_TIMESTAMP`)
+    .bind(requestId, tokenHash, expiresAt).run();
+  return expiresAt;
 }
 
 export async function addAuditEvent(
@@ -294,9 +275,10 @@ export async function addAuditEvent(
   actorEmail: string,
   action: string,
   metadata: Record<string, unknown> = {},
+  env: LotSocialEnvironment,
 ) {
-  await ensureAuthorizationSchema();
-  await database()
+  await ensureAuthorizationSchema(env);
+  await database(env, "authorization")
     .prepare("INSERT INTO authorization_audit_events (request_id, actor_type, actor_email, action, metadata) VALUES (?, ?, ?, ?, ?)")
     .bind(requestId, actorType, actorEmail, action, JSON.stringify(metadata))
     .run();
@@ -318,31 +300,32 @@ export async function createAuthorizationRequest(input: {
   providerContactName: string;
   providerContactEmail: string;
   requestedPermissions: PermissionId[];
+  env: LotSocialEnvironment;
 }) {
-  await ensureAuthorizationSchema();
-  await database()
+  await ensureAuthorizationSchema(input.env);
+  await database(input.env, "authorization")
     .prepare(`INSERT INTO authorization_requests (
       id, approval_token_hash, dealership_name, rooftop_location, dealership_domain,
       associate_name, associate_email, manager_name, manager_title, manager_email,
       manager_phone, provider_name, provider_contact_name, provider_contact_email,
-      requested_permissions, status, email_delivery_status
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'requested', 'pending')`)
+      requested_permissions, terms_version, status, email_delivery_status
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'requested', 'pending')`)
     .bind(
       input.id, input.tokenHash, input.dealershipName, input.rooftopLocation,
       input.dealershipDomain, input.associateName, input.associateEmail,
       input.managerName, input.managerTitle, input.managerEmail, input.managerPhone,
       input.providerName, input.providerContactName, input.providerContactEmail,
-      JSON.stringify(input.requestedPermissions),
+      JSON.stringify(input.requestedPermissions), TERMS_VERSION,
     )
     .run();
   await addAuditEvent(input.id, "associate", input.associateEmail, "permission_requested", {
     managerEmail: input.managerEmail,
     permissions: input.requestedPermissions,
-  });
+  }, input.env);
 }
 
-export async function setEmailDelivery(id: string, status: string, messageId?: string) {
-  await database()
+export async function setEmailDelivery(id: string, status: string, messageId: string | undefined, env: LotSocialEnvironment) {
+  await database(env, "authorization")
     .prepare("UPDATE authorization_requests SET email_delivery_status = ?, email_message_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
     .bind(status, messageId ?? null, id)
     .run();
@@ -358,14 +341,15 @@ export async function decideAuthorization(input: {
   providerContactEmail: string;
   expiresAt: string | null;
   managerNotes: string;
+  env: LotSocialEnvironment;
 }) {
-  const record = await getAuthorizationByToken(input.token);
+  const record = await getAuthorizationByToken(input.token, input.env);
   if (!record) return null;
   if (record.status !== "requested") return { record, alreadyDecided: true };
 
   const status = input.decision === "approved" ? "manager_approved" : "declined";
-  await database()
-    .prepare(`UPDATE authorization_requests SET status = ?, approved_permissions = ?,
+  const db = database(input.env, "authorization");
+  const statements = [db.prepare(`UPDATE authorization_requests SET status = ?, approved_permissions = ?,
       typed_signature = ?, provider_name = ?, provider_contact_name = ?,
       provider_contact_email = ?, expires_at = ?, manager_notes = ?,
       decided_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
@@ -379,14 +363,21 @@ export async function decideAuthorization(input: {
       input.expiresAt,
       input.managerNotes,
       record.id,
-    )
-    .run();
+    )];
+  if (input.decision === "approved") {
+    statements.push(db.prepare(`INSERT INTO authorization_management_links (
+      request_id, token_hash, expires_at
+    ) VALUES (?, ?, ?) ON CONFLICT(request_id) DO UPDATE SET
+      token_hash = excluded.token_hash, expires_at = excluded.expires_at, updated_at = CURRENT_TIMESTAMP`)
+      .bind(record.id, await hashToken(input.token), managementLinkExpiry(input.env)));
+  }
+  await db.batch(statements);
   await addAuditEvent(record.id, "manager", record.manager_email, status, {
     permissions: input.approvedPermissions,
     providerName: input.providerName,
     expiresAt: input.expiresAt,
     termsVersion: record.terms_version,
-  });
+  }, input.env);
   return { record: { ...record, status }, alreadyDecided: false };
 }
 
@@ -396,12 +387,16 @@ export async function manageAuthorization(input: {
   approvedPermissions: PermissionId[];
   expiresAt: string | null;
   managerNotes: string;
+  env: LotSocialEnvironment;
+  now?: Date;
 }) {
-  const record = await getAuthorizationByToken(input.token);
+  const record = await getAuthorizationByToken(input.token, input.env);
   if (!record) return null;
 
+  if (isManagementLinkExpired(record, input.env, input.now)) return { record, unavailable: true, expired: true };
+
   const manageableStatuses = ["manager_approved", "provider_pending", "provider_verified", "provider_declined", "feed_connected", "active", "suspended"];
-  if (!manageableStatuses.includes(record.status)) return { record, unavailable: true };
+  if (!manageableStatuses.includes(record.status)) return { record, unavailable: true, expired: false };
 
   const nextStatus = input.action === "revoke"
     ? "revoked"
@@ -410,7 +405,7 @@ export async function manageAuthorization(input: {
       : record.status === "suspended" ? "manager_approved" : record.status;
   const nextPermissions = input.action === "revoke" ? [] : input.approvedPermissions;
 
-  await database()
+  await database(input.env, "authorization")
     .prepare(`UPDATE authorization_requests SET status = ?, approved_permissions = ?,
       expires_at = ?, manager_notes = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
     .bind(nextStatus, JSON.stringify(nextPermissions), input.expiresAt, input.managerNotes, record.id)
@@ -427,9 +422,9 @@ export async function manageAuthorization(input: {
     permissions: nextPermissions,
     expiresAt: input.expiresAt,
     notes: input.managerNotes,
-  });
+  }, input.env);
 
-  return { record: { ...record, status: nextStatus, approved_permissions: JSON.stringify(nextPermissions) }, unavailable: false };
+  return { record: { ...record, status: nextStatus, approved_permissions: JSON.stringify(nextPermissions) }, unavailable: false, expired: false };
 }
 
 export function parsePermissions(value: string | null): PermissionId[] {

@@ -1,7 +1,8 @@
 {
-  "name": "site-creator-vinext-starter",
-  "version": "0.1.0",
+  "name": "lotsocial",
+  "version": "0.9.0",
   "private": true,
+  "packageManager": "pnpm@11.24.0",
   "engines": {
     "node": ">=22.13.0"
   },
@@ -9,9 +10,11 @@
     "dev": "vinext dev",
     "build": "vinext build",
     "start": "vinext start",
-    "test": "npm run build && node --test tests/rendered-html.test.mjs",
+    "test": "npm run build && node --test tests/*.test.mjs && npm run db:bootstrap-check && npm run db:check && npm run lint",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
-    "db:generate": "drizzle-kit generate"
+    "db:generate": "drizzle-kit generate",
+    "db:check": "node scripts/check-drizzle-drift.mjs",
+    "db:bootstrap-check": "node scripts/check-bootstrap-schema.mjs"
   },
   "dependencies": {
     "drizzle-orm": "0.45.2",
@@ -30,6 +33,7 @@
     "drizzle-kit": "0.31.10",
     "eslint": "9.39.4",
     "eslint-config-next": "16.2.6",
+    "miniflare": "4.20260515.0",
     "react-server-dom-webpack": "19.2.6",
     "tailwindcss": "4.2.1",
     "typescript": "5.9.3",

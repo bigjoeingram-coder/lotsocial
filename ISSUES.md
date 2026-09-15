@@ -1,0 +1,69 @@
+# LotSocial — State of the Company (Clarity Break, 2026-08-28)
+
+Auditor: Fable (Visionary seat). Repo at commit c63240a. Live context: semi-live on ChatGPT Sites, real salespeople testing.
+
+Format: one issue per line, [impact] — issue → why it matters.
+
+## Current disposition — closed pilot candidate (2026-09-13)
+
+The findings below are the original audit record, not the current open-work list. The closed-pilot candidate at local commit `e1572a2` resolves the pilot-blocking build work as follows:
+
+| Finding | Disposition | Evidence / boundary |
+|---|---|---|
+| I-01–I-05 | RESOLVED IN BUILD | Rock 2 closes the identity, request-budget, manager-email, and environment-contract gaps; Rock 4 adds paid-fallback budgets; Rock 5 replaces permanent manager credentials with expiring rotating links. Live host/allowlist and email behavior still require the deployment gate. |
+| I-06–I-07 | RESOLVED IN BUILD | Rock 5 makes the authorization state machine reachable without weakening provider rights. Rock 6 locks the adjacent-vehicle extraction regression with fixtures. |
+| I-08–I-11 | RESOLVED IN BUILD | Rock 1 establishes one bootstrap/migration authority; Rock 3 adds retryable initialization, atomic deletion, and canonical VDP identity. |
+| I-12–I-14 | RESOLVED IN BUILD | Behavior tests, main-targeted CI, import outcomes, and the keyed seven-day health endpoint are present and enforced by `npm test`. |
+| I-15 | MITIGATED FOR PILOT | The free reader remains a dependency, but outcome telemetry, paid-fallback caps, honest budget notices, and host-level health reporting make failure and spend observable. Keep under pilot monitoring. |
+| I-16–I-17 | DEFERRED, NON-BLOCKING | Module and UI decomposition are maintainability work. They are not missing customer behavior and remain outside this hardening cycle. |
+| I-18 | RESOLVED IN BUILD | Rock 6 removes the fixed make allowlist and proves Ram, Jeep, Chrysler, and Dodge candidate paths. |
+| I-19 | DEFERRED, NON-BLOCKING | Helper deduplication remains low-risk maintainability work. |
+| I-20 | RESOLVED IN BUILD | Package, README, icons, manifest, and product identity now name LotSocial. |
+| I-21 | DEFERRED BY PRODUCT DECISION | Phase 0 gamification remains out of scope until a real user database exists. |
+| I-22 | FRESH-DB PATH READY; EXISTING DB UNVERIFIED | A fresh pilot D1 from current migrations avoids the legacy nullable-key risk. Reuse of the Sites database remains gated on schema readback, affected-row counts, and backup before repair. |
+
+Pilot activation is therefore a deployment-and-live-verification decision, not unfinished local build work. `README.md` defines the local and closed-pilot operating gates; `RF-STATUS.md` preserves the live-only evidence gaps.
+
+## Security & money
+
+- [HIGH] I-01 — `getChatGPTUser` trusts the `oai-authenticated-user-email` header with no proof the request came through OpenAI's proxy → if the worker is reachable at any direct URL (workers.dev or custom route), anyone can set that header and read/write/delete any associate's inventory, projects, and authorizations. Verify platform provenance or block direct routes.
+- [HIGH] I-02 — No rate limit or quota on `/api/vdp-imports` POST → each blocked import fires up to 6 external reader fetches plus a PAID Bright Data request; one eager tester or a loop burns real spend with zero cap or alert.
+- [MED-HIGH] I-03 — `/api/authorization-requests` POST sends email to any attacker-typed `managerEmail` with attacker-controlled names via Resend → signed-in user can use LotSocial as a spam cannon; hits sender reputation. No rate limit, no domain sanity check.
+- [MED] I-04 — Manager approval token never expires and doubles as the permanent management credential (`manageAuthorization` by token) → a forwarded or breached inbox controls the authorization forever. Add token expiry/rotation on decision.
+- [LOW] I-05 — `.env.example` omits BRIGHTDATA_API_KEY/BRIGHTDATA_ZONE/SHOTSTACK_API_KEY/SHOTSTACK_STAGE → env drift between devs/deploys is invisible until a silent fallback fires.
+
+## Correctness & the dead state machine
+
+- [HIGH] I-06 — Nothing in the codebase ever sets an authorization to status `active`, but `evaluateAuthorization` requires exactly `active` and the UI promises "enforcement will deny until Active" → the entire manager→provider→enforcement pipeline is a road to a door that never opens. Either build the activation transition or cut the flow to what's real (do less better).
+- [MED-HIGH] I-07 — Dealer Inspire listing-guess fallback parses ±5000 chars around VIN evidence on multi-vehicle inventory pages → price/mileage regexes can capture the NEIGHBORING vehicle's numbers; a salesperson publishes a wrong price with LotSocial's name on the video. Compliance-grade risk given real users.
+- [MED] I-08 — Module-level `schemaReady` caches a FAILED promise forever (vdp, authorization, creative all copy the pattern) → one transient D1 error poisons every subsequent request until redeploy. Reset on rejection.
+- [MED] I-09 — Runtime `CREATE TABLE IF NOT EXISTS` in three libs competes with drizzle migrations in `drizzle/` as a second source of schema truth → drift between environments is undetectable; migrations exist but aren't the authority.
+- [MED-LOW] I-10 — Delete route runs sequential per-project deletes with no transaction (D1 `batch` exists, unused) → a mid-flight failure leaves orphaned render jobs the code specifically claims to prevent.
+- [LOW] I-11 — `sourceUrlVariants` only toggles trailing slash → same VDP with ?utm params or case differences imports as a duplicate row despite the UNIQUE constraint's intent.
+
+## Process & proof
+
+- [HIGH] I-12 — Both test files assert regex matches against SOURCE TEXT, not behavior (`assert.match(deleteRoute, /DELETE FROM/)`) → the proof passes while the feature can be completely broken; this is the "proof that lies" anti-pattern, institutionalized.
+- [MED-HIGH] I-13 — CI triggers only on a stale feature branch (`build/delete-and-draft-revalidation`) plus narrow PR paths → pushes to main ship untested; the extractor (highest-churn, highest-risk file) has zero coverage of any kind.
+- [MED] I-14 — No import outcome telemetry beyond console.warn → with salespeople live, nobody knows the import success rate, which dealer hosts fail, or when Bright Data starts eating money. Failures are discovered by user complaint (the scavenger-hunt pattern already ruled against in INGRAM OS).
+
+## Fragility & debt
+
+- [MED] I-15 — Extraction chain leans on free unauthenticated r.jina.ai (including an intentionally nested double-reader hack) → third-party rate limits or a jina change silently kill the fallback with no signal.
+- [MED] I-16 — `app/lib/vdp.ts` (628 lines) mixes URL validation, three fetch strategies, two parsers, persistence, and serialization → god module; every extractor tweak risks persistence, and it's the file that changes most.
+- [MED] I-17 — `AuthorizationApp.tsx` is a 759-line client component with 38 useState hooks and 9 inline fetch flows → any UI change risks every UI feature; split by view.
+- [MED-LOW] I-18 — Hardcoded 23-make allowlist inside `candidateInventoryPaths` → fallback silently skips model-path guessing for any brand not on the list (no Ram trucks, no Jeep, no Chrysler, no Dodge — in a dealership app).
+- [LOW] I-19 — `vehicleName`/price-formatting logic duplicated across creative.ts and rendering.ts; `seed`/`vibeSeed` computed twice identically in createCopy → divergence bugs waiting.
+- [LOW] I-20 — Repo identity is still the starter's: package name `site-creator-vinext-starter`, starter README, leftover `examples/d1/` → onboarding confusion, and the README documents a different product.
+- [CLARIFY] I-21 — Phase 0 spec features (Claim the Sale, Standings, Rising Star, Hall of Fame) are entirely absent from the codebase → is this cycle about hardening what's live, or resuming the spec? Changes what the rocks are.
+
+## Found during the build (added after the audit)
+
+- [MED] I-22 — The live D1 database was created by the runtime `CREATE TABLE IF NOT EXISTS` bootstrap, not by the drizzle migrations, and the two declared DIFFERENT schemas: **five** primary key columns (`authorization_requests.id`, `creative_projects.id`, `creative_render_jobs.id`, `imported_vehicles.id`, `provider_verifications.request_id`) were `PRIMARY KEY` in the bootstrap but `PRIMARY KEY NOT NULL` in the migrations, and SQLite genuinely allows NULL in a TEXT PRIMARY KEY column. Rock 1 corrected the bootstrap and added `npm run db:bootstrap-check` to keep them in lockstep, but `CREATE TABLE IF NOT EXISTS` cannot alter an existing table → the deployed database may still carry the nullable variant. **Corrected 2026-08-30 against the original entry, both proven by test in `tests/schema-repair.test.mjs`:** it is five columns, not six — `authorization_audit_events.id` is `INTEGER PRIMARY KEY AUTOINCREMENT`, the rowid alias, which cannot hold NULL; and severity drops from MED-HIGH to MED because every insert path uses `crypto.randomUUID()`, so no application code can write a NULL id. This is an unenforced constraint, not known corruption. Repair built and proven but NOT applied: see `drizzle/repair/i22-enforce-pk-not-null.sql`, `scripts/i22-check-schema.mjs` (read-only live audit, needs no deploy), and the runbook below. Applying it is Joe's call and needs D1 credentials this repo does not have.
+  - **2026-08-29 — repair built and proven; live database NOT yet verified or repaired.** Two refinements to the finding. (1) It is **five** columns, not six: `authorization_audit_events.id` is `INTEGER PRIMARY KEY AUTOINCREMENT`, which is the SQLite rowid alias and cannot store NULL — proven by test, not assumed, so that table needs no repair. (2) Severity in practice is lower than MED-HIGH: every insert path generates its id with `crypto.randomUUID()`, so no application code can write a NULL id. This is an **unenforced constraint**, not known data corruption. Delivered: `scripts/i22-check-schema.mjs` (read-only audit of a live schema dump — needs no deploy), `drizzle/repair/i22-enforce-pk-not-null.sql` (generated from `SCHEMA_BOOTSTRAP_SQL` by `scripts/i22-generate-repair.mjs`, so it cannot drift from the authority), and `tests/schema-repair.test.mjs` (5 tests on real SQLite: proves the legacy schema accepts a NULL id, proves the repair enforces NOT NULL and preserves rows and indexes, and proves the repair fails loudly rather than silently dropping rows if NULL ids already exist).
+  - **Still open, and requires Joe.** The database is provisioned by the OpenAI Sites platform, not by Cloudflare directly: `.openai/hosting.json` declares `"d1": "DB"` under project `appgprj_6a5c6108f314819189a468b7f6b7b0b4`, and the README states the starter does not use `wrangler.jsonc`. There is no wrangler config and no D1 credentials in this repo, so the live database cannot be read or altered from here. **Open question that gates everything else: does the Sites console expose a SQL/query surface for that project's D1?** If yes, step (a) is read-only and needs no deploy. If no, reading the live schema requires deploying a temporary ENFORCEMENT_API_KEY-gated diagnostic route, which is a deploy decision in its own right. Runbook: (a) obtain `SELECT name, sql FROM sqlite_master WHERE type='table'` from the live D1 and run it through `scripts/i22-check-schema.mjs` to confirm whether the deployed schema is affected at all — it may come back clean; (b) if affected, run `SELECT COUNT(*) FROM <table> WHERE <column> IS NULL` per affected table — any non-zero count is real bad data and must be resolved before the rebuild; (c) export a backup; (d) apply the repair SQL as a single batch. Steps (c) and (d) are destructive and are Joe's call, not automated.
+
+## Assets worth protecting (not issues)
+
+- Compliance discipline in copy: facts allowlist, "price when captured" wording, 7-day ad expiry line, flavor mode constrained to puffery — this is the product's moat; no rock may weaken it.
+- Bright Data branch logging with credential redaction; token hashing at rest; SSRF guard on VDP URLs; per-associate scoping on every query.

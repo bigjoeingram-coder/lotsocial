@@ -1,17 +1,35 @@
-import { getChatGPTUser } from "../../chatgpt-auth";
+import { env } from "cloudflare:workers";
+import { associateAuthResponse, requireAssociate } from "../../chatgpt-auth";
 import { saveCreativeProject, serializeCreativeProject } from "../../lib/creative";
+import type { GravyLevel } from "../../lib/creative";
 import { getImportedVehicle } from "../../lib/vdp";
 
 function clean(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
 }
 
+function cleanProfilePhotoUrl(value: unknown, request: Request) {
+  const raw = clean(value);
+  if (!raw) return "";
+  try {
+    const url = new URL(raw, request.url);
+    if (url.origin !== new URL(request.url).origin) return "";
+    return /^\/api\/profile-photos\/[a-f0-9-]{36}\.(?:jpg|jpeg|png|webp)$/i.test(url.pathname) ? url.toString() : "";
+  } catch {
+    return "";
+  }
+}
+
 export async function POST(request: Request) {
-  const user = await getChatGPTUser();
-  if (!user) return Response.json({ error: "Associate sign-in is required." }, { status: 401 });
+  let user;
+  try {
+    user = await requireAssociate(request, env);
+  } catch (error) {
+    return associateAuthResponse(error);
+  }
   const payload = (await request.json()) as Record<string, unknown>;
   const vehicleId = clean(payload.vehicleId);
-  const vehicle = await getImportedVehicle(vehicleId, user.email);
+  const vehicle = await getImportedVehicle(vehicleId, user.email, env);
   if (!vehicle) return Response.json({ error: "That vehicle is not in your inventory." }, { status: 404 });
   const availableImages = JSON.parse(vehicle.image_urls || "[]") as string[];
   const selectedImages = Array.isArray(payload.selectedImages)
@@ -21,7 +39,10 @@ export async function POST(request: Request) {
   const durationSeconds = [15, 30, 45].includes(Number(payload.durationSeconds)) ? Number(payload.durationSeconds) : 30;
   const endCardName = clean(payload.endCardName) || user.displayName;
   const endCardCta = clean(payload.endCardCta) || "Message me for details";
-  const flavor = payload.flavor === true;
+  const requestedGravy = clean(payload.gravyLevel);
+  const gravyLevel: GravyLevel = requestedGravy === "light" || requestedGravy === "extra"
+    ? requestedGravy
+    : payload.flavor === true ? "light" : "none";
   const project = await saveCreativeProject({
     vehicle,
     associateEmail: user.email,
@@ -32,7 +53,9 @@ export async function POST(request: Request) {
     endCardPhone: clean(payload.endCardPhone),
     endCardEmail: clean(payload.endCardEmail) || user.email,
     endCardCta,
-    flavor,
+    endCardPhotoUrl: cleanProfilePhotoUrl(payload.endCardPhotoUrl, request),
+    gravyLevel,
+    env,
   });
   if (!project) return Response.json({ error: "The creative draft could not be saved." }, { status: 500 });
   return Response.json({ project: serializeCreativeProject(project) }, { status: 201 });

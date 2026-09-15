@@ -1,5 +1,5 @@
 import { env } from "cloudflare:workers";
-import { getChatGPTUser } from "../../../../chatgpt-auth";
+import { associateAuthResponse, requireAssociate } from "../../../../chatgpt-auth";
 import { addAuditEvent, createProviderVerificationInvite, createSecureToken, getAuthorizationByIdForAssociate, hashToken } from "../../../../lib/authorization";
 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -23,10 +23,14 @@ LotSocial Inventory Operations`;
 }
 
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
-  const user = await getChatGPTUser();
-  if (!user) return Response.json({ error: "Associate sign-in is required." }, { status: 401 });
+  let user;
+  try {
+    user = await requireAssociate(request, env);
+  } catch (error) {
+    return associateAuthResponse(error);
+  }
   const { id } = await context.params;
-  const record = await getAuthorizationByIdForAssociate(id, user.email);
+  const record = await getAuthorizationByIdForAssociate(id, user.email, env);
   if (!record) return Response.json({ error: "Authorization record not found." }, { status: 404 });
   if (!["manager_approved", "provider_pending", "provider_declined"].includes(record.status)) {
     return Response.json({ error: "Provider verification can only begin after manager approval." }, { status: 409 });
@@ -41,7 +45,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   }
 
   const token = createSecureToken();
-  await createProviderVerificationInvite({ record, tokenHash: await hashToken(token), providerName, contactName, contactEmail });
+  await createProviderVerificationInvite({ record, tokenHash: await hashToken(token), providerName, contactName, contactEmail, env });
   const providerUrl = `${new URL(request.url).origin}/provider/${token}`;
   const runtime = env as typeof env & { RESEND_API_KEY?: string; EMAIL_FROM?: string };
   let emailDeliveryStatus = "preview_ready";
@@ -58,7 +62,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     });
     emailDeliveryStatus = delivery.ok ? "sent" : "delivery_failed";
   }
-  await addAuditEvent(record.id, "system", "", "provider_invitation_prepared", { contactEmail, emailDeliveryStatus });
+  await addAuditEvent(record.id, "system", "", "provider_invitation_prepared", { contactEmail, emailDeliveryStatus }, env);
 
   return Response.json({
     providerUrl,

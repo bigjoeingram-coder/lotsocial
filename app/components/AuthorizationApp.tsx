@@ -1,9 +1,11 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { PERMISSIONS, PermissionId } from "../lib/authorization-shared";
+import { replenishSelectedImages } from "../lib/creative-selection";
+import { prepareProfilePhoto, readPhotoUploadResponse } from "../lib/profile-photo-client";
 
-type User = { name: string; email: string } | null;
+type User = { name: string; email: string; phone?: string; dealershipName?: string; rooftopLocation?: string; profilePhotoUrl?: string };
 
 type RequestRow = {
   id: string;
@@ -80,6 +82,7 @@ type CreativeProject = {
   endCardPhone: string;
   endCardEmail: string;
   endCardCta: string;
+  endCardPhotoUrl: string;
   status: string;
   createdAt: string;
 };
@@ -99,6 +102,8 @@ type RenderJob = {
     photoCount: number;
     endCardSeconds: number;
     style: string;
+    template?: string;
+    music?: string;
     fidelity: string;
   } | null;
   createdAt: string;
@@ -156,6 +161,7 @@ function statusTone(status: string) {
 const renderStatusLabels: Record<string, string> = {
   queued: "Queued",
   fetching: "Collecting VDP photos",
+  preprocessing: "Preparing compatible photos",
   rendering: "Rendering video",
   saving: "Finalizing video",
   completed: "Video ready",
@@ -163,6 +169,10 @@ const renderStatusLabels: Record<string, string> = {
   provider_error: "Renderer needs attention",
   awaiting_provider_setup: "Production plan ready",
 };
+
+function renderIsActive(status: string | undefined) {
+  return Boolean(status && ["queued", "fetching", "preprocessing", "rendering", "saving"].includes(status));
+}
 
 function formatDate(value: string | null) {
   if (!value) return "—";
@@ -189,13 +199,20 @@ function vehicleModelLabel(vehicle: ImportedVehicle) {
   return label || vehicle.title;
 }
 
+function chunkImages(images: string[], size = 4) {
+  const pages: string[][] = [];
+  for (let index = 0; index < images.length; index += size) pages.push(images.slice(index, index + size));
+  return pages;
+}
+
+
 function initialForm(user: User): FormState {
   return {
-    dealershipName: "",
-    rooftopLocation: "",
+    dealershipName: user.dealershipName ?? "",
+    rooftopLocation: user.rooftopLocation ?? "",
     dealershipDomain: "",
-    associateName: user?.name ?? "",
-    associateEmail: user?.email ?? "",
+    associateName: user.name,
+    associateEmail: user.email,
     managerName: "",
     managerTitle: "Inventory Manager",
     managerEmail: "",
@@ -208,7 +225,8 @@ function initialForm(user: User): FormState {
 }
 
 export function AuthorizationApp({ user }: { user: User }) {
-  const [view, setView] = useState<"dashboard" | "request" | "inventory" | "creative">("dashboard");
+  const currentUser = user;
+  const [view, setView] = useState<"dashboard" | "request" | "inventory" | "creative">("inventory");
   const [step, setStep] = useState(1);
   const [requests, setRequests] = useState<RequestRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -220,10 +238,12 @@ export function AuthorizationApp({ user }: { user: User }) {
   const [detailLoading, setDetailLoading] = useState(false);
   const [providerDraft, setProviderDraft] = useState({ providerName: "", contactName: "", contactEmail: "" });
   const [providerInvite, setProviderInvite] = useState<{ providerUrl: string; emailDeliveryStatus: string; emailPreview?: string } | null>(null);
+  const [managerLink, setManagerLink] = useState<{ managerUrl: string; expiresAt: string; emailDeliveryStatus: string; emailPreview?: string } | null>(null);
   const [vehicles, setVehicles] = useState<ImportedVehicle[]>([]);
   const [inventoryLoading, setInventoryLoading] = useState(true);
   const [vdpUrl, setVdpUrl] = useState("");
   const [authorizedToMarket, setAuthorizedToMarket] = useState(false);
+  const [importPurpose, setImportPurpose] = useState("Create a vehicle social post");
   const [importingVdp, setImportingVdp] = useState(false);
   const [inventoryError, setInventoryError] = useState("");
   const [importNotice, setImportNotice] = useState("");
@@ -231,24 +251,39 @@ export function AuthorizationApp({ user }: { user: User }) {
   const [installHelp, setInstallHelp] = useState<"ios" | "android" | null>(null);
   const [creativeVehicle, setCreativeVehicle] = useState<ImportedVehicle | null>(null);
   const [selectedCreativeImages, setSelectedCreativeImages] = useState<string[]>([]);
+  const brokenCreativeImagesRef = useRef(new Set<string>());
   const [brokenCreativeImages, setBrokenCreativeImages] = useState<string[]>([]);
   const [brokenInventoryImages, setBrokenInventoryImages] = useState<Record<string, string[]>>({});
   const [creativeStyle, setCreativeStyle] = useState("walkaround");
-  const [captionFlavor, setCaptionFlavor] = useState(false);
+  const [gravyLevel, setGravyLevel] = useState<"none" | "light" | "extra">("none");
   const [creativeDuration, setCreativeDuration] = useState(30);
-  const [endCardName, setEndCardName] = useState(user?.name ?? "");
-  const [endCardPhone, setEndCardPhone] = useState("");
-  const [endCardEmail, setEndCardEmail] = useState(user?.email ?? "");
+  const [endCardName, setEndCardName] = useState(user.name);
+  const [endCardPhone, setEndCardPhone] = useState(user.phone ?? "");
+  const [endCardEmail, setEndCardEmail] = useState(user.email);
   const [endCardCta, setEndCardCta] = useState("Message me for details");
+  const [endCardPhotoUrl, setEndCardPhotoUrl] = useState(user.profilePhotoUrl ?? "");
+  const [endCardPhotoStatus, setEndCardPhotoStatus] = useState("");
+  const [uploadingEndCardPhoto, setUploadingEndCardPhoto] = useState(false);
   const [creativeDraft, setCreativeDraft] = useState<CreativeProject | null>(null);
   const [creativeError, setCreativeError] = useState("");
   const [generatingCreative, setGeneratingCreative] = useState(false);
   const [renderJob, setRenderJob] = useState<RenderJob | null>(null);
   const [preparingRender, setPreparingRender] = useState(false);
+  const [renderShareStatus, setRenderShareStatus] = useState("");
+  const [previewFrameIndex, setPreviewFrameIndex] = useState(0);
+  const [previewPlaying, setPreviewPlaying] = useState(false);
+
+  function apiHeaders(extra?: HeadersInit): HeadersInit {
+    return { ...(extra as Record<string, string> | undefined) };
+  }
 
   async function loadRequests() {
+    if (!currentUser) {
+      setLoading(false);
+      return;
+    }
     try {
-      const response = await fetch("/api/authorization-requests", { cache: "no-store" });
+      const response = await fetch("/api/authorization-requests", { cache: "no-store", headers: apiHeaders() });
       const payload = await response.json() as { requests?: RequestRow[] };
       setRequests(payload.requests ?? []);
     } finally {
@@ -256,11 +291,15 @@ export function AuthorizationApp({ user }: { user: User }) {
     }
   }
 
-  useEffect(() => { void loadRequests(); }, []);
+  useEffect(() => { void loadRequests(); }, [currentUser?.email]);
 
   async function loadVehicles() {
+    if (!currentUser) {
+      setInventoryLoading(false);
+      return;
+    }
     try {
-      const response = await fetch("/api/vdp-imports", { cache: "no-store" });
+      const response = await fetch("/api/vdp-imports", { cache: "no-store", headers: apiHeaders() });
       const payload = await response.json() as { vehicles?: ImportedVehicle[] };
       setVehicles(payload.vehicles ?? []);
     } finally {
@@ -268,7 +307,13 @@ export function AuthorizationApp({ user }: { user: User }) {
     }
   }
 
-  useEffect(() => { void loadVehicles(); }, []);
+  useEffect(() => { void loadVehicles(); }, [currentUser?.email]);
+
+  useEffect(() => {
+    if (window.sessionStorage.getItem("lotsocial-return-view") !== "inventory") return;
+    window.sessionStorage.removeItem("lotsocial-return-view");
+    setView("inventory");
+  }, []);
 
   useEffect(() => {
     setInstallBannerHidden(window.localStorage.getItem("lotsocial-install-banner-dismissed") === "yes");
@@ -291,17 +336,17 @@ export function AuthorizationApp({ user }: { user: User }) {
     try {
       const response = await fetch("/api/vdp-imports", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sourceUrl: vdpUrl, authorizedToMarket }),
+        headers: apiHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify({ sourceUrl: vdpUrl, authorizedToMarket, purposeNote: importPurpose }),
       });
-      const payload = await response.json() as { vehicle?: ImportedVehicle; error?: string };
+      const payload = await response.json() as { vehicle?: ImportedVehicle; error?: string; notice?: string };
       if (!response.ok || !payload.vehicle) throw new Error(payload.error ?? "Unable to import that VDP.");
       setVehicles((current) => [payload.vehicle!, ...current.filter((vehicle) => vehicle.id !== payload.vehicle!.id)]);
-      setImportNotice(`${payload.vehicle.title} was added to My Inventory.`);
+      setImportNotice(payload.notice || `${payload.vehicle.title} was added to My Inventory.`);
       setVdpUrl("");
       setAuthorizedToMarket(false);
     } catch (caught) {
-      setInventoryError(caught instanceof Error ? caught.message : "LotSocial could not scrape that VDP yet.");
+      setInventoryError(caught instanceof Error ? caught.message : "LotSocial could not gather information from that vehicle page yet.");
     } finally {
       setImportingVdp(false);
     }
@@ -309,14 +354,18 @@ export function AuthorizationApp({ user }: { user: User }) {
 
   function startCreative(vehicle: ImportedVehicle) {
     setCreativeVehicle(vehicle);
+    brokenCreativeImagesRef.current = new Set();
     setBrokenCreativeImages([]);
-    setSelectedCreativeImages(vehicle.imageUrls.slice(0, 6));
+    setSelectedCreativeImages(vehicle.imageUrls.slice(0, 10));
     setCreativeStyle("walkaround");
-    setCaptionFlavor(false);
+    setGravyLevel("none");
     setCreativeDuration(30);
     setCreativeDraft(null);
     setRenderJob(null);
     setCreativeError("");
+    setEndCardPhotoStatus("");
+    setPreviewFrameIndex(0);
+    setPreviewPlaying(false);
     setView("creative");
   }
 
@@ -328,16 +377,11 @@ export function AuthorizationApp({ user }: { user: User }) {
   }
 
   function markBrokenCreativeImage(url: string) {
-    setBrokenCreativeImages((current) => current.includes(url) ? current : [...current, url]);
+    brokenCreativeImagesRef.current.add(url);
+    setBrokenCreativeImages(Array.from(brokenCreativeImagesRef.current));
     setSelectedCreativeImages((current) => {
-      const selected = current.filter((image) => image !== url);
-      if (!creativeVehicle) return selected;
-      const broken = new Set([...brokenCreativeImages, url]);
-      for (const candidate of creativeVehicle.imageUrls) {
-        if (selected.length >= 6) break;
-        if (!broken.has(candidate) && !selected.includes(candidate)) selected.push(candidate);
-      }
-      return selected;
+      if (!creativeVehicle) return current.filter((image) => image !== url);
+      return replenishSelectedImages(current, creativeVehicle.imageUrls, brokenCreativeImagesRef.current);
     });
     setCreativeDraft(null);
     setRenderJob(null);
@@ -356,17 +400,16 @@ export function AuthorizationApp({ user }: { user: User }) {
     });
   }
 
-  async function generateCreative(event?: FormEvent, flavorOverride?: boolean) {
+  async function generateCreative(event?: FormEvent) {
     event?.preventDefault();
-    const flavor = flavorOverride ?? captionFlavor;
     if (!creativeVehicle) return;
     setGeneratingCreative(true);
     setCreativeError("");
     try {
       const response = await fetch("/api/creative-projects", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ vehicleId: creativeVehicle.id, selectedImages: selectedCreativeImages, style: creativeStyle, durationSeconds: creativeDuration, endCardName, endCardPhone, endCardEmail, endCardCta, flavor }),
+        headers: apiHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify({ vehicleId: creativeVehicle.id, selectedImages: selectedCreativeImages, style: creativeStyle, durationSeconds: creativeDuration, endCardName, endCardPhone, endCardEmail, endCardCta, endCardPhotoUrl, gravyLevel }),
       });
       const payload = await response.json() as { project?: CreativeProject; error?: string };
       if (!response.ok || !payload.project) throw new Error(payload.error ?? "Unable to create the storyboard.");
@@ -379,12 +422,37 @@ export function AuthorizationApp({ user }: { user: User }) {
     }
   }
 
+  async function uploadEndCardPhoto(file: File | null) {
+    if (!file) return;
+    setUploadingEndCardPhoto(true);
+    setEndCardPhotoStatus("Verifying photo...");
+    setCreativeError("");
+    try {
+      const prepared = await prepareProfilePhoto(file);
+      const form = new FormData();
+      form.append("photo", prepared);
+      const response = await fetch("/api/profile-photos", { method: "POST", headers: apiHeaders(), body: form });
+      const payload = await readPhotoUploadResponse(response);
+      if (!response.ok || !payload.photoUrl) throw new Error(payload.error ?? "Unable to verify that profile photo.");
+      setEndCardPhotoUrl(payload.photoUrl);
+      setEndCardPhotoStatus("Profile photo added to the end card.");
+      setCreativeDraft(null);
+      setRenderJob(null);
+    } catch (caught) {
+      setEndCardPhotoUrl("");
+      setEndCardPhotoStatus(caught instanceof Error ? caught.message : "Unable to verify that profile photo.");
+    } finally {
+      setUploadingEndCardPhoto(false);
+    }
+  }
+
   async function prepareRender() {
     if (!creativeDraft) return;
     setPreparingRender(true);
     setCreativeError("");
+    setRenderShareStatus("");
     try {
-      const response = await fetch(`/api/creative-projects/${creativeDraft.id}/render`, { method: "POST" });
+      const response = await fetch(`/api/creative-projects/${creativeDraft.id}/render`, { method: "POST", headers: apiHeaders() });
       const payload = await response.json() as { job?: RenderJob; error?: string };
       if ((!response.ok && response.status !== 502) || !payload.job) throw new Error(payload.error ?? "Unable to prepare the production render.");
       setRenderJob(payload.job);
@@ -395,33 +463,85 @@ export function AuthorizationApp({ user }: { user: User }) {
     }
   }
 
+  const refreshRenderStatus = useCallback(async (showError = false) => {
+    if (!creativeDraft) return;
+    try {
+      const response = await fetch(`/api/creative-projects/${creativeDraft.id}/render`, { cache: "no-store" });
+      const payload = await response.json() as { job?: RenderJob; error?: string; warning?: string };
+      if (!response.ok || !payload.job) throw new Error(payload.error ?? "Unable to check the render status.");
+      setRenderJob(payload.job);
+      if (showError && payload.warning) setCreativeError(payload.warning);
+    } catch (caught) {
+      if (showError) setCreativeError(caught instanceof Error ? caught.message : "Unable to check the render status.");
+    }
+  }, [creativeDraft]);
+
+  const renderJobStatus = renderJob?.status;
+
+  const previewIsEndCard = previewFrameIndex >= selectedCreativeImages.length;
+  const previewImage = selectedCreativeImages[previewFrameIndex] ?? "";
+
   useEffect(() => {
-    if (!creativeDraft || !renderJob || !["queued", "fetching", "rendering", "saving"].includes(renderJob.status)) return;
-    let stopped = false;
-    const poll = async () => {
-      try {
-        const response = await fetch(`/api/creative-projects/${creativeDraft.id}/render`, { cache: "no-store" });
-        const payload = await response.json() as { job?: RenderJob };
-        if (!stopped && response.ok && payload.job) setRenderJob(payload.job);
-      } catch {
-        // A later poll will retry while the current durable status remains visible.
+    setPreviewFrameIndex(0);
+    setPreviewPlaying(false);
+  }, [creativeVehicle?.id, selectedCreativeImages.length]);
+
+  useEffect(() => {
+    if (!previewPlaying || selectedCreativeImages.length === 0) return;
+    const frameCount = selectedCreativeImages.length + 1;
+    const frameMs = Math.max(900, Math.round((creativeDuration * 1000) / frameCount));
+    const timer = window.setInterval(() => setPreviewFrameIndex((current) => {
+      const next = current + 1;
+      if (next >= frameCount) {
+        setPreviewPlaying(false);
+        return frameCount - 1;
       }
-    };
+      return next;
+    }), frameMs);
+    return () => window.clearInterval(timer);
+  }, [previewPlaying, selectedCreativeImages.length, creativeDuration]);
+
+  async function saveRenderedVideoToPhotos() {
+    if (!renderJob?.outputUrl) return;
+    const videoUrl = renderJob.stored ? `${renderJob.outputUrl}?download=1` : renderJob.outputUrl;
+    setRenderShareStatus("Preparing video...");
+    try {
+      const response = await fetch(videoUrl, { cache: "no-store", headers: apiHeaders() });
+      if (!response.ok) throw new Error("Video download is not available yet.");
+      const blob = await response.blob();
+      const file = new File([blob], `lotsocial-${renderJob.id}.mp4`, { type: blob.type || "video/mp4" });
+      if (navigator.canShare?.({ files: [file] })) {
+        await navigator.share({ files: [file], title: "LotSocial video", text: "Save this LotSocial video to Photos." });
+        setRenderShareStatus("Share sheet opened. Choose Save Video to add it to Photos.");
+        return;
+      }
+      window.open(videoUrl, "_blank", "noopener,noreferrer");
+      setRenderShareStatus("This browser cannot save directly to Photos. Use the opened video share menu.");
+    } catch (caught) {
+      setRenderShareStatus(caught instanceof Error ? caught.message : "Unable to prepare the video share sheet.");
+    }
+  }
+
+  useEffect(() => {
+    if (!creativeDraft || !renderIsActive(renderJobStatus)) return;
+    let stopped = false;
+    const poll = async () => { if (!stopped) await refreshRenderStatus(false); };
     const timer = window.setInterval(() => void poll(), 5000);
     void poll();
     return () => { stopped = true; window.clearInterval(timer); };
-  }, [creativeDraft, renderJob?.id, renderJob?.status]);
+  }, [creativeDraft, renderJobStatus, refreshRenderStatus]);
 
   async function openDetails(id: string) {
     setDetailLoading(true);
     setError("");
     try {
-      const response = await fetch(`/api/authorization-details/${id}`, { cache: "no-store" });
+      const response = await fetch(`/api/authorization-details/${id}`, { cache: "no-store", headers: apiHeaders() });
       const payload = await response.json() as { request?: RequestDetail; auditEvents?: AuditEvent[]; error?: string };
       if (!response.ok || !payload.request) throw new Error(payload.error ?? "Unable to load authorization details.");
       setDetail({ request: payload.request, auditEvents: payload.auditEvents ?? [] });
       setProviderDraft({ providerName: payload.request.providerName === "Unknown" ? "" : payload.request.providerName, contactName: payload.request.providerContactName, contactEmail: payload.request.providerContactEmail });
       setProviderInvite(null);
+      setManagerLink(null);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Unable to load authorization details.");
     } finally {
@@ -436,7 +556,7 @@ export function AuthorizationApp({ user }: { user: User }) {
     try {
       const response = await fetch(`/api/authorization-details/${detail.request.id}/provider-invite`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: apiHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify(providerDraft),
       });
       const payload = await response.json() as { error?: string; providerUrl?: string; emailDeliveryStatus?: string; emailPreview?: string };
@@ -446,6 +566,22 @@ export function AuthorizationApp({ user }: { user: User }) {
       await loadRequests();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Unable to prepare provider verification.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function issueManagerLink() {
+    if (!detail) return;
+    setSubmitting(true);
+    setError("");
+    try {
+      const response = await fetch(`/api/authorization-details/${detail.request.id}/manager-link`, { method: "POST" });
+      const payload = await response.json() as { error?: string; managerUrl?: string; expiresAt?: string; emailDeliveryStatus?: string; emailPreview?: string };
+      if (!response.ok || !payload.managerUrl || !payload.expiresAt || !payload.emailDeliveryStatus) throw new Error(payload.error ?? "Unable to prepare a fresh manager link.");
+      setManagerLink({ managerUrl: payload.managerUrl, expiresAt: payload.expiresAt, emailDeliveryStatus: payload.emailDeliveryStatus, emailPreview: payload.emailPreview });
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Unable to prepare a fresh manager link.");
     } finally {
       setSubmitting(false);
     }
@@ -488,7 +624,7 @@ export function AuthorizationApp({ user }: { user: User }) {
     try {
       const response = await fetch("/api/authorization-requests", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: apiHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({ ...form, providerName: form.providerName.replace("Unknown / manager will confirm", "Unknown") }),
       });
       const payload = await response.json() as { error?: string; approvalUrl?: string; emailDeliveryStatus?: string; emailPreview?: string };
@@ -507,7 +643,7 @@ export function AuthorizationApp({ user }: { user: User }) {
     setStep(1);
     setResult(null);
     setError("");
-    setForm(initialForm(user));
+    setForm(initialForm(currentUser));
   }
 
   const usableCreativeImages = creativeVehicle
@@ -527,9 +663,9 @@ export function AuthorizationApp({ user }: { user: User }) {
           <button className={view !== "inventory" ? "active" : ""} onClick={() => setView("dashboard")}>Authorizations</button>
         </nav>
         <div className="topbar-actions">
-          {!user && <a className="signin-link" href="/signin-with-chatgpt?return_to=%2F">Associate sign in</a>}
-          <span className="environment-chip"><span className="live-dot" /> Authorization workspace</span>
-          <div className="avatar" title={user?.email ?? "Demo associate"}>{(user?.name ?? "DA").slice(0, 2).toUpperCase()}</div>
+          <span className="environment-chip"><span className="live-dot" /> {currentUser.dealershipName || "Authorization workspace"}</span>
+          {currentUser.dealershipName && <a className="account-signout" href="/api/account-logout">Sign out</a>}
+          <div className="avatar" title={currentUser.email}>{currentUser.name.slice(0, 2).toUpperCase()}</div>
         </div>
       </header>
 
@@ -684,11 +820,15 @@ export function AuthorizationApp({ user }: { user: User }) {
             </div>}
             <div className="inventory-hero">
               <div><p className="eyebrow">Starter inventory</p><h1>Paste a VDP. Start creating.</h1><p>Import one public dealership vehicle page at a time. LotSocial captures the listed facts, available imagery, source URL, and import time.</p></div>
-              <span className="plan-chip">Starter · VDP Scrape</span>
+              <span className="plan-chip">Starter · VDP information</span>
             </div>
             <form className="vdp-import-panel" onSubmit={importVdp}>
               <div className="vdp-import-heading"><div className="import-icon">↗</div><div><h2>Import a vehicle detail page</h2><p>Use the exact public VDP for the vehicle you want to promote.</p></div></div>
-              <label className="vdp-url-field"><span>Vehicle detail page URL</span><div><input type="url" value={vdpUrl} onChange={(event) => setVdpUrl(event.target.value)} placeholder="https://dealer.com/inventory/vehicle..." required /><button className="primary-button" type="submit" disabled={importingVdp || !authorizedToMarket}>{importingVdp ? "Scraping VDP..." : "Import vehicle"}</button></div></label>
+              <div className="vdp-import-controls">
+                <label className="vdp-url-field"><span>Vehicle detail page URL</span><input type="url" value={vdpUrl} onChange={(event) => setVdpUrl(event.target.value)} placeholder="https://dealer.com/inventory/vehicle..." required /></label>
+                <label className="field vdp-purpose-field"><span>Why are you importing this vehicle?</span><select value={importPurpose} onChange={(event) => setImportPurpose(event.target.value)} required><option>Create a vehicle social post</option><option>Create a walkaround video</option><option>Promote a new arrival</option><option>Promote aged inventory</option><option>Manager request</option></select></label>
+                <div className="vdp-submit-row"><button className="primary-button" type="submit" disabled={importingVdp || !authorizedToMarket}>{importingVdp ? "Gathering vehicle information..." : "Gather vehicle information"}</button></div>
+              </div>
               <label className="vdp-certification"><input type="checkbox" checked={authorizedToMarket} onChange={(event) => setAuthorizedToMarket(event.target.checked)} /><span className="custom-check">✓</span><span>I certify that I am authorized to market this dealership's vehicle and use its approved VDP content for dealership social posts.</span></label>
               <div className="vdp-boundary"><strong>One-time, source-stamped import</strong><span>LotSocial does not bypass logins or access controls. Automated inventory remains a Pro feed feature.</span></div>
               {inventoryError && <div className="form-error" role="alert">{inventoryError}</div>}
@@ -706,15 +846,28 @@ export function AuthorizationApp({ user }: { user: User }) {
               <div className="creative-heading"><div><p className="eyebrow">Creative studio</p><h1>{vehicleDisplayName(creativeVehicle)}</h1><p>Build a source-grounded vertical-video storyboard from the dealership's VDP photos and facts.</p></div><div className="creative-vehicle-chip">{creativeVehicle.price && <strong>{formatPrice(creativeVehicle.price, creativeVehicle.currency)}</strong>}<span>VIN {creativeVehicle.vin || "not detected"}</span></div></div>
               <div className="creative-layout">
                 <main className="creative-editor">
-                  <section className="creative-step"><div className="creative-step-title"><span>1</span><div><h2>{hasCreativeImages ? "Select the shots" : "Caption-only draft"}</h2><p>{hasCreativeImages ? "Choose 2–10 photos. Their order becomes the first storyboard sequence." : "LotSocial captured grounded vehicle facts but no usable VDP photos. Create copy now; video needs source imagery."}</p></div><strong>{selectedCreativeImages.length} selected</strong></div>{hasCreativeImages ? <div className="creative-photo-grid">{usableCreativeImages.map((image, index) => <button type="button" key={image} className={selectedCreativeImages.includes(image) ? "selected" : ""} onClick={() => toggleCreativeImage(image)}><img src={image} alt={`VDP photo ${index + 1}`} loading="lazy" referrerPolicy="no-referrer" onError={() => markBrokenCreativeImage(image)} /><span>{selectedCreativeImages.includes(image) ? selectedCreativeImages.indexOf(image) + 1 : "+"}</span></button>)}</div> : <div className="caption-only-note">You can generate and copy the caption now. A video render needs at least two source vehicle photos.</div>}</section>
-                  <section className="creative-step"><div className="creative-step-title"><span>2</span><div><h2>Choose the pacing</h2><p>The script uses only facts captured from the source VDP.</p></div></div><div className="creative-options"><label className={creativeStyle === "energetic" ? "selected" : ""}><input type="radio" name="style" value="energetic" checked={creativeStyle === "energetic"} onChange={() => { setCreativeStyle("energetic"); setCreativeDraft(null); }} /><strong>Fast cuts</strong><p>Quick hooks and energetic pacing</p></label><label className={creativeStyle === "walkaround" ? "selected" : ""}><input type="radio" name="style" value="walkaround" checked={creativeStyle === "walkaround"} onChange={() => { setCreativeStyle("walkaround"); setCreativeDraft(null); }} /><strong>Walkaround</strong><p>Clear, conversational vehicle tour</p></label><label className={creativeStyle === "premium" ? "selected" : ""}><input type="radio" name="style" value="premium" checked={creativeStyle === "premium"} onChange={() => { setCreativeStyle("premium"); setCreativeDraft(null); }} /><strong>Premium</strong><p>Slower, polished presentation</p></label></div><div className="duration-options"><span>Target length</span>{[15,30,45].map((duration) => <button type="button" key={duration} className={creativeDuration === duration ? "active" : ""} onClick={() => { setCreativeDuration(duration); setCreativeDraft(null); }}>{duration}s</button>)}</div></section>
-                  <section className="creative-step"><div className="creative-step-title"><span>3</span><div><h2>Salesperson end card</h2><p>This becomes the final shot and call to action.</p></div></div><div className="form-grid compact"><label className="field"><span>Display name</span><input name="name" autoComplete="name" value={endCardName} onChange={(event) => { setEndCardName(event.target.value); setCreativeDraft(null); }} required /></label><label className="field"><span>Phone</span><input type="tel" name="phone" autoComplete="tel" inputMode="tel" value={endCardPhone} onChange={(event) => { setEndCardPhone(event.target.value); setCreativeDraft(null); }} placeholder="Optional" /></label><label className="field"><span>Email</span><input type="email" name="email" autoComplete="email" value={endCardEmail} onChange={(event) => { setEndCardEmail(event.target.value); setCreativeDraft(null); }} /></label><label className="field"><span>Call to action</span><select value={endCardCta} onChange={(event) => { setEndCardCta(event.target.value); setCreativeDraft(null); }}><option>Message me for details</option><option>Schedule your test drive</option><option>Ask me for today's availability</option><option>Contact me for current pricing</option></select></label></div></section>
+                  <section className="creative-step"><div className="creative-step-title"><span>1</span><div><h2>{hasCreativeImages ? "Select the shots" : "Caption-only draft"}</h2><p>{hasCreativeImages ? "Choose 2–10 photos. Swipe groups of four, then tap the shots you want in order." : "LotSocial captured grounded vehicle facts but no usable VDP photos. Create copy now; video needs source imagery."}</p></div><strong>{selectedCreativeImages.length} selected</strong></div>{hasCreativeImages ? <div className="creative-photo-grid" aria-label="Swipeable VDP photo groups">{chunkImages(usableCreativeImages).map((page, pageIndex) => <div className="creative-photo-page" key={`photo-page-${pageIndex}`} aria-label={`Photo group ${pageIndex + 1}`}>{page.map((image, imageIndex) => { const index = pageIndex * 4 + imageIndex; return <button type="button" key={image} className={selectedCreativeImages.includes(image) ? "selected" : ""} onClick={() => toggleCreativeImage(image)}><img src={image} alt={`VDP photo ${index + 1}`} loading="lazy" referrerPolicy="no-referrer" onError={() => markBrokenCreativeImage(image)} /><span>{selectedCreativeImages.includes(image) ? selectedCreativeImages.indexOf(image) + 1 : "+"}</span></button>; })}</div>)}</div> : <div className="caption-only-note">You can generate and copy the caption now. A video render needs at least two source vehicle photos.</div>}</section>
+                  <section className="creative-step"><div className="creative-step-title"><span>2</span><div><h2>Choose the video template</h2><p>Each template has its own pacing, motion, background, and music.</p></div></div><div className="creative-options"><label className={creativeStyle === "energetic" ? "selected" : ""}><input type="radio" name="style" value="energetic" checked={creativeStyle === "energetic"} onChange={() => { setCreativeStyle("energetic"); setCreativeDraft(null); }} /><strong>Fast cuts</strong><p>Rapid movement, bold backdrop, upbeat music</p></label><label className={creativeStyle === "walkaround" ? "selected" : ""}><input type="radio" name="style" value="walkaround" checked={creativeStyle === "walkaround"} onChange={() => { setCreativeStyle("walkaround"); setCreativeDraft(null); }} /><strong>Walkaround</strong><p>Steady tour, clean backdrop, lighter music</p></label><label className={creativeStyle === "premium" ? "selected" : ""}><input type="radio" name="style" value="premium" checked={creativeStyle === "premium"} onChange={() => { setCreativeStyle("premium"); setCreativeDraft(null); }} /><strong>Premium</strong><p>Cinematic motion, dark backdrop, restrained music</p></label></div><div className="duration-options"><span>Target length</span>{[15,30,45].map((duration) => <button type="button" key={duration} className={creativeDuration === duration ? "active" : ""} onClick={() => { setCreativeDuration(duration); setCreativeDraft(null); }}>{duration}s</button>)}</div><fieldset className="gravy-options"><legend>Choose your Gravy</legend><p>Controls the embellishment—not the vehicle facts.</p><div>{([{ value: "none", label: "No Gravy", detail: "Straight facts" }, { value: "light", label: "Light Gravy", detail: "A little personality" }, { value: "extra", label: "Extra Gravy", detail: "Maximum safe sizzle" }] as const).map((option) => <label key={option.value} className={gravyLevel === option.value ? "selected" : ""}><input type="radio" name="gravy" value={option.value} checked={gravyLevel === option.value} onChange={() => { setGravyLevel(option.value); setCreativeDraft(null); setRenderJob(null); }} /><strong>{option.label}</strong><span>{option.detail}</span></label>)}</div></fieldset></section>
+                  <section className="creative-step"><div className="creative-step-title"><span>3</span><div><h2>Salesperson end card</h2><p>This becomes the final shot. The selected CTA also appears in the generated post wording.</p></div></div><div className="end-card-builder"><label className="profile-upload"><span>{endCardPhotoUrl ? <img src={endCardPhotoUrl} alt="End-card profile" /> : "Photo"}</span><input type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif,.jpg,.jpeg,.png,.webp,.heic,.heif" onChange={(event) => void uploadEndCardPhoto(event.target.files?.[0] ?? null)} disabled={uploadingEndCardPhoto} /><strong>{uploadingEndCardPhoto ? "Preparing..." : endCardPhotoUrl ? "Replace profile photo" : "Upload profile photo"}</strong><small>JPEG, PNG, WebP, or HEIC. Large phone photos are resized automatically.</small></label><div className="form-grid compact"><label className="field"><span>Display name</span><input name="name" autoComplete="section-end-card name" value={endCardName} onChange={(event) => { setEndCardName(event.target.value); setCreativeDraft(null); }} required /></label><label className="field"><span>Phone</span><input type="tel" name="tel" autoComplete="section-end-card tel" inputMode="tel" enterKeyHint="next" value={endCardPhone} onChange={(event) => { setEndCardPhone(event.target.value); setCreativeDraft(null); }} placeholder="Mobile or dealership phone" /></label><label className="field"><span>Email</span><input type="email" name="email" autoComplete="section-end-card email" inputMode="email" enterKeyHint="next" autoCapitalize="off" spellCheck={false} value={endCardEmail} onChange={(event) => { setEndCardEmail(event.target.value); setCreativeDraft(null); }} /></label><label className="field"><span>Call to action</span><select value={endCardCta} onChange={(event) => { setEndCardCta(event.target.value); setCreativeDraft(null); }}><option>Message me for details</option><option>Schedule your test drive</option><option>Ask me for today's availability</option><option>Contact me for current pricing</option></select></label></div></div>{endCardPhotoStatus && <p className={`profile-upload-status ${endCardPhotoUrl ? "approved" : "blocked"}`}>{endCardPhotoStatus}</p>}</section>
                   {creativeError && <div className="form-error" role="alert">{creativeError}</div>}
                   <button className="primary-button creative-generate" type="submit" disabled={generatingCreative}>{generatingCreative ? "Building creative..." : creativeDraft ? "Regenerate creative draft" : selectedCreativeImages.length < 2 ? "Generate social caption" : "Generate creative draft"}</button>
                 </main>
-                <aside className="creative-preview"><div className="phone-preview"><div className="phone-screen">{selectedCreativeImages[0] ? <img src={selectedCreativeImages[0]} alt="First storyboard frame" referrerPolicy="no-referrer" onError={() => markBrokenCreativeImage(selectedCreativeImages[0])} /> : <div /> }<div className="preview-overlay"><span>{creativeStyle}</span><strong>{creativeVehicle.year} {creativeVehicle.make}<br />{creativeVehicle.model}</strong><small>{creativeVehicle.price ? `${formatPrice(creativeVehicle.price, creativeVehicle.currency)} as listed` : "Contact for pricing"}</small></div></div></div><div className="preview-sequence">{selectedCreativeImages.slice(0,6).map((image,index) => <div key={image}><img src={image} alt="" referrerPolicy="no-referrer" onError={() => markBrokenCreativeImage(image)} /><span>{index + 1}</span></div>)}<div className="end-frame"><strong>{endCardName || "Your name"}</strong><span>{endCardCta}</span></div></div><p className="preview-note">Storyboard preview · Final rendering will animate these shots and splice the end card.</p></aside>
+                <aside className="creative-preview">
+                  <div className="phone-preview"><div className="phone-screen">
+                    {previewIsEndCard ? <div className="preview-end-card">
+                      {endCardPhotoUrl && <img src={endCardPhotoUrl} alt={`${endCardName || "Salesperson"} end-card preview`} />}
+                      <strong>{endCardName || "Your name"}</strong>
+                      <div className="preview-contact">{endCardPhone && <span>{endCardPhone}</span>}{endCardEmail && <span>{endCardEmail}</span>}</div>
+                      <p>{endCardCta}</p><small>LotSocial</small>
+                    </div> : previewImage ? <><img src={previewImage} alt={`Storyboard frame ${previewFrameIndex + 1}`} referrerPolicy="no-referrer" onError={() => markBrokenCreativeImage(previewImage)} /><div className="preview-overlay"><span>{creativeStyle}</span><strong>{creativeVehicle.year} {creativeVehicle.make}<br />{creativeVehicle.model}</strong><small>{creativeVehicle.price ? `${formatPrice(creativeVehicle.price, creativeVehicle.currency)} as listed` : "Contact for pricing"}</small></div></> : <div />}
+                    {selectedCreativeImages.length > 0 && !previewIsEndCard && <button className="preview-play-button" type="button" aria-label={previewPlaying ? "Pause storyboard preview" : "Play storyboard preview"} onClick={() => setPreviewPlaying((current) => !current)}><span aria-hidden="true">{previewPlaying ? "Ⅱ" : "▶"}</span><strong>{previewPlaying ? "Pause" : "Preview"}</strong></button>}
+                  </div></div>
+                  <div className="preview-controls"><span>{previewIsEndCard ? "End card" : `Shot ${previewFrameIndex + 1} of ${selectedCreativeImages.length}`}</span></div>
+                  <div className="preview-sequence">{selectedCreativeImages.map((image,index) => <button type="button" className={previewFrameIndex === index ? "active" : ""} key={image} onClick={() => { setPreviewPlaying(false); setPreviewFrameIndex(index); }}><img src={image} alt={`Shot ${index + 1}`} referrerPolicy="no-referrer" onError={() => markBrokenCreativeImage(image)} /><span>{index + 1}</span></button>)}<button type="button" className={`end-frame ${previewIsEndCard ? "active" : ""}`} aria-label={`Preview end card for ${endCardName || "salesperson"}`} onClick={() => { setPreviewPlaying(false); setPreviewFrameIndex(selectedCreativeImages.length); }}>{endCardPhotoUrl && <img src={endCardPhotoUrl} alt="" />}<strong>{endCardName || "Your name"}</strong></button></div>
+                  <p className="preview-note">Preview includes all {selectedCreativeImages.length} selected shots and the salesperson end card.</p>
+                </aside>
               </div>
-              {creativeDraft && <section className="creative-output"><div className="output-heading"><div><p className="eyebrow">{selectedCreativeImages.length < 2 ? "Caption ready" : "Storyboard ready"}</p><h2>Grounded copy and production brief</h2></div><div className="output-heading-actions"><button type="button" className={`flavor-toggle ${captionFlavor ? "active" : ""}`} disabled={generatingCreative} onClick={() => { const next = !captionFlavor; setCaptionFlavor(next); void generateCreative(undefined, next); }}>{captionFlavor ? "✨ Flavor on — make it factual" : "✨ Add some flavor"}</button><span>Saved draft</span></div></div><div className="output-grid"><article><div><h3>Voiceover script</h3><button type="button" onClick={() => void navigator.clipboard.writeText(creativeDraft.voiceoverScript)}>Copy</button></div><p>{creativeDraft.voiceoverScript}</p></article><article><div><h3>Social caption</h3><button type="button" onClick={() => void navigator.clipboard.writeText(creativeDraft.socialCaption)}>Copy</button></div><pre>{creativeDraft.socialCaption}</pre></article></div><div className="render-gate"><div><span>Production render</span><strong>{selectedCreativeImages.length < 2 ? "Add two vehicle photos to render video." : "Prepare a source-faithful 9:16 video."}</strong><p>{selectedCreativeImages.length < 2 ? "The caption is ready to post now; video remains unavailable without source imagery." : "Original VDP photos, deterministic motion, exact listing copy, and the salesperson end card."}</p></div><button type="button" onClick={() => void prepareRender()} disabled={selectedCreativeImages.length < 2 || preparingRender || Boolean(renderJob && ["queued", "fetching", "rendering", "saving", "completed"].includes(renderJob.status))}>{selectedCreativeImages.length < 2 ? "Video needs 2 photos" : preparingRender ? "Preparing..." : renderJob?.status === "completed" ? "Video ready" : renderJob && ["queued", "fetching", "rendering", "saving"].includes(renderJob.status) ? "Rendering..." : renderJob?.status === "awaiting_provider_setup" ? "Check connection" : "Prepare vertical video"}</button></div>{renderJob && <div className={`render-result ${renderJob.status}`} role="status"><div><span className="render-status-dot" /><div><strong>{renderStatusLabels[renderJob.status] ?? "Render update"}</strong><p>{renderJob.status === "completed" ? renderJob.stored ? "Your source-faithful video is saved permanently and ready to download." : renderJob.errorMessage || "Your source-faithful vertical video is ready to review and download." : ["queued", "fetching", "rendering", "saving"].includes(renderJob.status) ? "This page checks progress automatically. You will not be charged for duplicate clicks." : renderJob.errorMessage}</p></div></div>{renderJob.summary && <dl><div><dt>Output</dt><dd>{renderJob.summary.format}</dd></div><div><dt>Length</dt><dd>{renderJob.summary.durationSeconds}s</dd></div><div><dt>Shots</dt><dd>{renderJob.summary.photoCount} + end card</dd></div><div><dt>Storage</dt><dd>{renderJob.stored ? "Saved permanently" : "Provider copy"}</dd></div></dl>}{renderJob.status === "completed" && renderJob.outputUrl && <div className="completed-video"><video controls playsInline preload="metadata" poster={selectedCreativeImages[0]}><source src={renderJob.outputUrl} type="video/mp4" />Your browser cannot preview this video.</video><div><strong>Final vertical video</strong><p>Review every vehicle detail before publishing.</p><a href={renderJob.stored ? `${renderJob.outputUrl}?download=1` : renderJob.outputUrl} target="_blank" rel="noreferrer">Download MP4 ↗</a></div></div>}</div>}</section>}
+              {creativeDraft && <section className="creative-output"><div className="output-heading"><div><p className="eyebrow">{selectedCreativeImages.length < 2 ? "Caption ready" : "Storyboard ready"}</p><h2>Grounded copy and production brief</h2></div><div className="output-heading-actions"><span>{gravyLevel === "none" ? "No Gravy" : gravyLevel === "light" ? "Light Gravy" : "Extra Gravy"} · Saved draft</span></div></div><div className="output-grid"><article><div><h3>Voiceover script</h3><button type="button" onClick={() => void navigator.clipboard.writeText(creativeDraft.voiceoverScript)}>Copy</button></div><p>{creativeDraft.voiceoverScript}</p></article><article><div><h3>Social caption</h3><button type="button" onClick={() => void navigator.clipboard.writeText(creativeDraft.socialCaption)}>Copy</button></div><pre>{creativeDraft.socialCaption}</pre></article></div><div className="render-gate"><div><span>Production render</span><strong>{selectedCreativeImages.length < 2 ? "Add two vehicle photos to render video." : `Prepare the ${creativeStyle === "energetic" ? "Fast Cuts" : creativeStyle === "premium" ? "Premium" : "Walkaround"} 9:16 video.`}</strong><p>{selectedCreativeImages.length < 2 ? "The caption is ready to post now; video remains unavailable without source imagery." : "Original dealership photos, template-specific motion, background and music, exact listing copy, and the salesperson end card."}</p></div><button type="button" onClick={() => void prepareRender()} disabled={selectedCreativeImages.length < 2 || preparingRender || Boolean(renderJob && ["queued", "fetching", "rendering", "saving", "completed"].includes(renderJob.status))}>{selectedCreativeImages.length < 2 ? "Video needs 2 photos" : preparingRender ? "Preparing..." : renderJob?.status === "completed" ? "Video ready" : renderJob && ["queued", "fetching", "rendering", "saving"].includes(renderJob.status) ? "Rendering..." : renderJob?.status === "awaiting_provider_setup" ? "Check connection" : renderJob?.status === "failed" ? "Retry vertical video" : "Prepare vertical video"}</button></div>{renderJob && <div className={`render-result ${renderJob.status}`} role="status"><div><span className="render-status-dot" /><div><strong>{renderStatusLabels[renderJob.status] ?? "Render update"}</strong><p>{renderJob.status === "completed" ? renderJob.stored ? "Your source-faithful video is saved permanently and ready to download." : renderJob.errorMessage || "Your source-faithful vertical video is ready to review and download." : ["queued", "fetching", "rendering", "saving"].includes(renderJob.status) ? "This page checks progress automatically. You will not be charged for duplicate clicks." : renderJob.errorMessage || (renderJob.status === "failed" ? "The renderer could not process one or more dealership photos. Retry now; LotSocial will securely relay the original source images first." : "The production renderer needs attention.")}</p></div>{["queued", "fetching", "rendering", "saving"].includes(renderJob.status) && <button type="button" className="render-refresh" onClick={() => void refreshRenderStatus(true)}>Check status now</button>}</div>{renderJob.summary && <dl><div><dt>Template</dt><dd>{renderJob.summary.template ?? renderJob.summary.style}</dd></div><div><dt>Length</dt><dd>{renderJob.summary.durationSeconds}s</dd></div><div><dt>Shots</dt><dd>{renderJob.summary.photoCount} + end card</dd></div><div><dt>Music</dt><dd>{renderJob.summary.music ?? "Included"}</dd></div><div><dt>Output</dt><dd>{renderJob.summary.format}</dd></div><div><dt>Storage</dt><dd>{renderJob.stored ? "Saved permanently" : "Provider copy"}</dd></div></dl>}{renderJob.status === "completed" && renderJob.outputUrl && <div className="completed-video"><video controls playsInline preload="metadata" poster={selectedCreativeImages[0]}><source src={renderJob.outputUrl} type="video/mp4" />Your browser cannot preview this video.</video><div><strong>Final vertical video</strong><p>Review every vehicle detail before publishing.</p><div className="completed-actions"><button type="button" onClick={() => void saveRenderedVideoToPhotos()}>Save to Photos</button><a href={renderJob.stored ? `${renderJob.outputUrl}?download=1` : renderJob.outputUrl} target="_blank" rel="noreferrer">Download MP4 ↗</a></div>{renderShareStatus && <small className="share-status">{renderShareStatus}</small>}</div></div>}</div>}</section>}
             </form>}
           </section>
         )}
@@ -722,10 +875,11 @@ export function AuthorizationApp({ user }: { user: User }) {
       {detail && <div className="detail-backdrop" role="presentation" onMouseDown={() => setDetail(null)}>
         <section className="detail-drawer" role="dialog" aria-modal="true" aria-label="Authorization details" onMouseDown={(event) => event.stopPropagation()}>
           <div className="detail-header"><div><p className="eyebrow">Authorization record</p><h2>{detail.request.dealershipName}</h2><p>{detail.request.rooftopLocation}</p></div><button className="detail-close" onClick={() => setDetail(null)} aria-label="Close details">×</button></div>
-          <div className="detail-status"><div className={`status-badge ${statusTone(detail.request.status)}`}><span />{statusLabels[detail.request.status] ?? detail.request.status}</div><strong>{detail.request.status === "active" ? "Connector access is enabled" : "Connector access is blocked"}</strong><p>{detail.request.status === "active" ? "The connector may use only the permissions listed below." : "The enforcement gate will deny inventory use until this record reaches Active status."}</p></div>
+          <div className="detail-status"><div className={`status-badge ${statusTone(detail.request.status)}`}><span />{statusLabels[detail.request.status] ?? detail.request.status}</div><strong>{detail.request.effectiveAccess.some((item) => item.allowed) ? "Approved access is partially enabled" : "Approved access is blocked"}</strong><p>Dealership-controlled permissions can activate after manager approval; provider-controlled rights remain blocked until provider verification.</p></div>
           <div className="detail-grid"><div><span>Associate</span><strong>{detail.request.associateName}</strong><small>{detail.request.associateEmail}</small></div><div><span>Manager</span><strong>{detail.request.managerName}</strong><small>{detail.request.managerEmail}</small></div><div><span>Provider</span><strong>{detail.request.providerName || "Unknown"}</strong><small>{detail.request.providerContactEmail || "Contact not added"}</small></div><div><span>Expiration</span><strong>{detail.request.expiresAt || "No expiration"}</strong><small>Checked on every connector request</small></div></div>
           <section className="detail-section"><div className="detail-section-title"><h3>Approved permissions</h3><span>{detail.request.approvedPermissions.length}</span></div>{detail.request.approvedPermissions.length === 0 ? <p className="detail-empty">No permissions are currently approved.</p> : <div className="detail-permissions">{detail.request.approvedPermissions.map((id) => { const permission = PERMISSIONS.find((item) => item.id === id)!; const effective = detail.request.effectiveAccess.find((item) => item.permission === id); return <div key={id}><span className={effective?.allowed ? "permission-live" : "permission-blocked"}>{effective?.allowed ? "Allowed" : "Blocked"}</span><strong>{permission.label}</strong><p>{permission.detail}</p></div>; })}</div>}</section>
           {detail.request.managerNotes && <section className="detail-section"><h3>Manager restrictions</h3><p className="manager-note">{detail.request.managerNotes}</p></section>}
+          {["manager_approved", "provider_pending", "provider_verified", "provider_declined", "feed_connected", "active", "suspended"].includes(detail.request.status) && <section className="detail-section"><div className="detail-section-title"><h3>Manager control link</h3><span>Time-limited</span></div><p>Create a fresh secure link for the manager. Every older management link is invalidated.</p><button className="primary-button provider-invite-button" disabled={submitting} onClick={() => void issueManagerLink()}>{submitting ? "Preparing..." : "Create fresh manager link"}</button>{managerLink && <div className="provider-invite-result"><strong>{managerLink.emailDeliveryStatus === "sent" ? "Manager link emailed" : "Manager link ready"}</strong><div><code>{managerLink.managerUrl}</code><button onClick={() => void navigator.clipboard.writeText(managerLink.managerUrl)}>Copy</button></div><small>Expires {formatDate(managerLink.expiresAt)}</small>{managerLink.emailPreview && <details><summary>Preview email</summary><pre>{managerLink.emailPreview}</pre></details>}</div>}</section>}
           {["manager_approved", "provider_pending", "provider_declined"].includes(detail.request.status) && <section className="detail-section provider-invite-card"><div className="detail-section-title"><h3>Provider verification</h3><span>Next</span></div><p>Send the feed company a secure rights-and-delivery confirmation. A new invitation replaces any older provider link.</p><div className="provider-invite-grid"><label><span>Provider company</span><input value={providerDraft.providerName} onChange={(event) => setProviderDraft((current) => ({ ...current, providerName: event.target.value }))} placeholder="HomeNet, DealerOn, vAuto..." /></label><label><span>Contact name</span><input value={providerDraft.contactName} onChange={(event) => setProviderDraft((current) => ({ ...current, contactName: event.target.value }))} placeholder="Feed operations contact" /></label><label className="provider-email"><span>Contact email</span><input type="email" value={providerDraft.contactEmail} onChange={(event) => setProviderDraft((current) => ({ ...current, contactEmail: event.target.value }))} placeholder="feeds@provider.com" /></label></div><button className="primary-button provider-invite-button" disabled={submitting} onClick={() => void inviteProvider()}>{submitting ? "Preparing..." : detail.request.status === "provider_pending" ? "Replace & resend verification" : "Create provider verification"}</button>{providerInvite && <div className="provider-invite-result"><strong>{providerInvite.emailDeliveryStatus === "sent" ? "Verification email sent" : "Verification link ready"}</strong><div><code>{providerInvite.providerUrl}</code><button onClick={() => void navigator.clipboard.writeText(providerInvite.providerUrl)}>Copy</button></div>{providerInvite.emailPreview && <details><summary>Preview email</summary><pre>{providerInvite.emailPreview}</pre></details>}</div>}</section>}
           {detail.request.status === "provider_verified" && detail.request.providerVerification && <section className="detail-section provider-verified-card"><div><span className="permission-live">Verified</span><h3>Provider rights confirmed</h3><p>{detail.request.providerVerification.deliveryMethod} · {detail.request.providerVerification.feedFormat}</p></div><p>{detail.request.providerVerification.connectionNotes || "No additional connection notes were supplied."}</p><small>Technical feed testing is the final gate before activation.</small></section>}
           <section className="detail-section"><div className="detail-section-title"><h3>Audit history</h3><span>{detail.auditEvents.length}</span></div><div className="audit-list">{detail.auditEvents.map((event) => <div className="audit-event" key={event.id}><span className="audit-dot" /><div><strong>{formatAuditAction(event.action)}</strong><p>{event.actorType} · {event.actorEmail || "system"}</p></div><time>{formatDate(event.createdAt)}</time></div>)}</div></section>

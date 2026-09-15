@@ -11,6 +11,7 @@ CREATE TABLE `creative_projects` (
 	`end_card_phone` text DEFAULT '' NOT NULL,
 	`end_card_email` text DEFAULT '' NOT NULL,
 	`end_card_cta` text DEFAULT 'Message me for details' NOT NULL,
+	`end_card_photo_url` text DEFAULT '' NOT NULL,
 	`status` text DEFAULT 'draft' NOT NULL,
 	`created_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
 	`updated_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL

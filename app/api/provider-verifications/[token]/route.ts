@@ -1,8 +1,9 @@
+import { env } from "cloudflare:workers";
 import { getProviderVerificationByToken, parsePermissions } from "../../../lib/authorization";
 
 export async function GET(_request: Request, context: { params: Promise<{ token: string }> }) {
   const { token } = await context.params;
-  const record = await getProviderVerificationByToken(token);
+  const record = await getProviderVerificationByToken(token, env);
   if (!record) return Response.json({ error: "This provider verification link is invalid." }, { status: 404 });
   return Response.json({
     verification: {

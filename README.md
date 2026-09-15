@@ -1,98 +1,70 @@
-# vinext-starter
+# LotSocial
 
-A clean full-stack starter running on
-[vinext](https://github.com/cloudflare/vinext), with optional Cloudflare D1 and
-Drizzle support.
+LotSocial turns one dealership vehicle-detail-page URL into a source-grounded social caption, vertical-video storyboard, and durable associate inventory record.
 
-## Prerequisites
+## Pilot boundary
 
-- Node.js `>=22.13.0`
+- One input: the exact public VDP URL.
+- Scrape-or-fail: there is no manual vehicle-fact fallback.
+- Closed access: the Worker pins the Sites hostname and an associate allowlist.
+- Source-grounded output: copy uses captured facts and retains source/import timestamps.
+- Human approval: every vehicle detail and creative must be reviewed before publishing.
+- Cost control: per-associate import caps plus per-associate and global Bright Data caps.
+- Rights control: dealership-grantable permissions and provider-controlled rights are enforced separately.
 
-## Quick Start
+Customer testing is not public launch. Deployment, allowlist changes, paid-provider credentials, customer invitations, and production sends remain controlled operations.
+
+## Local development
+
+Requirements: Node.js `>=22.13.0` and pnpm `11.24.0`.
 
 ```bash
-npm install
+pnpm install --frozen-lockfile
 npm run dev
-npm run build
+npm test
 ```
 
-This starter does not use `wrangler.jsonc`.
+`npm test` runs the production build, all behavior tests (including real Worker/Miniflare paths), bootstrap-schema parity, Drizzle migration drift, and lint.
 
-## Included Shape
+## Required pilot configuration
 
-- edit site code under `app/`
-- `.openai/hosting.json` declares optional Sites D1 and R2 bindings
-- `vite.config.ts` simulates declared bindings for local development
-- `db/schema.ts` starts intentionally empty
-- `examples/d1/` contains an optional D1 example surface
-- `drizzle.config.ts` supports local migration generation when needed
+Copy `.env.example` into the deployment environment and configure:
 
-## Workspace Auth Headers
+- `LOTSOCIAL_EXPECTED_SITES_HOSTNAME`
+- `LOTSOCIAL_ASSOCIATE_ALLOWLIST`
+- `LOTSOCIAL_DAILY_VDP_IMPORT_CAP`
+- `LOTSOCIAL_DAILY_AUTHORIZATION_REQUEST_CAP`
+- `LOTSOCIAL_DAILY_MANAGER_EMAIL_CAP`
+- `LOTSOCIAL_DAILY_BRIGHTDATA_ASSOCIATE_CAP`
+- `LOTSOCIAL_DAILY_BRIGHTDATA_GLOBAL_CAP`
+- `LOTSOCIAL_MANAGEMENT_LINK_TTL_HOURS`
+- `ENFORCEMENT_API_KEY`
 
-OpenAI workspace sites can read the current user's email from
-`oai-authenticated-user-email`.
+Optional integrations stay disabled when their credentials are absent:
 
-SIWC-authenticated workspace sites may also receive
-`oai-authenticated-user-full-name` when the user's SIWC profile has a non-empty
-`name` claim. The full-name value is percent-encoded UTF-8 and is accompanied by
-`oai-authenticated-user-full-name-encoding: percent-encoded-utf-8`.
+- `BRIGHTDATA_API_KEY` and `BRIGHTDATA_ZONE`
+- `SHOTSTACK_API_KEY` and `SHOTSTACK_STAGE`
+- `RESEND_API_KEY` and `EMAIL_FROM`
 
-Treat the full name as optional and fall back to email when it is absent:
+Full-page VDP screenshot evidence additionally requires a Cloudflare Browser Run binding named `BROWSER`. The host must use compatibility date `2026-03-24` or later. Without that binding, imports still retain the exact source payload and SHA-256 hash and truthfully record the screenshot status as `unavailable`.
 
-```tsx
-import { headers } from "next/headers";
+## Operations
 
-export default async function Home() {
-  const requestHeaders = await headers();
-  const email = requestHeaders.get("oai-authenticated-user-email");
-  const encodedFullName = requestHeaders.get("oai-authenticated-user-full-name");
-  const fullName =
-    encodedFullName &&
-    requestHeaders.get("oai-authenticated-user-full-name-encoding") ===
-      "percent-encoded-utf-8"
-      ? decodeURIComponent(encodedFullName)
-      : null;
+- `GET /api/ops/import-health` with `Authorization: Bearer <ENFORCEMENT_API_KEY>` returns seven-day success and paid-fallback usage by dealer host.
+- `GET /api/ops/evidence?vehicleId=<id>` is restricted to managers/admins (or the internal enforcement key) and returns append-only import evidence with 15-minute signed artifact links. Add `&format=csv` for a spreadsheet-ready export.
+- Authorization management links expire and rotate; issuing a fresh link invalidates every older management link.
+- Drizzle migrations are canonical. Runtime bootstrap is retained for Sites-provisioned D1 and is checked byte-for-byte against migrations.
 
-  const displayName = fullName ?? email;
-  // ...
-}
-```
+## Deployment gate
 
-## Optional Dispatch-Owned ChatGPT Sign-In
+Before a closed pilot deployment:
 
-Import the ready-to-use helpers from `app/chatgpt-auth.ts` when the site needs
-optional or required ChatGPT sign-in:
+1. Confirm the exact Sites hostname and tester allowlist.
+2. Set conservative daily import and paid-fallback caps.
+3. Verify the live D1 schema or use a fresh pilot database built from current migrations.
+4. Run `npm test` from the release commit.
+5. Exercise allowlisted, non-allowlisted, and non-Sites-host identity probes.
+6. Import representative VDPs and confirm `/api/ops/import-health` records the outcomes.
+7. Complete one caption and one render/download path before inviting testers.
 
-- Use `getChatGPTUser()` for optional signed-in UI.
-- Use `requireChatGPTUser(returnTo)` for server-rendered pages that should send
-  anonymous visitors through Sign in with ChatGPT.
-- Use `chatGPTSignInPath(returnTo)` and `chatGPTSignOutPath(returnTo)` for
-  browser links or actions.
-- Pass a same-origin relative `returnTo` path for the destination after sign-in
-  or sign-out. The helper validates and safely encodes it.
-- Mark protected pages with `export const dynamic = "force-dynamic"` because
-  they depend on per-request identity headers.
-
-Dispatch owns `/signin-with-chatgpt`, `/signout-with-chatgpt`, `/callback`, the
-OAuth cookies, and identity header injection. Do not implement app routes for
-those reserved paths. Routes that do not import and call the helper remain
-anonymous-compatible.
-
-SIWC establishes identity only; it does not prove workspace membership. Use the
-Sites hosting platform's access policy controls for workspace-wide restrictions,
-or enforce explicit server-side membership or allowlist checks.
-
-Use SIWC for account pages, user-specific dashboards, saved records, and write
-actions tied to the current ChatGPT user. Leave public content anonymous.
-
-## Useful Commands
-
-- `npm run dev`: start local development
-- `npm run build`: verify the vinext build output
-- `npm test`: build the starter and verify its rendered loading skeleton
-- `npm run db:generate`: generate Drizzle migrations after schema changes
-
-## Learn More
-
-- [vinext Documentation](https://github.com/cloudflare/vinext)
-- [Drizzle D1 Guide](https://orm.drizzle.team/docs/get-started/d1-new)
+Do not call a branch, package, or green build deployed until the Sites deployment and live probes have been read back.

@@ -50,6 +50,48 @@
       "when": 1784780706594,
       "tag": "0006_goofy_blob",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1788158670741,
+      "tag": "0007_great_baron_strucker",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1789321262168,
+      "tag": "0008_ancient_killer_shrike",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1789321515768,
+      "tag": "0009_powerful_blindfold",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1789426414966,
+      "tag": "0010_odd_master_mold",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1789427917597,
+      "tag": "0011_majestic_unicorn",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1789428036043,
+      "tag": "0012_free_moira_mactaggert",
+      "breakpoints": true
     }
   ]
 }

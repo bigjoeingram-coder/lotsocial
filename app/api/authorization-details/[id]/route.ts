@@ -1,15 +1,20 @@
-import { getChatGPTUser } from "../../../chatgpt-auth";
+import { env } from "cloudflare:workers";
+import { associateAuthResponse, requireAssociate } from "../../../chatgpt-auth";
 import { evaluateAuthorization, getAuthorizationByIdForAssociate, getProviderVerification, listAuditEvents, parsePermissions } from "../../../lib/authorization";
 
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
-  const user = await getChatGPTUser();
-  if (!user) return Response.json({ error: "Associate sign-in is required." }, { status: 401 });
+  let user;
+  try {
+    user = await requireAssociate(_request, env);
+  } catch (error) {
+    return associateAuthResponse(error);
+  }
 
   const { id } = await context.params;
-  const record = await getAuthorizationByIdForAssociate(id, user.email);
+  const record = await getAuthorizationByIdForAssociate(id, user.email, env);
   if (!record) return Response.json({ error: "Authorization record not found." }, { status: 404 });
-  const auditEvents = await listAuditEvents(record.id);
-  const providerVerification = await getProviderVerification(record.id);
+  const auditEvents = await listAuditEvents(record.id, env);
+  const providerVerification = await getProviderVerification(record.id, env);
   const approvedPermissions = parsePermissions(record.approved_permissions);
 
   return Response.json({
