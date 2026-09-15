@@ -53,7 +53,7 @@ test("No, Light, and Extra Gravy create distinct copy without changing the compl
   }
 });
 
-test("render styles produce genuinely different motion treatments", () => {
+test("render styles produce genuinely different production templates", () => {
   const vehicle = importedVehicle();
   const plans = ["energetic", "walkaround", "premium"].map((style) => buildVerticalRenderPlan({ ...project, style }, vehicle));
   const treatments = plans.map((plan) => {
@@ -64,6 +64,16 @@ test("render styles produce genuinely different motion treatments", () => {
   assert.match(treatments[0].effect, /Fast$/);
   assert.match(treatments[1].effect, /Slow$/);
   assert.match(treatments[2].effect, /Slow$/);
+  assert.equal(new Set(plans.map((plan) => plan.summary.template)).size, 3);
+  assert.equal(new Set(plans.map((plan) => plan.render.timeline.background)).size, 3);
+  assert.equal(new Set(plans.map((plan) => plan.render.timeline.tracks.at(-1).clips[0].asset.src)).size, 3);
+  for (const plan of plans) {
+    const music = plan.render.timeline.tracks.at(-1).clips[0];
+    assert.equal(music.asset.type, "audio");
+    assert.equal(music.asset.effect, "fadeInFadeOut");
+    assert.ok(music.asset.volume > 0 && music.asset.volume < 0.3);
+    assert.equal(music.length, 30);
+  }
 });
 
 test("energetic render plans use Shotstack-valid fast transitions", () => {
@@ -80,12 +90,12 @@ test("render plans omit the optional profile track when no salesperson photo is 
   const plan = buildVerticalRenderPlan({ ...project, end_card_photo_url: "" }, importedVehicle());
 
   assert.ok(plan.render.timeline.tracks.every((track) => track.clips.length > 0));
-  assert.equal(plan.render.timeline.tracks.length, 4);
+  assert.equal(plan.render.timeline.tracks.length, 5);
 });
 
 test("production plans relay dealership images through the LotSocial source endpoint", () => {
   const plan = buildVerticalRenderPlan(project, importedVehicle(), "https://lotsocial.example/");
-  const imageSources = plan.render.timeline.tracks.flatMap((track) => track.clips).map((clip) => clip.asset.src).filter(Boolean);
+  const imageSources = plan.render.timeline.tracks.flatMap((track) => track.clips).filter((clip) => clip.asset.type === "image").map((clip) => clip.asset.src).filter(Boolean);
   assert.deepEqual([...new Set(imageSources)].sort(), [
     "https://lotsocial.example/api/render-source-images/project_1/0",
     "https://lotsocial.example/api/render-source-images/project_1/1",
@@ -102,7 +112,7 @@ test("production render sources use expiring signed URLs on the public media pro
   assert.match(urls[0], /^https:\/\/lotsocial-render-source\.bigjoe-ingram\.workers\.dev\/image\?e=1700007200&u=[A-Za-z0-9_-]+&s=[A-Za-z0-9_-]+$/);
   assert.notEqual(urls[0], urls[1]);
   const plan = buildVerticalRenderPlan(project, importedVehicle(), urls);
-  const imageSources = plan.render.timeline.tracks.flatMap((track) => track.clips).map((clip) => clip.asset.src).filter(Boolean);
+  const imageSources = plan.render.timeline.tracks.flatMap((track) => track.clips).filter((clip) => clip.asset.type === "image").map((clip) => clip.asset.src).filter(Boolean);
   assert.deepEqual([...new Set(imageSources)].sort(), [...urls].sort());
 });
 

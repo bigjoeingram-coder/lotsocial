@@ -5,10 +5,44 @@ import type { ImportedVehicleRecord } from "./vdp.ts";
 type RenderEnvironment = { SHOTSTACK_API_KEY?: string; SHOTSTACK_STAGE?: string };
 type ShotstackStage = "stage" | "v1";
 const INSPECTION_IMAGE_SCALE = 0.92;
-const WALLPAPER_BACKGROUND_SCALE = 1.18;
-const WALLPAPER_BACKGROUND_OPACITY = 0.38;
-const WALLPAPER_TINT_OPACITY = 0.94;
 const INGEST_POLL_ATTEMPTS = 30;
+
+const VIDEO_TEMPLATES = {
+  energetic: {
+    name: "Fast Cuts",
+    background: "#071116",
+    wallpaperScale: 1.24,
+    wallpaperOpacity: 0.46,
+    tintOpacity: 0.86,
+    tintCss: "div{width:1080px;height:1920px;background:linear-gradient(145deg,#071116 0%,#0d2025 58%,#31520f 100%)}",
+    music: "https://shotstack-assets.s3-ap-southeast-2.amazonaws.com/music/freepd/motions.mp3",
+    musicVolume: 0.22,
+  },
+  walkaround: {
+    name: "Walkaround",
+    background: "#17242a",
+    wallpaperScale: 1.18,
+    wallpaperOpacity: 0.38,
+    tintOpacity: 0.94,
+    tintCss: "div{width:1080px;height:1920px;background:linear-gradient(180deg,#071116 0%,#17242a 62%,#0d181c 100%)}",
+    music: "https://shotstack-assets.s3-ap-southeast-2.amazonaws.com/music/freepd/advertising.mp3",
+    musicVolume: 0.16,
+  },
+  premium: {
+    name: "Premium",
+    background: "#08090b",
+    wallpaperScale: 1.12,
+    wallpaperOpacity: 0.28,
+    tintOpacity: 0.96,
+    tintCss: "div{width:1080px;height:1920px;background:linear-gradient(155deg,#050607 0%,#111519 64%,#3a321d 100%)}",
+    music: "https://shotstack-assets.s3-ap-southeast-2.amazonaws.com/music/freepd/fireworks.mp3",
+    musicVolume: 0.13,
+  },
+} as const;
+
+function videoTemplate(style: string) {
+  return VIDEO_TEMPLATES[style as keyof typeof VIDEO_TEMPLATES] ?? VIDEO_TEMPLATES.walkaround;
+}
 
 function renderEnvironment(env: LotSocialEnvironment) {
   const runtime = env as RenderEnvironment;
@@ -68,6 +102,7 @@ function styleTreatment(style: string, index: number) {
 }
 
 export function buildVerticalRenderPlan(project: CreativeProjectRecord, vehicle: ImportedVehicleRecord, sourceOrigin: string | string[] = "", profilePhotoSource = project.end_card_photo_url) {
+  const template = videoTemplate(project.style);
   const images = JSON.parse(project.selected_images || "[]") as string[];
   const renderImages = Array.isArray(sourceOrigin)
     ? sourceOrigin
@@ -87,17 +122,17 @@ export function buildVerticalRenderPlan(project: CreativeProjectRecord, vehicle:
     start,
     length,
     fit: "crop",
-    scale: WALLPAPER_BACKGROUND_SCALE,
+    scale: template.wallpaperScale,
     position: "center",
-    opacity: WALLPAPER_BACKGROUND_OPACITY,
+    opacity: template.wallpaperOpacity,
     filter: "darken",
     transition: index === 0 ? { out: "fade" } : { in: "fade", out: "fade" },
   }));
   const wallpaperTintClips = timedImages.map(({ start, length }, index) => ({
-    asset: { type: "html", html: "<div></div>", css: "div{width:1080px;height:1920px;background:#071116}", width: 1080, height: 1920 },
+    asset: { type: "html", html: "<div></div>", css: template.tintCss, width: 1080, height: 1920 },
     start,
     length,
-    opacity: WALLPAPER_TINT_OPACITY,
+    opacity: template.tintOpacity,
     transition: index === 0 ? { out: "fade" } : { in: "fade", out: "fade" },
   }));
   const clips = timedImages.map(({ src, start, length }, index) => {
@@ -122,12 +157,13 @@ export function buildVerticalRenderPlan(project: CreativeProjectRecord, vehicle:
   const endCardStart = Number((total - endCardLength).toFixed(2));
   const render = {
     timeline: {
-      background: "#17242a",
+      background: template.background,
       tracks: [
         { clips: [{ asset: { type: "html", html: endCardHtml, css: endCardCss, width: 1080, height: 1920 }, start: endCardStart, length: endCardLength }] },
         { clips },
         { clips: wallpaperTintClips },
         { clips: wallpaperClips },
+        { clips: [{ asset: { type: "audio", src: template.music, volume: template.musicVolume, effect: "fadeInFadeOut" }, start: 0, length: total }] },
       ],
     },
     output: { format: "mp4", resolution: "hd", aspectRatio: "9:16", fps: 30 },
@@ -140,7 +176,9 @@ export function buildVerticalRenderPlan(project: CreativeProjectRecord, vehicle:
       photoCount: images.length,
       endCardSeconds: endCardLength,
       style: project.style,
-      fidelity: "Original dealership VDP photos only, style-specific motion, inspection-fit framing with darker same-image wallpaper fill, and a branded salesperson end card with source-time pricing disclosure",
+      template: template.name,
+      music: "Included",
+      fidelity: "Original dealership VDP photos only, template-specific motion, background, pacing and music, inspection-fit framing, and a branded salesperson end card with source-time pricing disclosure",
     },
   };
 }
@@ -232,10 +270,11 @@ export async function prepareRenderCompatibleImages(
   convertAllImages = false,
 ) {
   const compatiblePlan = structuredClone(plan);
-  type MutableRenderClip = { asset: { src?: string; [key: string]: unknown }; [key: string]: unknown };
+  type MutableRenderClip = { asset: { type?: string; src?: string; [key: string]: unknown }; [key: string]: unknown };
   const clips = compatiblePlan.render.timeline.tracks.flatMap((track) => track.clips as unknown as MutableRenderClip[]);
   const sources = [...new Set(
     clips
+      .filter((clip) => clip.asset.type === "image")
       .map((clip) => clip.asset.src ?? "")
       .filter((src) => src && (convertAllImages || needsImageRendition(src))),
   )];
