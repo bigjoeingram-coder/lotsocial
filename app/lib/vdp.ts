@@ -199,7 +199,7 @@ function createDeadline(durationMs = IMPORT_DEADLINE_MS) {
 
 function timeoutFor(deadline: { expiresAt: number }, requestedMs: number) {
   const remaining = deadline.expiresAt - Date.now();
-  if (remaining <= 0) throw new Error("LotSocial could not scrape that VDP before the dealer page timed out.");
+  if (remaining <= 0) throw new Error("LotSocial could not gather vehicle information before the dealer page timed out.");
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), Math.min(remaining, requestedMs));
   return { signal: controller.signal, cleanup: () => clearTimeout(timeout) };
@@ -562,7 +562,7 @@ export async function extractVehicleFromVdp(
       if (context) context.trace.fallback = "listing_guess";
       throw new ResolvedVehicle(listingVehicle);
     }
-    throw new Error(`LotSocial could not scrape that VDP yet. ${reason} and no matching public inventory listing was found.`);
+    throw new Error(`LotSocial could not gather information from that vehicle page yet. ${reason} and no matching public inventory listing was found.`);
   }
 
   let resolved: { html: string; finalUrl: URL };

@@ -142,11 +142,12 @@ test("the render source relay validates, caches, and serves the captured dealers
 
 test("rendered end card uses the associate photo, spaced contact order, and approved disclaimer without a vehicle-title ghost", () => {
   const withPhoto = { ...project, end_card_photo_url: "https://app.example/api/profile-photos/00000000-0000-4000-8000-000000000000.jpg" };
-  const plan = buildVerticalRenderPlan(withPhoto, importedVehicle({ imported_at: "2026-09-14 16:20:00" }));
-  const profileClip = plan.render.timeline.tracks[0].clips[0];
-  const html = plan.render.timeline.tracks[1].clips[0].asset.html;
+  const embeddedPhoto = "data:image/jpeg;base64,AQID";
+  const plan = buildVerticalRenderPlan(withPhoto, importedVehicle({ imported_at: "2026-09-14 16:20:00" }), "", embeddedPhoto);
+  const html = plan.render.timeline.tracks[0].clips[0].asset.html;
   assert.ok(plan.summary.endCardSeconds >= 5);
-  assert.equal(profileClip.asset.src, withPhoto.end_card_photo_url);
+  assert.match(html, /<img class="profile-photo" src="data:image\/jpeg;base64,AQID"/);
+  assert.doesNotMatch(JSON.stringify(plan), /https:\/\/app\.example\/api\/profile-photos/);
   assert.ok(html.indexOf("Joe") < html.indexOf("555-0100"));
   assert.ok(html.indexOf("555-0100") < html.indexOf("Message me for details"));
   assert.ok(html.indexOf("Message me for details") < html.indexOf("Pricing and availability"));

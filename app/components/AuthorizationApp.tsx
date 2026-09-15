@@ -344,7 +344,7 @@ export function AuthorizationApp({ user }: { user: User }) {
       setVdpUrl("");
       setAuthorizedToMarket(false);
     } catch (caught) {
-      setInventoryError(caught instanceof Error ? caught.message : "LotSocial could not scrape that VDP yet.");
+      setInventoryError(caught instanceof Error ? caught.message : "LotSocial could not gather information from that vehicle page yet.");
     } finally {
       setImportingVdp(false);
     }
@@ -818,11 +818,11 @@ export function AuthorizationApp({ user }: { user: User }) {
             </div>}
             <div className="inventory-hero">
               <div><p className="eyebrow">Starter inventory</p><h1>Paste a VDP. Start creating.</h1><p>Import one public dealership vehicle page at a time. LotSocial captures the listed facts, available imagery, source URL, and import time.</p></div>
-              <span className="plan-chip">Starter · VDP Scrape</span>
+              <span className="plan-chip">Starter · VDP information</span>
             </div>
             <form className="vdp-import-panel" onSubmit={importVdp}>
               <div className="vdp-import-heading"><div className="import-icon">↗</div><div><h2>Import a vehicle detail page</h2><p>Use the exact public VDP for the vehicle you want to promote.</p></div></div>
-              <label className="vdp-url-field"><span>Vehicle detail page URL</span><div><input type="url" value={vdpUrl} onChange={(event) => setVdpUrl(event.target.value)} placeholder="https://dealer.com/inventory/vehicle..." required /><button className="primary-button" type="submit" disabled={importingVdp || !authorizedToMarket}>{importingVdp ? "Gathering vehicle info..." : "Import vehicle"}</button></div></label>
+              <label className="vdp-url-field"><span>Vehicle detail page URL</span><div><input type="url" value={vdpUrl} onChange={(event) => setVdpUrl(event.target.value)} placeholder="https://dealer.com/inventory/vehicle..." required /><button className="primary-button" type="submit" disabled={importingVdp || !authorizedToMarket}>{importingVdp ? "Gathering vehicle information..." : "Gather vehicle information"}</button></div></label>
               <label className="field"><span>Why are you importing this vehicle?</span><select value={importPurpose} onChange={(event) => setImportPurpose(event.target.value)} required><option>Create a vehicle social post</option><option>Create a walkaround video</option><option>Promote a new arrival</option><option>Promote aged inventory</option><option>Manager request</option></select></label>
               <label className="vdp-certification"><input type="checkbox" checked={authorizedToMarket} onChange={(event) => setAuthorizedToMarket(event.target.checked)} /><span className="custom-check">✓</span><span>I certify that I am authorized to market this dealership's vehicle and use its approved VDP content for dealership social posts.</span></label>
               <div className="vdp-boundary"><strong>One-time, source-stamped import</strong><span>LotSocial does not bypass logins or access controls. Automated inventory remains a Pro feed feature.</span></div>

@@ -67,7 +67,7 @@ function styleTreatment(style: string, index: number) {
   };
 }
 
-export function buildVerticalRenderPlan(project: CreativeProjectRecord, vehicle: ImportedVehicleRecord, sourceOrigin: string | string[] = "") {
+export function buildVerticalRenderPlan(project: CreativeProjectRecord, vehicle: ImportedVehicleRecord, sourceOrigin: string | string[] = "", profilePhotoSource = project.end_card_photo_url) {
   const images = JSON.parse(project.selected_images || "[]") as string[];
   const renderImages = Array.isArray(sourceOrigin)
     ? sourceOrigin
@@ -116,25 +116,14 @@ export function buildVerticalRenderPlan(project: CreativeProjectRecord, vehicle:
   const endCardPhone = project.end_card_phone ? `<div class="phone">${escapeHtml(project.end_card_phone)}</div>` : "";
   const endCardEmail = project.end_card_email ? `<div class="email">${escapeHtml(project.end_card_email)}</div>` : "";
   const disclaimer = `Pricing and availability as shown on the dealer's website on ${capturedAtLabel(vehicle.imported_at)}; subject to change. Confirm current price with the dealership.`;
-  const endCardHtml = `<div class="end-card"><div class="content"><div class="photo-space"></div><h1>${escapeHtml(project.end_card_name)}</h1><div class="contact">${endCardPhone}${endCardEmail}</div><p>${escapeHtml(project.end_card_cta)}</p><div class="disclaimer">${escapeHtml(disclaimer)}</div><div class="brand"><span></span><b>LotSocial</b></div></div></div>`;
-  const endCardCss = "html,body{margin:0}.end-card{box-sizing:border-box;position:relative;width:1080px;height:1920px;font-family:Arial,Helvetica,sans-serif;color:white;text-align:center;background:linear-gradient(180deg,#071116 0%,#101f24 58%,#05090b 100%);overflow:hidden}.content{position:absolute;left:155px;right:155px;top:160px;bottom:95px}.photo-space{height:390px}.end-card h1{max-width:770px;margin:0 auto 52px;font-size:58px;line-height:1.05;letter-spacing:-.03em;overflow-wrap:anywhere}.contact{max-width:770px;margin:0 auto 68px}.phone{display:block;margin:0 auto 24px;color:#e8f1eb;font-size:34px;line-height:1.25;font-weight:850;overflow-wrap:anywhere}.email{display:block;margin:0 auto;color:#e8f1eb;font-size:27px;line-height:1.3;font-weight:650;overflow-wrap:anywhere}.end-card p{max-width:770px;margin:0 auto 95px;color:#c8ff43;font-size:36px;line-height:1.18;font-weight:900;letter-spacing:.02em;text-transform:uppercase;overflow-wrap:anywhere}.disclaimer{max-width:790px;margin:0 auto;color:#c8d2cd;font-size:24px;line-height:1.42;font-weight:650;overflow-wrap:anywhere}.brand{position:absolute;left:0;right:0;bottom:0;color:#c8ff43}.brand span{display:inline-block;box-sizing:border-box;width:44px;height:66px;border:8px solid #c8ff43;border-right:0;vertical-align:middle}.brand b{display:inline-block;margin-left:13px;color:#c8ff43;font-size:34px;letter-spacing:.08em;vertical-align:middle}";
+  const endCardPhoto = profilePhotoSource ? `<img class="profile-photo" src="${escapeHtml(profilePhotoSource)}" alt="">` : `<div class="photo-space"></div>`;
+  const endCardHtml = `<div class="end-card"><div class="content">${endCardPhoto}<h1>${escapeHtml(project.end_card_name)}</h1><div class="contact">${endCardPhone}${endCardEmail}</div><p>${escapeHtml(project.end_card_cta)}</p><div class="disclaimer">${escapeHtml(disclaimer)}</div><div class="brand"><span></span><b>LotSocial</b></div></div></div>`;
+  const endCardCss = "html,body{margin:0}.end-card{box-sizing:border-box;position:relative;width:1080px;height:1920px;font-family:Arial,Helvetica,sans-serif;color:white;text-align:center;background:linear-gradient(180deg,#071116 0%,#101f24 58%,#05090b 100%);overflow:hidden}.content{position:absolute;left:155px;right:155px;top:125px;bottom:95px}.photo-space,.profile-photo{display:block;width:360px;height:360px;margin:0 auto 48px}.profile-photo{border:10px solid #c8ff43;border-radius:34px;object-fit:cover;background:#071116}.end-card h1{max-width:770px;margin:0 auto 52px;font-size:58px;line-height:1.05;letter-spacing:-.03em;overflow-wrap:anywhere}.contact{max-width:770px;margin:0 auto 68px}.phone{display:block;margin:0 auto 24px;color:#e8f1eb;font-size:34px;line-height:1.25;font-weight:850;overflow-wrap:anywhere}.email{display:block;margin:0 auto;color:#e8f1eb;font-size:27px;line-height:1.3;font-weight:650;overflow-wrap:anywhere}.end-card p{max-width:770px;margin:0 auto 95px;color:#c8ff43;font-size:36px;line-height:1.18;font-weight:900;letter-spacing:.02em;text-transform:uppercase;overflow-wrap:anywhere}.disclaimer{max-width:790px;margin:0 auto;color:#c8d2cd;font-size:24px;line-height:1.42;font-weight:650;overflow-wrap:anywhere}.brand{position:absolute;left:0;right:0;bottom:0;color:#c8ff43}.brand span{display:inline-block;box-sizing:border-box;width:44px;height:66px;border:8px solid #c8ff43;border-right:0;vertical-align:middle}.brand b{display:inline-block;margin-left:13px;color:#c8ff43;font-size:34px;letter-spacing:.08em;vertical-align:middle}";
   const endCardStart = Number((total - endCardLength).toFixed(2));
-  const profileClips = project.end_card_photo_url ? [{
-    asset: { type: "image", src: project.end_card_photo_url },
-    start: endCardStart,
-    length: endCardLength,
-    fit: "crop",
-    width: 300,
-    height: 300,
-    position: "top",
-    offset: { x: 0, y: -0.15 },
-    transition: { in: "fade", out: "fade" },
-  }] : [];
   const render = {
     timeline: {
       background: "#17242a",
       tracks: [
-        ...(profileClips.length ? [{ clips: profileClips }] : []),
         { clips: [{ asset: { type: "html", html: endCardHtml, css: endCardCss, width: 1080, height: 1920 }, start: endCardStart, length: endCardLength }] },
         { clips },
         { clips: wallpaperTintClips },
@@ -171,8 +160,9 @@ function base64Url(bytes: ArrayBuffer) {
 export async function buildSignedRenderSourceUrls(project: CreativeProjectRecord, env: LotSocialEnvironment, now = Date.now()) {
   const origin = env.LOTSOCIAL_RENDER_PROXY_ORIGIN?.trim().replace(/\/$/, "");
   const secret = env.LOTSOCIAL_RENDER_PROXY_SECRET?.trim();
-  if (!origin || !secret) return [];
   const images = JSON.parse(project.selected_images || "[]") as string[];
+  if (images.length && (!origin || !secret)) throw new Error("The secure image relay is unavailable. No render was submitted or charged.");
+  if (!origin || !secret) return [];
   const expires = Math.floor(now / 1000) + 60 * 60 * 2;
   const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
   return Promise.all(images.map(async (source) => {
@@ -181,6 +171,17 @@ export async function buildSignedRenderSourceUrls(project: CreativeProjectRecord
     const signature = base64Url(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(message)));
     return `${origin}/image?e=${expires}&u=${encoded}&s=${signature}`;
   }));
+}
+
+export async function validateSignedRenderSourceUrls(urls: string[]) {
+  for (let index = 0; index < urls.length; index += 1) {
+    const response = await fetch(urls[index], { headers: { Accept: "image/*" } });
+    const contentType = response.headers.get("content-type") || "";
+    if (!response.ok || !/^image\//i.test(contentType)) {
+      throw new Error(`Selected photo ${index + 1} could not be prepared. Deselect that photo and try again. No render was submitted or charged.`);
+    }
+    await response.body?.cancel();
+  }
 }
 
 function needsImageRendition(src: string) {

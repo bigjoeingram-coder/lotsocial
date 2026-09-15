@@ -43,3 +43,30 @@ export async function getStoredProfilePhoto(photoId: string, env: LotSocialEnvir
   if (!/^[a-f0-9-]{36}\.(?:jpg|jpeg|png|webp)$/i.test(photoId)) return null;
   return mediaBucket(env).get(`profile-photos/${photoId}`);
 }
+
+function profilePhotoId(photoUrl: string) {
+  try {
+    const pathname = new URL(photoUrl, "https://lotsocial.invalid").pathname;
+    return pathname.match(/^\/api\/profile-photos\/([a-f0-9-]{36}\.(?:jpg|jpeg|png|webp))$/i)?.[1] ?? "";
+  } catch {
+    return "";
+  }
+}
+
+function arrayBufferToBase64(buffer: ArrayBuffer) {
+  const bytes = new Uint8Array(buffer);
+  let binary = "";
+  for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
+  }
+  return btoa(binary);
+}
+
+export async function getProfilePhotoDataUri(photoUrl: string, env: LotSocialEnvironment) {
+  const photoId = profilePhotoId(photoUrl);
+  if (!photoId) return "";
+  const object = await getStoredProfilePhoto(photoId, env);
+  if (!object) return "";
+  const contentType = object.httpMetadata?.contentType || "image/jpeg";
+  return `data:${contentType};base64,${arrayBufferToBase64(await object.arrayBuffer())}`;
+}

@@ -1,6 +1,6 @@
 import { createRenderJob, getCreativeProject, getLatestRenderJob, serializeRenderJob, updateRenderJob } from "./creative.ts";
 import type { CreativeProjectRecord, CreativeRenderJobRecord } from "./creative.ts";
-import { archiveRenderedVideo } from "./media.ts";
+import { archiveRenderedVideo, getProfilePhotoDataUri } from "./media.ts";
 import type { LotSocialEnvironment } from "./schema-bootstrap.ts";
 import { getImportedVehicle } from "./vdp.ts";
 import {
@@ -9,6 +9,7 @@ import {
   checkRender,
   rendererIsConfigured,
   submitRender,
+  validateSignedRenderSourceUrls,
 } from "./rendering.ts";
 
 type RouteUser = {
@@ -66,10 +67,21 @@ export async function handleCreativeRenderPost(
   const vehicle = await (dependencies.getImportedVehicle ?? getImportedVehicle)(project.vehicle_id, user.email, env);
   if (!vehicle) return Response.json({ error: "The source vehicle is no longer available." }, { status: 404 });
 
-  const signedSources = await buildSignedRenderSourceUrls(project, env);
+  let signedSources: string[];
+  let profilePhotoSource = "";
+  try {
+    signedSources = await buildSignedRenderSourceUrls(project, env);
+    await validateSignedRenderSourceUrls(signedSources);
+    profilePhotoSource = project.end_card_photo_url ? await getProfilePhotoDataUri(project.end_card_photo_url, env) : "";
+  } catch (caught) {
+    return Response.json({ error: caught instanceof Error ? caught.message : "The selected photos could not be prepared. No render was submitted or charged." }, { status: 422 });
+  }
+  if (project.end_card_photo_url && !profilePhotoSource) {
+    return Response.json({ error: "The salesperson photo could not be prepared. Upload it again before rendering. No render was submitted or charged." }, { status: 422 });
+  }
   const sourceHostname = env.LOTSOCIAL_EXPECTED_SITES_HOSTNAME?.trim();
   const sourceOrigin = signedSources.length ? signedSources : sourceHostname ? `https://${sourceHostname}` : "";
-  const plan = (dependencies.buildVerticalRenderPlan ?? buildVerticalRenderPlan)(project, vehicle, sourceOrigin);
+  const plan = (dependencies.buildVerticalRenderPlan ?? buildVerticalRenderPlan)(project, vehicle, sourceOrigin, profilePhotoSource);
   const submission = await (dependencies.submitRender ?? submitRender)(plan, env);
   const job = await (dependencies.createRenderJob ?? createRenderJob)({
     projectId: project.id,
