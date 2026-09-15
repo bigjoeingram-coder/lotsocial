@@ -65,6 +65,15 @@ test("render styles produce genuinely different motion treatments", () => {
   assert.match(treatments[2].effect, /Slow$/);
 });
 
+test("energetic render plans use Shotstack-valid zoom transitions", () => {
+  const plan = buildVerticalRenderPlan({ ...project, style: "energetic" }, importedVehicle());
+  const vehicleClips = plan.render.timeline.tracks[2].clips;
+
+  assert.equal(vehicleClips[0].transition.out, "zoom");
+  assert.equal(vehicleClips[1].transition.out, "zoom");
+  assert.doesNotMatch(JSON.stringify(plan), /zoomFast/);
+});
+
 test("rendered end card uses the associate photo, spaced contact order, and approved disclaimer without a vehicle-title ghost", () => {
   const withPhoto = { ...project, end_card_photo_url: "https://app.example/api/profile-photos/00000000-0000-4000-8000-000000000000.jpg" };
   const plan = buildVerticalRenderPlan(withPhoto, importedVehicle({ imported_at: "2026-09-14 16:20:00" }));

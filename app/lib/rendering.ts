@@ -47,7 +47,7 @@ function styleTreatment(style: string, index: number) {
   if (style === "energetic") {
     return {
       effect: ["zoomInFast", "slideLeftFast", "zoomOutFast", "slideRightFast"][index % 4],
-      transition: index === 0 ? { out: "zoomFast" } : { in: index % 2 ? "wipeLeftFast" : "wipeRightFast", out: "zoomFast" },
+      transition: index === 0 ? { out: "zoom" } : { in: index % 2 ? "wipeLeftFast" : "wipeRightFast", out: "zoom" },
       scale: 0.96,
     };
   }
