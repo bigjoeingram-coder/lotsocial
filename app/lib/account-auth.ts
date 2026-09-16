@@ -132,11 +132,20 @@ export async function getAccountUserFromHeaders(headers: Headers, env: LotSocial
   const rawToken = cookieValue(headers.get("cookie") ?? "", SESSION_COOKIE);
   if (!rawToken || !env.DB) return null;
   await ensureLotSocialSchema(env);
-  const record = await database(env, "LotSocial accounts").prepare(`SELECT a.* FROM associate_sessions s
+  const db = database(env, "LotSocial accounts");
+  const record = await db.prepare(`SELECT a.* FROM associate_sessions s
       JOIN associate_accounts a ON a.id = s.account_id
       WHERE s.token_hash = ? AND s.revoked_at IS NULL AND s.expires_at > ? AND a.status = 'active' LIMIT 1`)
     .bind(await hashToken(rawToken), new Date().toISOString()).first<AssociateAccountRecord>();
   if (!record) return null;
+  let profilePhotoUrl = record.profile_photo_url;
+  if (!profilePhotoUrl) {
+    const latestCreativeProfile = await db.prepare(`SELECT end_card_photo_url FROM creative_projects
+        WHERE LOWER(associate_email) = LOWER(?) AND end_card_photo_url <> ''
+        ORDER BY created_at DESC LIMIT 1`)
+      .bind(record.email).first<{ end_card_photo_url: string }>();
+    profilePhotoUrl = latestCreativeProfile?.end_card_photo_url ?? "";
+  }
   return {
     accountId: record.id,
     displayName: record.display_name,
@@ -146,7 +155,7 @@ export async function getAccountUserFromHeaders(headers: Headers, env: LotSocial
     dealershipName: record.dealership_name,
     dealershipDomain: record.dealership_domain,
     rooftopLocation: record.rooftop_location,
-    profilePhotoUrl: record.profile_photo_url,
+    profilePhotoUrl,
     role: record.role,
   };
 }

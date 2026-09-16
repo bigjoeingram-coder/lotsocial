@@ -437,7 +437,14 @@ export function AuthorizationApp({ user }: { user: User }) {
       const payload = await readPhotoUploadResponse(response);
       if (!response.ok || !payload.photoUrl) throw new Error(payload.error ?? "Unable to verify that profile photo.");
       setEndCardPhotoUrl(payload.photoUrl);
-      setEndCardPhotoStatus("Profile photo added to the end card.");
+      const profileResponse = await fetch("/api/account-profile", {
+        method: "PATCH",
+        headers: apiHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify({ profilePhotoUrl: payload.photoUrl }),
+      });
+      setEndCardPhotoStatus(profileResponse.ok
+        ? "Profile photo saved for this and future end cards."
+        : "Profile photo added to this end card, but could not be saved as your default.");
       setCreativeDraft(null);
       setRenderJob(null);
     } catch (caught) {
