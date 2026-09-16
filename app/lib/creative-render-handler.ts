@@ -75,7 +75,7 @@ export async function handleCreativeRenderPost(
     return Response.json({ error: caught instanceof Error ? caught.message : "The selected photos could not be prepared. No render was submitted or charged." }, { status: 422 });
   }
   const plan = (dependencies.buildVerticalRenderPlan ?? buildVerticalRenderPlan)(project, vehicle, sourceOrigin, project.end_card_photo_url);
-  const submission = await (dependencies.submitRender ?? submitRender)(plan, env, { convertAllImages: existing?.status === "failed" });
+  const submission = await (dependencies.submitRender ?? submitRender)(plan, env, { convertAllImages: true });
   const job = await (dependencies.createRenderJob ?? createRenderJob)({
     projectId: project.id,
     associateEmail: user.email,

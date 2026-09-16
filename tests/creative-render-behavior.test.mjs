@@ -77,7 +77,6 @@ test("render jobs use the LotSocial source relay instead of provider hotlinks", 
   const originalFetch = globalThis.fetch;
   let submittedPlan;
   let submittedOptions;
-  const failedJob = { id: "job_failed", project_id: cleanProject.id, provider_render_id: "v1:failed", status: "failed" };
   const selectedProject = { ...cleanProject, selected_images: JSON.stringify(["https://dealer.example/photo.jpg"]) };
   globalThis.fetch = async () => new Response(new Uint8Array([1]), { headers: { "Content-Type": "image/jpeg" } });
   try {
@@ -88,7 +87,7 @@ test("render jobs use the LotSocial source relay instead of provider hotlinks", 
       {
         associate: signedInUser,
         getCreativeProject: async () => selectedProject,
-        getLatestRenderJob: async () => failedJob,
+        getLatestRenderJob: async () => null,
         getImportedVehicle: async () => ({ id: "vehicle_1" }),
         buildVerticalRenderPlan: (_project, _vehicle, origin) => ({ render: { timeline: { tracks: [] } }, summary: { origin } }),
         submitRender: async (plan, _env, options) => {
