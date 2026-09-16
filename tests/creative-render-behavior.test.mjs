@@ -120,3 +120,28 @@ test("active render status refreshes and serializes the provider result", async 
   assert.equal(response.status, 200);
   assert.deepEqual(await json(response), { job: { id: "job_1", status: "completed", outputUrl: completedJob.output_url } });
 });
+
+test("failed render with no stored provider reason is refreshed for diagnostics", async () => {
+  const failedJob = { id: "job_failed", project_id: cleanProject.id, provider_render_id: "v1:render_failed", status: "failed", error_message: "" };
+  const diagnosedJob = { ...failedJob, error_message: "Audio asset could not be decoded" };
+  let checked = false;
+  const response = await handleCreativeRenderGet(
+    new Request("https://app.example/api/creative-projects/project_1/render"),
+    testEnv(),
+    { params: Promise.resolve({ id: "project_1" }) },
+    {
+      associate: signedInUser,
+      getCreativeProject: async () => cleanProject,
+      getLatestRenderJob: async () => failedJob,
+      checkRender: async () => {
+        checked = true;
+        return { status: "failed", outputUrl: "", errorMessage: diagnosedJob.error_message };
+      },
+      updateRenderJob: async () => diagnosedJob,
+      serializeRenderJob: (job) => ({ id: job.id, status: job.status, errorMessage: job.error_message }),
+    },
+  );
+
+  assert.equal(checked, true);
+  assert.deepEqual(await json(response), { job: { id: "job_failed", status: "failed", errorMessage: diagnosedJob.error_message } });
+});

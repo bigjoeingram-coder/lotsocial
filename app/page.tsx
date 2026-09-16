@@ -6,7 +6,7 @@ export const dynamic = "force-dynamic";
 
 export default async function Home() {
   const user = await requireChatGPTUser("/", env);
-  const renderConfig = `v85:${env.LOTSOCIAL_RENDER_PROXY_ORIGIN?.trim() ? "origin" : "no-origin"}:${env.LOTSOCIAL_RENDER_PROXY_SECRET?.trim() ? "secret" : "no-secret"}`;
+  const renderConfig = `v86:${env.LOTSOCIAL_RENDER_PROXY_ORIGIN?.trim() ? "origin" : "no-origin"}:${env.LOTSOCIAL_RENDER_PROXY_SECRET?.trim() ? "secret" : "no-secret"}`;
   return <>
     <span hidden data-render-config={renderConfig} />
     <AuthorizationApp user={{

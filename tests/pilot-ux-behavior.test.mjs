@@ -267,3 +267,18 @@ test("failed renderer status keeps the provider's actionable error", async () =>
     globalThis.fetch = originalFetch;
   }
 });
+
+test("failed renderer status extracts nested and array messages", async () => {
+  const originalFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = async (input) => {
+      assert.match(String(input), /\?data=true&merged=true$/);
+      return Response.json({ response: { status: "failed", error: [{ details: { reason: "Audio track is invalid" } }] } });
+    };
+    const result = await checkRender("v1:render_1", testEnv({ SHOTSTACK_API_KEY: "test-key" }));
+    assert.equal(result.status, "failed");
+    assert.equal(result.errorMessage, "Audio track is invalid");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

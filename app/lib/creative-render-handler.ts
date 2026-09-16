@@ -108,7 +108,11 @@ export async function handleCreativeRenderGet(
   const job = await (dependencies.getLatestRenderJob ?? getLatestRenderJob)(project.id, user.email, env);
   if (!job) return Response.json({ error: "No render job exists for this creative project." }, { status: 404 });
 
-  if (job.provider_render_id && ["queued", "fetching", "preprocessing", "rendering", "saving"].includes(job.status)) {
+  const shouldRefreshProvider = job.provider_render_id && (
+    ["queued", "fetching", "preprocessing", "rendering", "saving"].includes(job.status)
+    || (job.status === "failed" && !job.error_message)
+  );
+  if (shouldRefreshProvider) {
     try {
       const providerState = await (dependencies.checkRender ?? checkRender)(job.provider_render_id, env);
       if (providerState) {

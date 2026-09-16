@@ -185,7 +185,14 @@ export function buildVerticalRenderPlan(project: CreativeProjectRecord, vehicle:
 
 function providerMessage(value: unknown): string {
   if (typeof value === "string") return value.trim();
-  if (value && typeof value === "object" && "message" in value && typeof value.message === "string") return value.message.trim();
+  if (Array.isArray(value)) return value.map(providerMessage).filter(Boolean).join("; ");
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    for (const key of ["message", "error", "detail", "details", "reason"]) {
+      const message = providerMessage(record[key]);
+      if (message) return message;
+    }
+  }
   return "";
 }
 
@@ -335,7 +342,7 @@ export async function checkRender(providerRenderId: string, env: LotSocialEnviro
   const { apiKey } = renderEnvironment(env);
   if (!apiKey) return null;
   const provider = parseProviderRenderId(providerRenderId, env);
-  const response = await fetch(`https://api.shotstack.io/edit/${provider.stage}/render/${encodeURIComponent(provider.id)}`, {
+  const response = await fetch(`https://api.shotstack.io/edit/${provider.stage}/render/${encodeURIComponent(provider.id)}?data=true&merged=true`, {
     headers: { "x-api-key": apiKey },
   });
   const payload = await response.json() as {
