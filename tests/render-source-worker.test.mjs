@@ -26,12 +26,29 @@ test("render source worker answers Shotstack HEAD checks with downloadable image
     return new Response(new Uint8Array([1, 2, 3]), { headers: { "Content-Type": "image/jpeg", "Content-Length": "3" } });
   };
   try {
-    const response = await worker.fetch(new Request(`https://proxy.example/image?e=${expires}&u=${encoded}&s=${signed}`, { method: "HEAD" }), { PROXY_SECRET: secret });
+    const response = await worker.fetch(new Request(`https://proxy.example/image.jpg?e=${expires}&u=${encoded}&s=${signed}`, { method: "HEAD" }), { PROXY_SECRET: secret });
     assert.equal(response.status, 200);
     assert.equal(response.headers.get("content-type"), "image/jpeg");
     assert.equal(response.headers.get("content-length"), "3");
     assert.equal(await response.text(), "");
     assert.equal(upstreamMethod, "GET");
+  } finally {
+    globalThis.fetch = originalFetch;
+    globalThis.caches = originalCaches;
+  }
+});
+
+test("render source worker keeps the legacy extensionless route available", async () => {
+  const expires = String(Math.floor(Date.now() / 1000) + 3600);
+  const encoded = base64Url("https://dealer.example/photo.jpg");
+  const signed = await signature("test-secret", `${expires}.${encoded}`);
+  const originalFetch = globalThis.fetch;
+  const originalCaches = globalThis.caches;
+  globalThis.caches = { default: { match: async () => undefined, put: async () => undefined } };
+  globalThis.fetch = async () => new Response(new Uint8Array([1]), { headers: { "Content-Type": "image/jpeg" } });
+  try {
+    const response = await worker.fetch(new Request(`https://proxy.example/image?e=${expires}&u=${encoded}&s=${signed}`), { PROXY_SECRET: "test-secret" });
+    assert.equal(response.status, 200);
   } finally {
     globalThis.fetch = originalFetch;
     globalThis.caches = originalCaches;

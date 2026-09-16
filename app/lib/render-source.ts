@@ -26,7 +26,7 @@ async function signedRelayUrl(source: URL, env: LotSocialEnvironment) {
     ["sign"],
   );
   const signature = base64Url(new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(message))));
-  return `${origin}/image?e=${expires}&u=${encoded}&s=${signature}`;
+  return `${origin}/image.jpg?e=${expires}&u=${encoded}&s=${signature}`;
 }
 
 function imageContentType(response: Response) {

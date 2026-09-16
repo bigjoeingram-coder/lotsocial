@@ -109,7 +109,7 @@ test("production render sources use expiring signed URLs on the public media pro
     LOTSOCIAL_RENDER_PROXY_SECRET: "test-secret",
   }), 1_700_000_000_000);
   assert.equal(urls.length, 2);
-  assert.match(urls[0], /^https:\/\/lotsocial-render-source\.bigjoe-ingram\.workers\.dev\/image\?e=1700007200&u=[A-Za-z0-9_-]+&s=[A-Za-z0-9_-]+$/);
+  assert.match(urls[0], /^https:\/\/lotsocial-render-source\.bigjoe-ingram\.workers\.dev\/image\.jpg\?e=1700007200&u=[A-Za-z0-9_-]+&s=[A-Za-z0-9_-]+$/);
   assert.notEqual(urls[0], urls[1]);
   const plan = buildVerticalRenderPlan(project, importedVehicle(), urls);
   const imageSources = plan.render.timeline.tracks.flatMap((track) => track.clips).filter((clip) => clip.asset.type === "image").map((clip) => clip.asset.src).filter(Boolean);
@@ -168,7 +168,7 @@ test("the stable render source falls back to the signed relay when the dealer CD
     globalThis.fetch = async (url) => {
       requests.push(String(url));
       if (requests.length === 1) return new Response("blocked", { status: 403, headers: { "Content-Type": "text/html" } });
-      assert.match(String(url), /^https:\/\/lotsocial-render-source\.bigjoe-ingram\.workers\.dev\/image\?e=\d+&u=[A-Za-z0-9_-]+&s=[A-Za-z0-9_-]+$/);
+      assert.match(String(url), /^https:\/\/lotsocial-render-source\.bigjoe-ingram\.workers\.dev\/image\.jpg\?e=\d+&u=[A-Za-z0-9_-]+&s=[A-Za-z0-9_-]+$/);
       return new Response(new Uint8Array([4, 5, 6]), { headers: { "Content-Type": "image/jpeg", "Content-Length": "3" } });
     };
     const env = testEnv({

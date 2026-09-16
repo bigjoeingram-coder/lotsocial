@@ -44,7 +44,8 @@ function sourceHeaders(upstream, source) {
 const renderSourceWorker = {
   async fetch(request, env) {
     const requestUrl = new URL(request.url);
-    if (!['GET', 'HEAD'].includes(request.method) || requestUrl.pathname !== "/image") return new Response("Not found", { status: 404 });
+    const supportedPath = requestUrl.pathname === "/image" || requestUrl.pathname === "/image.jpg";
+    if (!['GET', 'HEAD'].includes(request.method) || !supportedPath) return new Response("Not found", { status: 404 });
 
     const expires = requestUrl.searchParams.get("e") || "";
     const encodedSource = requestUrl.searchParams.get("u") || "";

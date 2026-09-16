@@ -67,15 +67,10 @@ export async function handleCreativeRenderPost(
   const vehicle = await (dependencies.getImportedVehicle ?? getImportedVehicle)(project.vehicle_id, user.email, env);
   if (!vehicle) return Response.json({ error: "The source vehicle is no longer available." }, { status: 404 });
 
-  const sourceHostname = env.LOTSOCIAL_EXPECTED_SITES_HOSTNAME?.trim();
-  let sourceOrigin: string | string[];
+  let sourceOrigin: string[];
   try {
-    const selectedImages = JSON.parse(project.selected_images || "[]") as string[];
-    const candidateSources = sourceHostname
-      ? selectedImages.map((_source, index) => `https://${sourceHostname}/api/render-source-images/${encodeURIComponent(project.id)}/${index}.jpg`)
-      : await buildSignedRenderSourceUrls(project, env);
-    sourceOrigin = sourceHostname ? `https://${sourceHostname}` : candidateSources;
-    await validateSignedRenderSourceUrls(candidateSources);
+    sourceOrigin = await buildSignedRenderSourceUrls(project, env);
+    await validateSignedRenderSourceUrls(sourceOrigin);
   } catch (caught) {
     return Response.json({ error: caught instanceof Error ? caught.message : "The selected photos could not be prepared. No render was submitted or charged." }, { status: 422 });
   }

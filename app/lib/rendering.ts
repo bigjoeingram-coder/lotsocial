@@ -214,7 +214,7 @@ export async function buildSignedRenderSourceUrls(project: CreativeProjectRecord
     const encoded = base64Url(new TextEncoder().encode(source).buffer);
     const message = `${expires}.${encoded}`;
     const signature = base64Url(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(message)));
-    return `${origin}/image?e=${expires}&u=${encoded}&s=${signature}`;
+    return `${origin}/image.jpg?e=${expires}&u=${encoded}&s=${signature}`;
   }));
 }
 
