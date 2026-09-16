@@ -139,13 +139,7 @@ export async function getAccountUserFromHeaders(headers: Headers, env: LotSocial
     .bind(await hashToken(rawToken), new Date().toISOString()).first<AssociateAccountRecord>();
   if (!record) return null;
   let profilePhotoUrl = record.profile_photo_url;
-  if (!profilePhotoUrl) {
-    const latestCreativeProfile = await db.prepare(`SELECT end_card_photo_url FROM creative_projects
-        WHERE LOWER(associate_email) = LOWER(?) AND end_card_photo_url <> ''
-        ORDER BY created_at DESC LIMIT 1`)
-      .bind(record.email).first<{ end_card_photo_url: string }>();
-    profilePhotoUrl = latestCreativeProfile?.end_card_photo_url ?? "";
-  }
+  if (!profilePhotoUrl) profilePhotoUrl = await getLatestCreativeProfilePhoto(record.email, env);
   return {
     accountId: record.id,
     displayName: record.display_name,
@@ -158,6 +152,16 @@ export async function getAccountUserFromHeaders(headers: Headers, env: LotSocial
     profilePhotoUrl,
     role: record.role,
   };
+}
+
+export async function getLatestCreativeProfilePhoto(email: string, env: LotSocialEnvironment) {
+  if (!env.DB) return "";
+  await ensureLotSocialSchema(env);
+  const latestCreativeProfile = await database(env, "LotSocial accounts").prepare(`SELECT end_card_photo_url FROM creative_projects
+      WHERE LOWER(associate_email) = LOWER(?) AND end_card_photo_url <> ''
+      ORDER BY created_at DESC LIMIT 1`)
+    .bind(email).first<{ end_card_photo_url: string }>();
+  return latestCreativeProfile?.end_card_photo_url ?? "";
 }
 
 export async function createAccountLoginLink(emailValue: string, env: LotSocialEnvironment) {

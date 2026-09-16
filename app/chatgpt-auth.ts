@@ -1,6 +1,6 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
-import { getAccountUserFromHeaders } from "./lib/account-auth.ts";
+import { getAccountUserFromHeaders, getLatestCreativeProfilePhoto } from "./lib/account-auth.ts";
 import type { LotSocialEnvironment } from "./lib/schema-bootstrap.ts";
 
 export type ChatGPTUser = {
@@ -77,6 +77,7 @@ export async function requireAssociate(
     displayName: fullName ?? email,
     email,
     fullName,
+    profilePhotoUrl: await getLatestCreativeProfilePhoto(email, env),
     role: "admin",
   };
 }
