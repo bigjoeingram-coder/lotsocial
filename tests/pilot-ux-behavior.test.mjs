@@ -3,7 +3,7 @@ import test from "node:test";
 import { createCopy } from "../app/lib/creative.ts";
 import { replenishSelectedImages } from "../app/lib/creative-selection.ts";
 import { validateProfilePhotoFile, verifyProfilePhotoForSocial } from "../app/lib/image-moderation.ts";
-import { buildSignedRenderSourceUrls, buildVerticalRenderPlan, checkRender, inlineRenderProfilePhotos, prepareRenderCompatibleImages } from "../app/lib/rendering.ts";
+import { buildSignedRenderSourceUrls, buildVerticalRenderPlan, checkRender, inlineRenderProfilePhotos, prepareRenderCompatibleImages, renderTemplateVariant } from "../app/lib/rendering.ts";
 import { serveRenderSourceImage } from "../app/lib/render-source.ts";
 import { normalizeVehicleYear } from "../app/lib/vdp.ts";
 import { FakeD1, importedVehicle, testEnv } from "./harness.mjs";
@@ -73,6 +73,51 @@ test("render styles produce genuinely different production templates", () => {
     assert.equal(music.asset.effect, "fadeInFadeOut");
     assert.ok(music.asset.volume > 0 && music.asset.volume < 0.3);
     assert.equal(music.length, 30);
+  }
+});
+
+test("each video category rotates between two stable production templates", () => {
+  const styles = ["energetic", "walkaround", "premium"];
+  for (const style of styles) {
+    const vehicles = Array.from({ length: 100 }, (_, index) => importedVehicle({
+      id: `vehicle-${index}`,
+      vin: `VIN-${index}`,
+      source_url: `https://dealer.example/vehicle-${index}`,
+    }));
+    const variants = new Set(vehicles.map((vehicle) => renderTemplateVariant(style, vehicle)));
+    const plans = vehicles.map((vehicle) => buildVerticalRenderPlan({ ...project, style }, vehicle));
+    const names = new Set(plans.map((plan) => plan.summary.template));
+    const representativePlans = [0, 1].map((variant) => plans.find((plan) => plan.summary.templateVariant === variant + 1));
+    const visualSignatures = new Set(representativePlans.map((plan) => {
+      const foreground = plan.render.timeline.tracks.flatMap((track) => track.clips).find((clip) => "effect" in clip);
+      return JSON.stringify({
+        background: plan.render.timeline.background,
+        effect: foreground.effect,
+        scale: foreground.scale,
+        tint: plan.render.timeline.tracks[2].clips[0].asset.css,
+      });
+    }));
+
+    assert.deepEqual([...variants].sort(), [0, 1]);
+    assert.equal(names.size, 2);
+    assert.equal(visualSignatures.size, 2, `${style} variants must differ in motion and art direction, not only name`);
+    assert.ok([...names].every((name) => name.startsWith(style === "energetic" ? "Fast Cuts ·" : style === "premium" ? "Premium ·" : "Walkaround ·")));
+  }
+});
+
+test("template rotation is deterministic for retries of the same vehicle", () => {
+  const vehicle = importedVehicle({
+    id: "vehicle-retry",
+    vin: "WVWLE7CDXTW247193",
+    source_url: "https://www.capovw.com/inventory/new-2026-volkswagen-golf-gti-s-fwd-4d-hatchback-wvwle7cdxtw247193/",
+  });
+
+  for (const style of ["energetic", "walkaround", "premium"]) {
+    const first = buildVerticalRenderPlan({ ...project, id: "project-first", style }, vehicle);
+    const retry = buildVerticalRenderPlan({ ...project, id: "project-retry", style }, vehicle);
+    assert.equal(first.summary.template, retry.summary.template);
+    assert.equal(first.summary.templateVariant, retry.summary.templateVariant);
+    assert.deepEqual(first.render.timeline, retry.render.timeline);
   }
 });
 

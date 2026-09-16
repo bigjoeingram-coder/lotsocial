@@ -10,40 +10,93 @@ const INGEST_POLL_ATTEMPTS = 30;
 const HTML5_MARKUP_LIMIT = 1_000_000;
 
 const VIDEO_TEMPLATES = {
-  energetic: {
-    name: "Fast Cuts",
-    background: "#071116",
-    wallpaperScale: 1.24,
-    wallpaperOpacity: 0.46,
-    tintOpacity: 0.86,
-    tintCss: "div{width:1080px;height:1920px;background:linear-gradient(145deg,#071116 0%,#0d2025 58%,#31520f 100%)}",
-    music: "https://shotstack-assets.s3-ap-southeast-2.amazonaws.com/music/freepd/motions.mp3",
-    musicVolume: 0.22,
-  },
-  walkaround: {
-    name: "Walkaround",
-    background: "#17242a",
-    wallpaperScale: 1.18,
-    wallpaperOpacity: 0.38,
-    tintOpacity: 0.94,
-    tintCss: "div{width:1080px;height:1920px;background:linear-gradient(180deg,#071116 0%,#17242a 62%,#0d181c 100%)}",
-    music: "https://shotstack-assets.s3-ap-southeast-2.amazonaws.com/music/freepd/advertising.mp3",
-    musicVolume: 0.16,
-  },
-  premium: {
-    name: "Premium",
-    background: "#08090b",
-    wallpaperScale: 1.12,
-    wallpaperOpacity: 0.28,
-    tintOpacity: 0.96,
-    tintCss: "div{width:1080px;height:1920px;background:linear-gradient(155deg,#050607 0%,#111519 64%,#3a321d 100%)}",
-    music: "https://shotstack-assets.s3-ap-southeast-2.amazonaws.com/music/freepd/fireworks.mp3",
-    musicVolume: 0.13,
-  },
+  energetic: [
+    {
+      name: "Fast Cuts · Surge",
+      background: "#071116",
+      wallpaperScale: 1.24,
+      wallpaperOpacity: 0.46,
+      tintOpacity: 0.86,
+      tintCss: "div{width:1080px;height:1920px;background:linear-gradient(145deg,#071116 0%,#0d2025 58%,#31520f 100%)}",
+      music: "https://shotstack-assets.s3-ap-southeast-2.amazonaws.com/music/freepd/motions.mp3",
+      musicVolume: 0.22,
+    },
+    {
+      name: "Fast Cuts · Velocity",
+      background: "#10121a",
+      wallpaperScale: 1.3,
+      wallpaperOpacity: 0.42,
+      tintOpacity: 0.88,
+      tintCss: "div{width:1080px;height:1920px;background:linear-gradient(155deg,#081015 0%,#17202c 52%,#243f11 100%)}",
+      music: "https://shotstack-assets.s3-ap-southeast-2.amazonaws.com/music/freepd/motions.mp3",
+      musicVolume: 0.2,
+    },
+  ],
+  walkaround: [
+    {
+      name: "Walkaround · Glide",
+      background: "#17242a",
+      wallpaperScale: 1.18,
+      wallpaperOpacity: 0.38,
+      tintOpacity: 0.94,
+      tintCss: "div{width:1080px;height:1920px;background:linear-gradient(180deg,#071116 0%,#17242a 62%,#0d181c 100%)}",
+      music: "https://shotstack-assets.s3-ap-southeast-2.amazonaws.com/music/freepd/advertising.mp3",
+      musicVolume: 0.16,
+    },
+    {
+      name: "Walkaround · Showcase",
+      background: "#0b171c",
+      wallpaperScale: 1.14,
+      wallpaperOpacity: 0.34,
+      tintOpacity: 0.92,
+      tintCss: "div{width:1080px;height:1920px;background:linear-gradient(165deg,#071116 0%,#193038 54%,#102119 100%)}",
+      music: "https://shotstack-assets.s3-ap-southeast-2.amazonaws.com/music/freepd/advertising.mp3",
+      musicVolume: 0.15,
+    },
+  ],
+  premium: [
+    {
+      name: "Premium · Noir",
+      background: "#08090b",
+      wallpaperScale: 1.12,
+      wallpaperOpacity: 0.28,
+      tintOpacity: 0.96,
+      tintCss: "div{width:1080px;height:1920px;background:linear-gradient(155deg,#050607 0%,#111519 64%,#3a321d 100%)}",
+      music: "https://shotstack-assets.s3-ap-southeast-2.amazonaws.com/music/freepd/fireworks.mp3",
+      musicVolume: 0.13,
+    },
+    {
+      name: "Premium · Gallery",
+      background: "#0d1013",
+      wallpaperScale: 1.08,
+      wallpaperOpacity: 0.24,
+      tintOpacity: 0.96,
+      tintCss: "div{width:1080px;height:1920px;background:linear-gradient(145deg,#06080a 0%,#172027 62%,#2f2a21 100%)}",
+      music: "https://shotstack-assets.s3-ap-southeast-2.amazonaws.com/music/freepd/fireworks.mp3",
+      musicVolume: 0.12,
+    },
+  ],
 } as const;
 
-function videoTemplate(style: string) {
-  return VIDEO_TEMPLATES[style as keyof typeof VIDEO_TEMPLATES] ?? VIDEO_TEMPLATES.walkaround;
+function stableHash(value: string) {
+  let hash = 2166136261;
+  for (const character of value) {
+    hash ^= character.codePointAt(0) ?? 0;
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}
+
+export function renderTemplateVariant(style: string, vehicle: Pick<ImportedVehicleRecord, "vin" | "source_url" | "id">) {
+  const normalizedStyle = style in VIDEO_TEMPLATES ? style as keyof typeof VIDEO_TEMPLATES : "walkaround";
+  const templates = VIDEO_TEMPLATES[normalizedStyle];
+  const vehicleKey = vehicle.vin || vehicle.source_url || vehicle.id;
+  return stableHash(`${normalizedStyle}:${vehicleKey}`) % templates.length;
+}
+
+function videoTemplate(style: string, vehicle: Pick<ImportedVehicleRecord, "vin" | "source_url" | "id">) {
+  const normalizedStyle = style in VIDEO_TEMPLATES ? style as keyof typeof VIDEO_TEMPLATES : "walkaround";
+  return VIDEO_TEMPLATES[normalizedStyle][renderTemplateVariant(normalizedStyle, vehicle)];
 }
 
 function renderEnvironment(env: LotSocialEnvironment) {
@@ -79,32 +132,40 @@ function capturedAtLabel(value: string) {
   }).format(parsed);
 }
 
-function styleTreatment(style: string, index: number) {
+function styleTreatment(style: string, variant: number, index: number) {
   if (style === "energetic") {
+    const effects = variant === 0
+      ? ["zoomInFast", "slideLeftFast", "zoomOutFast", "slideRightFast"]
+      : ["slideRightFast", "zoomInFast", "slideLeftFast", "zoomOutFast"];
     return {
-      effect: ["zoomInFast", "slideLeftFast", "zoomOutFast", "slideRightFast"][index % 4],
+      effect: effects[index % effects.length],
       transition: index === 0
         ? { out: "fadeFast" }
-        : { in: index % 2 ? "wipeLeftFast" : "wipeRightFast", out: "fadeFast" },
-      scale: 0.96,
+        : { in: variant === 0 ? (index % 2 ? "wipeLeftFast" : "wipeRightFast") : (index % 2 ? "wipeRightFast" : "wipeLeftFast"), out: "fadeFast" },
+      scale: variant === 0 ? 0.96 : 0.92,
     };
   }
   if (style === "premium") {
     return {
-      effect: index % 2 ? "zoomOutSlow" : "zoomInSlow",
+      effect: variant === 0
+        ? (index % 2 ? "zoomOutSlow" : "zoomInSlow")
+        : (index % 2 ? "slideLeftSlow" : "slideRightSlow"),
       transition: index === 0 ? { out: "fadeSlow" } : { in: "fadeSlow", out: "fadeSlow" },
-      scale: 0.88,
+      scale: variant === 0 ? 0.88 : 0.84,
     };
   }
   return {
-    effect: index % 2 ? "slideRightSlow" : "slideLeftSlow",
+    effect: variant === 0
+      ? (index % 2 ? "slideRightSlow" : "slideLeftSlow")
+      : (index % 2 ? "zoomInSlow" : "zoomOutSlow"),
     transition: index === 0 ? { out: "fade" } : { in: "fade", out: "fade" },
-    scale: INSPECTION_IMAGE_SCALE,
+    scale: variant === 0 ? INSPECTION_IMAGE_SCALE : 0.88,
   };
 }
 
 export function buildVerticalRenderPlan(project: CreativeProjectRecord, vehicle: ImportedVehicleRecord, sourceOrigin: string | string[] = "", profilePhotoSource = project.end_card_photo_url) {
-  const template = videoTemplate(project.style);
+  const templateVariant = renderTemplateVariant(project.style, vehicle);
+  const template = videoTemplate(project.style, vehicle);
   const images = JSON.parse(project.selected_images || "[]") as string[];
   const renderImages = Array.isArray(sourceOrigin)
     ? sourceOrigin
@@ -138,7 +199,7 @@ export function buildVerticalRenderPlan(project: CreativeProjectRecord, vehicle:
     transition: index === 0 ? { out: "fade" } : { in: "fade", out: "fade" },
   }));
   const clips = timedImages.map(({ src, start, length }, index) => {
-    const treatment = styleTreatment(project.style, index);
+    const treatment = styleTreatment(project.style, templateVariant, index);
     return {
       asset: { type: "image", src },
       start,
@@ -181,6 +242,7 @@ export function buildVerticalRenderPlan(project: CreativeProjectRecord, vehicle:
       endCardSeconds: endCardLength,
       style: project.style,
       template: template.name,
+      templateVariant: templateVariant + 1,
       music: "Included",
       fidelity: "Original dealership VDP photos only, template-specific motion, background, pacing and music, inspection-fit framing, and a branded salesperson end card with source-time pricing disclosure",
     },
