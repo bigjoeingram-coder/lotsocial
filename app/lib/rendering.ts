@@ -1,11 +1,13 @@
 import type { LotSocialEnvironment } from "./schema-bootstrap.ts";
 import type { CreativeProjectRecord } from "./creative.ts";
 import type { ImportedVehicleRecord } from "./vdp.ts";
+import { getStoredProfilePhoto } from "./media.ts";
 
 type RenderEnvironment = { SHOTSTACK_API_KEY?: string; SHOTSTACK_STAGE?: string };
 type ShotstackStage = "stage" | "v1";
 const INSPECTION_IMAGE_SCALE = 0.92;
 const INGEST_POLL_ATTEMPTS = 30;
+const HTML5_MARKUP_LIMIT = 1_000_000;
 
 const VIDEO_TEMPLATES = {
   energetic: {
@@ -153,13 +155,13 @@ export function buildVerticalRenderPlan(project: CreativeProjectRecord, vehicle:
   const disclaimer = `Pricing and availability as shown on the dealer's website on ${capturedAtLabel(vehicle.imported_at)}; subject to change. Confirm current price with the dealership.`;
   const endCardPhoto = profilePhotoSource ? `<img class="profile-photo" src="${escapeHtml(profilePhotoSource)}" alt="">` : `<div class="photo-space"></div>`;
   const endCardHtml = `<div class="end-card"><div class="content">${endCardPhoto}<h1>${escapeHtml(project.end_card_name)}</h1><div class="contact">${endCardPhone}${endCardEmail}</div><p>${escapeHtml(project.end_card_cta)}</p><div class="disclaimer">${escapeHtml(disclaimer)}</div><div class="brand"><span></span><b>LotSocial</b></div></div></div>`;
-  const endCardCss = "html,body{margin:0}.end-card{box-sizing:border-box;position:relative;width:1080px;height:1920px;font-family:Arial,Helvetica,sans-serif;color:white;text-align:center;background:linear-gradient(180deg,#071116 0%,#101f24 58%,#05090b 100%);overflow:hidden}.content{position:absolute;left:155px;right:155px;top:125px;bottom:95px}.photo-space,.profile-photo{display:block;width:360px;height:360px;margin:0 auto 48px}.profile-photo{border:10px solid #c8ff43;border-radius:34px;object-fit:cover;background:#071116}.end-card h1{max-width:770px;margin:0 auto 52px;font-size:58px;line-height:1.05;letter-spacing:-.03em;overflow-wrap:anywhere}.contact{max-width:770px;margin:0 auto 68px}.phone{display:block;margin:0 auto 24px;color:#e8f1eb;font-size:34px;line-height:1.25;font-weight:850;overflow-wrap:anywhere}.email{display:block;margin:0 auto;color:#e8f1eb;font-size:27px;line-height:1.3;font-weight:650;overflow-wrap:anywhere}.end-card p{max-width:770px;margin:0 auto 95px;color:#c8ff43;font-size:36px;line-height:1.18;font-weight:900;letter-spacing:.02em;text-transform:uppercase;overflow-wrap:anywhere}.disclaimer{max-width:790px;margin:0 auto;color:#c8d2cd;font-size:24px;line-height:1.42;font-weight:650;overflow-wrap:anywhere}.brand{position:absolute;left:0;right:0;bottom:0;color:#c8ff43}.brand span{display:inline-block;box-sizing:border-box;width:44px;height:66px;border:8px solid #c8ff43;border-right:0;vertical-align:middle}.brand b{display:inline-block;margin-left:13px;color:#c8ff43;font-size:34px;letter-spacing:.08em;vertical-align:middle}";
+  const endCardCss = "html,body{box-sizing:border-box;width:1080px;height:1920px;margin:0;padding:0;overflow:hidden;background:#071116}.end-card{box-sizing:border-box;width:1080px;height:1920px;padding:110px 120px 90px;font-family:Arial,Helvetica,sans-serif;color:white;text-align:center;background:linear-gradient(180deg,#071116 0%,#101f24 58%,#05090b 100%);overflow:hidden}.content{box-sizing:border-box;width:840px;height:1720px;display:grid;grid-template-rows:430px 160px 155px 140px 190px 1fr 90px;row-gap:22px;align-items:center;justify-items:center}.photo-space,.profile-photo{display:block;box-sizing:border-box;width:360px;height:420px;margin:0}.profile-photo{border:10px solid #c8ff43;border-radius:34px;object-fit:contain;object-position:center;background:#071116}.end-card h1{max-width:820px;max-height:150px;margin:0;font-size:58px;line-height:1.06;letter-spacing:-.03em;overflow:hidden;overflow-wrap:anywhere}.contact{max-width:820px;max-height:145px;margin:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;overflow:hidden}.phone{margin:0;color:#e8f1eb;font-size:34px;line-height:1.2;font-weight:850;overflow-wrap:anywhere}.email{margin:0;color:#e8f1eb;font-size:27px;line-height:1.25;font-weight:650;overflow-wrap:anywhere}.end-card p{max-width:820px;max-height:130px;margin:0;color:#c8ff43;font-size:36px;line-height:1.16;font-weight:900;letter-spacing:.02em;text-transform:uppercase;overflow:hidden;overflow-wrap:anywhere}.disclaimer{max-width:820px;max-height:180px;margin:0;color:#c8d2cd;font-size:24px;line-height:1.4;font-weight:650;overflow:hidden;overflow-wrap:anywhere}.brand{align-self:end;color:#c8ff43;white-space:nowrap}.brand span{display:inline-block;box-sizing:border-box;width:44px;height:66px;border:8px solid #c8ff43;border-right:0;vertical-align:middle}.brand b{display:inline-block;margin-left:13px;color:#c8ff43;font-size:34px;letter-spacing:.08em;vertical-align:middle}";
   const endCardStart = Number((total - endCardLength).toFixed(2));
   const render = {
     timeline: {
       background: template.background,
       tracks: [
-        { clips: [{ asset: { type: "html", html: endCardHtml, css: endCardCss, width: 1080, height: 1920 }, start: endCardStart, length: endCardLength }] },
+        { clips: [{ asset: { type: "html5", html: endCardHtml, css: endCardCss }, start: endCardStart, length: endCardLength, width: 1080, height: 1920 }] },
         { clips },
         { clips: wallpaperTintClips },
         { clips: wallpaperClips },
@@ -237,6 +239,49 @@ function needsImageRendition(src: string) {
   }
 }
 
+function standardBase64(bytes: ArrayBuffer) {
+  let binary = "";
+  for (const byte of new Uint8Array(bytes)) binary += String.fromCharCode(byte);
+  return btoa(binary);
+}
+
+function profilePhotoId(source: string) {
+  try {
+    const pathname = new URL(source, "https://lotsocial.local").pathname;
+    return pathname.match(/\/api\/profile-photos\/([a-f0-9-]{36}\.(?:jpg|jpeg|png|webp))$/i)?.[1] ?? "";
+  } catch {
+    return "";
+  }
+}
+
+export async function inlineRenderProfilePhotos(plan: ReturnType<typeof buildVerticalRenderPlan>, env: LotSocialEnvironment) {
+  const compatiblePlan = structuredClone(plan);
+  type MutableHtmlClip = { asset: { type?: string; html?: string; [key: string]: unknown }; [key: string]: unknown };
+  const clips = compatiblePlan.render.timeline.tracks.flatMap((track) => track.clips as unknown as MutableHtmlClip[]);
+  const profilePattern = /src="([^"]*\/api\/profile-photos\/[a-f0-9-]{36}\.(?:jpg|jpeg|png|webp)(?:\?[^"#]*)?)"/gi;
+
+  for (const clip of clips) {
+    if (clip.asset.type !== "html5" || !clip.asset.html) continue;
+    const matches = [...clip.asset.html.matchAll(profilePattern)];
+    if (matches.length === 0) continue;
+    let html = clip.asset.html;
+    for (const match of matches) {
+      const source = match[1];
+      const photoId = profilePhotoId(source);
+      const object = photoId ? await getStoredProfilePhoto(photoId, env) : null;
+      if (!object) throw new Error("The saved end-card photo could not be loaded. Re-upload the photo and retry. No render was submitted or charged.");
+      const contentType = object.httpMetadata?.contentType || ({ jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", webp: "image/webp" }[photoId.split(".").at(-1)?.toLowerCase() ?? ""] ?? "image/jpeg");
+      const dataUri = `data:${contentType};base64,${standardBase64(await object.arrayBuffer())}`;
+      html = html.replace(source, dataUri);
+    }
+    if (html.length > HTML5_MARKUP_LIMIT) {
+      throw new Error("The saved end-card photo is too large for the video renderer. Re-upload the photo and retry. No render was submitted or charged.");
+    }
+    clip.asset.html = html;
+  }
+  return compatiblePlan;
+}
+
 async function imageRendition(src: string, apiKey: string, stage: ShotstackStage) {
   const queued = await fetch(`https://api.shotstack.io/ingest/${stage}/sources`, {
     method: "POST",
@@ -304,10 +349,16 @@ export async function submitRender(
   const stages: ShotstackStage[] = stage === "v1" ? ["v1", "stage"] : ["stage", "v1"];
   let latestMessage = "The renderer rejected this job.";
   let rendererAuthRejected = false;
+  let providerPlan;
+  try {
+    providerPlan = await inlineRenderProfilePhotos(plan, env);
+  } catch (caught) {
+    return { status: "provider_error", providerRenderId: "", errorMessage: caught instanceof Error ? caught.message : "The renderer could not prepare the saved end-card photo." };
+  }
   for (const candidateStage of stages) {
     let compatiblePlan;
     try {
-      compatiblePlan = await prepareRenderCompatibleImages(plan, apiKey, candidateStage, Boolean(options.convertAllImages));
+      compatiblePlan = await prepareRenderCompatibleImages(providerPlan, apiKey, candidateStage, Boolean(options.convertAllImages));
     } catch (caught) {
       return { status: "provider_error", providerRenderId: "", errorMessage: caught instanceof Error ? caught.message : "The renderer could not prepare the dealership images." };
     }

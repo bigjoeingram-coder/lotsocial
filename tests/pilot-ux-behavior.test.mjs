@@ -3,7 +3,7 @@ import test from "node:test";
 import { createCopy } from "../app/lib/creative.ts";
 import { replenishSelectedImages } from "../app/lib/creative-selection.ts";
 import { validateProfilePhotoFile, verifyProfilePhotoForSocial } from "../app/lib/image-moderation.ts";
-import { buildSignedRenderSourceUrls, buildVerticalRenderPlan, checkRender, prepareRenderCompatibleImages } from "../app/lib/rendering.ts";
+import { buildSignedRenderSourceUrls, buildVerticalRenderPlan, checkRender, inlineRenderProfilePhotos, prepareRenderCompatibleImages } from "../app/lib/rendering.ts";
 import { serveRenderSourceImage } from "../app/lib/render-source.ts";
 import { normalizeVehicleYear } from "../app/lib/vdp.ts";
 import { FakeD1, importedVehicle, testEnv } from "./harness.mjs";
@@ -186,14 +186,22 @@ test("the stable render source falls back to the signed relay when the dealer CD
   }
 });
 
-test("rendered end card uses the associate photo, spaced contact order, and approved disclaimer without a vehicle-title ghost", () => {
+test("rendered end card uses a full-frame HTML5 grid with bounded rows and the approved content order", () => {
   const withPhoto = { ...project, end_card_photo_url: "https://app.example/api/profile-photos/00000000-0000-4000-8000-000000000000.jpg" };
   const plan = buildVerticalRenderPlan(withPhoto, importedVehicle({ imported_at: "2026-09-14 16:20:00" }));
-  const html = plan.render.timeline.tracks[0].clips[0].asset.html;
+  const endCard = plan.render.timeline.tracks[0].clips[0];
+  const html = endCard.asset.html;
+  const css = endCard.asset.css;
   assert.ok(plan.summary.endCardSeconds >= 5);
+  assert.equal(endCard.asset.type, "html5");
+  assert.equal(endCard.width, 1080);
+  assert.equal(endCard.height, 1920);
   assert.match(html, /<img class="profile-photo" src="https:\/\/app\.example\/api\/profile-photos\/00000000-0000-4000-8000-000000000000\.jpg"/);
-  const imageAssetSources = plan.render.timeline.tracks.flatMap((track) => track.clips).filter((clip) => clip.asset.type === "image").map((clip) => clip.asset.src);
-  assert.ok(!imageAssetSources.includes(withPhoto.end_card_photo_url), "the profile photo stays inside the proven HTML end card instead of a separate provider image track");
+  assert.match(css, /html,body\{box-sizing:border-box;width:1080px;height:1920px/);
+  assert.match(css, /\.content\{[^}]*display:grid;grid-template-rows:430px 160px 155px 140px 190px 1fr 90px/);
+  assert.match(css, /\.profile-photo\{[^}]*object-fit:contain/);
+  assert.doesNotMatch(css, /\.content\{[^}]*position:absolute/);
+  assert.doesNotMatch(css, /\.brand\{[^}]*position:absolute/);
   assert.ok(html.indexOf("Joe") < html.indexOf("555-0100"));
   assert.ok(html.indexOf("555-0100") < html.indexOf("Message me for details"));
   assert.ok(html.indexOf("Message me for details") < html.indexOf("Pricing and availability"));
@@ -201,6 +209,34 @@ test("rendered end card uses the associate photo, spaced contact order, and appr
   assert.doesNotMatch(html, /2025 Ford/);
   assert.doesNotMatch(html, /<span>L<\/span><b>LotSocial/);
   assert.match(html, /<span><\/span><b>LotSocial/);
+});
+
+test("the private saved profile photo is embedded before the provider receives the HTML5 card", async () => {
+  const photoId = "00000000-0000-4000-8000-000000000000.jpg";
+  const withPhoto = { ...project, end_card_photo_url: `https://app.example/api/profile-photos/${photoId}` };
+  const plan = buildVerticalRenderPlan(withPhoto, importedVehicle());
+  const media = {
+    get: async (key) => key === `profile-photos/${photoId}` ? {
+      httpMetadata: { contentType: "image/jpeg" },
+      arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer,
+    } : null,
+  };
+
+  const compatible = await inlineRenderProfilePhotos(plan, testEnv({ MEDIA: media }));
+  const originalHtml = plan.render.timeline.tracks[0].clips[0].asset.html;
+  const providerHtml = compatible.render.timeline.tracks[0].clips[0].asset.html;
+  assert.match(originalHtml, /https:\/\/app\.example\/api\/profile-photos\//, "the stored audit plan keeps the stable application URL");
+  assert.doesNotMatch(providerHtml, /\/api\/profile-photos\//);
+  assert.match(providerHtml, /src="data:image\/jpeg;base64,AQID"/);
+});
+
+test("a missing saved profile photo fails before a paid render can be submitted", async () => {
+  const withPhoto = { ...project, end_card_photo_url: "https://app.example/api/profile-photos/00000000-0000-4000-8000-000000000000.jpg" };
+  const plan = buildVerticalRenderPlan(withPhoto, importedVehicle());
+  await assert.rejects(
+    () => inlineRenderProfilePhotos(plan, testEnv({ MEDIA: { get: async () => null } })),
+    /No render was submitted or charged/,
+  );
 });
 
 test("vehicle dates are normalized to a public model year", () => {
