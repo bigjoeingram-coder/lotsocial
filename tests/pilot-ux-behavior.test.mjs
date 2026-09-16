@@ -97,8 +97,8 @@ test("production plans relay dealership images through the LotSocial source endp
   const plan = buildVerticalRenderPlan(project, importedVehicle(), "https://lotsocial.example/");
   const imageSources = plan.render.timeline.tracks.flatMap((track) => track.clips).filter((clip) => clip.asset.type === "image").map((clip) => clip.asset.src).filter(Boolean);
   assert.deepEqual([...new Set(imageSources)].sort(), [
-    "https://lotsocial.example/api/render-source-images/project_1/0",
-    "https://lotsocial.example/api/render-source-images/project_1/1",
+    "https://lotsocial.example/api/render-source-images/project_1/0.jpg",
+    "https://lotsocial.example/api/render-source-images/project_1/1.jpg",
   ]);
   assert.equal(imageSources.length, 4, "each relayed source is reused for foreground and wallpaper tracks");
 });
@@ -121,7 +121,7 @@ test("the render source relay validates, caches, and serves the captured dealers
   const objects = new Map();
   const media = {
     get: async (key) => objects.get(key) ?? null,
-    put: async (key, body, options) => objects.set(key, { body, httpMetadata: options.httpMetadata }),
+    put: async (key, body, options) => objects.set(key, { body, size: body.byteLength, httpMetadata: options.httpMetadata }),
   };
   const db = new FakeD1({ creativeProjects: [project] });
   let upstreamFetches = 0;
@@ -139,10 +139,14 @@ test("the render source relay validates, caches, and serves the captured dealers
 
     const uuidProject = { ...project, id: "00000000-0000-4000-8000-000000000000" };
     db.creativeProjects.push(uuidProject);
-    const fresh = await serveRenderSourceImage(uuidProject.id, "0", env);
+    const fresh = await serveRenderSourceImage(uuidProject.id, "0.jpg", env);
     assert.equal(fresh.status, 200);
     assert.equal(fresh.headers.get("content-type"), "image/avif");
-    const cached = await serveRenderSourceImage(uuidProject.id, "0", env);
+    const head = await serveRenderSourceImage(uuidProject.id, "0.jpg", env, true);
+    assert.equal(head.status, 200);
+    assert.equal(head.headers.get("content-length"), "3");
+    assert.equal(await head.text(), "");
+    const cached = await serveRenderSourceImage(uuidProject.id, "0.jpg", env);
     assert.equal(cached.status, 200);
     assert.equal(upstreamFetches, 1);
   } finally {

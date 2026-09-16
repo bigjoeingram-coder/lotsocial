@@ -5,3 +5,8 @@ export async function GET(_request: Request, context: { params: Promise<{ projec
   const { projectId, index } = await context.params;
   return serveRenderSourceImage(projectId, index, env);
 }
+
+export async function HEAD(_request: Request, context: { params: Promise<{ projectId: string; index: string }> }) {
+  const { projectId, index } = await context.params;
+  return serveRenderSourceImage(projectId, index, env, true);
+}

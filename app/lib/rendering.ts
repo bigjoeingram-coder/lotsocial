@@ -107,7 +107,7 @@ export function buildVerticalRenderPlan(project: CreativeProjectRecord, vehicle:
   const renderImages = Array.isArray(sourceOrigin)
     ? sourceOrigin
     : sourceOrigin
-    ? images.map((_src, index) => `${sourceOrigin.replace(/\/$/, "")}/api/render-source-images/${encodeURIComponent(project.id)}/${index}`)
+    ? images.map((_src, index) => `${sourceOrigin.replace(/\/$/, "")}/api/render-source-images/${encodeURIComponent(project.id)}/${index}.jpg`)
     : images;
   const total = Math.max(15, project.duration_seconds);
   const endCardLength = Math.min(6, Math.max(5, total * 0.15));

@@ -75,6 +75,7 @@ test("render revalidation allows current clean copy", () => {
 
 test("render jobs use the LotSocial source relay instead of provider hotlinks", async () => {
   let submittedPlan;
+  let submittedOptions;
   const failedJob = { id: "job_failed", project_id: cleanProject.id, provider_render_id: "v1:failed", status: "failed" };
   const response = await handleCreativeRenderPost(
     new Request("https://app.example/api/creative-projects/project_1/render", { method: "POST" }),
@@ -86,8 +87,9 @@ test("render jobs use the LotSocial source relay instead of provider hotlinks", 
       getLatestRenderJob: async () => failedJob,
       getImportedVehicle: async () => ({ id: "vehicle_1" }),
       buildVerticalRenderPlan: (_project, _vehicle, origin) => ({ render: { timeline: { tracks: [] } }, summary: { origin } }),
-      submitRender: async (plan) => {
+      submitRender: async (plan, _env, options) => {
         submittedPlan = plan;
+        submittedOptions = options;
         return { status: "queued", providerRenderId: "v1:retry", errorMessage: "" };
       },
       createRenderJob: async () => ({ id: "job_retry", status: "queued" }),
@@ -97,6 +99,7 @@ test("render jobs use the LotSocial source relay instead of provider hotlinks", 
 
   assert.equal(response.status, 201);
   assert.equal(submittedPlan.summary.origin, "https://lotsocial.test");
+  assert.deepEqual(submittedOptions, { convertAllImages: true });
 });
 
 test("active render status refreshes and serializes the provider result", async () => {

@@ -31,9 +31,10 @@ async function boundedImageBody(response: Response) {
   return body;
 }
 
-export async function serveRenderSourceImage(projectId: string, imageIndex: string, env: LotSocialEnvironment) {
-  if (!/^[a-f0-9-]{36}$/i.test(projectId) || !/^\d{1,2}$/.test(imageIndex)) return new Response("Not found", { status: 404 });
-  const index = Number(imageIndex);
+export async function serveRenderSourceImage(projectId: string, imageIndex: string, env: LotSocialEnvironment, headOnly = false) {
+  const indexMatch = imageIndex.match(/^(\d{1,2})(?:\.jpg)?$/i);
+  if (!/^[a-f0-9-]{36}$/i.test(projectId) || !indexMatch) return new Response("Not found", { status: 404 });
+  const index = Number(indexMatch[1]);
   if (index < 0 || index > 9) return new Response("Not found", { status: 404 });
   await ensureLotSocialSchema(env);
   const project = await database(env, "creative project").prepare(
@@ -47,7 +48,11 @@ export async function serveRenderSourceImage(projectId: string, imageIndex: stri
   const cacheKey = `render-sources/${projectId}/${index}`;
   const cached = await env.MEDIA?.get(cacheKey);
   if (cached) {
-    return new Response(cached.body, { headers: { "Content-Type": cached.httpMetadata?.contentType || "application/octet-stream", "Cache-Control": "public, max-age=604800, immutable" } });
+    return new Response(headOnly ? null : cached.body, { headers: {
+      "Content-Type": cached.httpMetadata?.contentType || "application/octet-stream",
+      "Content-Length": String(cached.size),
+      "Cache-Control": "public, max-age=604800, immutable",
+    } });
   }
   const upstream = await fetch(sourceUrl, {
     headers: { Accept: "image/avif,image/webp,image/png,image/jpeg,*/*", "User-Agent": "Mozilla/5.0 LotSocial/1.0" },
@@ -57,5 +62,5 @@ export async function serveRenderSourceImage(projectId: string, imageIndex: stri
   if (!upstream.ok || !ALLOWED_IMAGE_TYPES.has(contentType)) return new Response("Source image unavailable", { status: 502 });
   const body = await boundedImageBody(upstream);
   await env.MEDIA?.put(cacheKey, body, { httpMetadata: { contentType, cacheControl: "public, max-age=604800, immutable" } });
-  return new Response(body, { headers: { "Content-Type": contentType, "Content-Length": String(body.byteLength), "Cache-Control": "public, max-age=604800, immutable" } });
+  return new Response(headOnly ? null : body, { headers: { "Content-Type": contentType, "Content-Length": String(body.byteLength), "Cache-Control": "public, max-age=604800, immutable" } });
 }
