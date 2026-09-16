@@ -194,11 +194,11 @@ test("rendered end card uses a full-frame HTML5 grid with bounded rows and the a
   const css = endCard.asset.css;
   assert.ok(plan.summary.endCardSeconds >= 5);
   assert.equal(endCard.asset.type, "html5");
-  assert.equal(endCard.width, 1080);
-  assert.equal(endCard.height, 1920);
+  assert.equal(endCard.width, 720);
+  assert.equal(endCard.height, 1280);
   assert.match(html, /<img class="profile-photo" src="https:\/\/app\.example\/api\/profile-photos\/00000000-0000-4000-8000-000000000000\.jpg"/);
-  assert.match(css, /html,body\{box-sizing:border-box;width:1080px;height:1920px/);
-  assert.match(css, /\.content\{[^}]*display:grid;grid-template-rows:430px 160px 155px 140px 190px 1fr 90px/);
+  assert.match(css, /html,body\{box-sizing:border-box;width:720px;height:1280px/);
+  assert.match(css, /\.content\{[^}]*display:grid;grid-template-rows:286px 106px 103px 93px 126px 1fr 60px/);
   assert.match(css, /\.profile-photo\{[^}]*object-fit:contain/);
   assert.doesNotMatch(css, /\.content\{[^}]*position:absolute/);
   assert.doesNotMatch(css, /\.brand\{[^}]*position:absolute/);
