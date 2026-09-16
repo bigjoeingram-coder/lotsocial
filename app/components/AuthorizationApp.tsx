@@ -415,6 +415,8 @@ export function AuthorizationApp({ user }: { user: User }) {
       if (!response.ok || !payload.project) throw new Error(payload.error ?? "Unable to create the storyboard.");
       setCreativeDraft(payload.project);
       setRenderJob(null);
+      setGeneratingCreative(false);
+      if (selectedCreativeImages.length >= 2) await startCreativeRender(payload.project);
     } catch (caught) {
       setCreativeError(caught instanceof Error ? caught.message : "Unable to create the storyboard.");
     } finally {
@@ -446,13 +448,12 @@ export function AuthorizationApp({ user }: { user: User }) {
     }
   }
 
-  async function prepareRender() {
-    if (!creativeDraft) return;
+  async function startCreativeRender(project: CreativeProject) {
     setPreparingRender(true);
     setCreativeError("");
     setRenderShareStatus("");
     try {
-      const response = await fetch(`/api/creative-projects/${creativeDraft.id}/render`, { method: "POST", headers: apiHeaders() });
+      const response = await fetch(`/api/creative-projects/${project.id}/render`, { method: "POST", headers: apiHeaders() });
       const payload = await response.json() as { job?: RenderJob; error?: string };
       if ((!response.ok && response.status !== 502) || !payload.job) throw new Error(payload.error ?? "Unable to prepare the production render.");
       setRenderJob(payload.job);
@@ -461,6 +462,11 @@ export function AuthorizationApp({ user }: { user: User }) {
     } finally {
       setPreparingRender(false);
     }
+  }
+
+  async function prepareRender() {
+    if (!creativeDraft) return;
+    await startCreativeRender(creativeDraft);
   }
 
   const refreshRenderStatus = useCallback(async (showError = false) => {
@@ -850,7 +856,7 @@ export function AuthorizationApp({ user }: { user: User }) {
                   <section className="creative-step"><div className="creative-step-title"><span>2</span><div><h2>Choose the video template</h2><p>Each template has its own pacing, motion, background, and music.</p></div></div><div className="creative-options"><label className={creativeStyle === "energetic" ? "selected" : ""}><input type="radio" name="style" value="energetic" checked={creativeStyle === "energetic"} onChange={() => { setCreativeStyle("energetic"); setCreativeDraft(null); }} /><strong>Fast cuts</strong><p>Rapid movement, bold backdrop, upbeat music</p></label><label className={creativeStyle === "walkaround" ? "selected" : ""}><input type="radio" name="style" value="walkaround" checked={creativeStyle === "walkaround"} onChange={() => { setCreativeStyle("walkaround"); setCreativeDraft(null); }} /><strong>Walkaround</strong><p>Steady tour, clean backdrop, lighter music</p></label><label className={creativeStyle === "premium" ? "selected" : ""}><input type="radio" name="style" value="premium" checked={creativeStyle === "premium"} onChange={() => { setCreativeStyle("premium"); setCreativeDraft(null); }} /><strong>Premium</strong><p>Cinematic motion, dark backdrop, restrained music</p></label></div><div className="duration-options"><span>Target length</span>{[15,30,45].map((duration) => <button type="button" key={duration} className={creativeDuration === duration ? "active" : ""} onClick={() => { setCreativeDuration(duration); setCreativeDraft(null); }}>{duration}s</button>)}</div><fieldset className="gravy-options"><legend>Choose your Gravy</legend><p>Controls the embellishment—not the vehicle facts.</p><div>{([{ value: "none", label: "No Gravy", detail: "Straight facts" }, { value: "light", label: "Light Gravy", detail: "A little personality" }, { value: "extra", label: "Extra Gravy", detail: "Maximum safe sizzle" }] as const).map((option) => <label key={option.value} className={gravyLevel === option.value ? "selected" : ""}><input type="radio" name="gravy" value={option.value} checked={gravyLevel === option.value} onChange={() => { setGravyLevel(option.value); setCreativeDraft(null); setRenderJob(null); }} /><strong>{option.label}</strong><span>{option.detail}</span></label>)}</div></fieldset></section>
                   <section className="creative-step"><div className="creative-step-title"><span>3</span><div><h2>Salesperson end card</h2><p>This becomes the final shot. The selected CTA also appears in the generated post wording.</p></div></div><div className="end-card-builder"><label className="profile-upload"><span>{endCardPhotoUrl ? <img src={endCardPhotoUrl} alt="End-card profile" /> : "Photo"}</span><input type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif,.jpg,.jpeg,.png,.webp,.heic,.heif" onChange={(event) => void uploadEndCardPhoto(event.target.files?.[0] ?? null)} disabled={uploadingEndCardPhoto} /><strong>{uploadingEndCardPhoto ? "Preparing..." : endCardPhotoUrl ? "Replace profile photo" : "Upload profile photo"}</strong><small>JPEG, PNG, WebP, or HEIC. Large phone photos are resized automatically.</small></label><div className="form-grid compact"><label className="field"><span>Display name</span><input name="name" autoComplete="section-end-card name" value={endCardName} onChange={(event) => { setEndCardName(event.target.value); setCreativeDraft(null); }} required /></label><label className="field"><span>Phone</span><input type="tel" name="tel" autoComplete="section-end-card tel" inputMode="tel" enterKeyHint="next" value={endCardPhone} onChange={(event) => { setEndCardPhone(event.target.value); setCreativeDraft(null); }} placeholder="Mobile or dealership phone" /></label><label className="field"><span>Email</span><input type="email" name="email" autoComplete="section-end-card email" inputMode="email" enterKeyHint="next" autoCapitalize="off" spellCheck={false} value={endCardEmail} onChange={(event) => { setEndCardEmail(event.target.value); setCreativeDraft(null); }} /></label><label className="field"><span>Call to action</span><select value={endCardCta} onChange={(event) => { setEndCardCta(event.target.value); setCreativeDraft(null); }}><option>Message me for details</option><option>Schedule your test drive</option><option>Ask me for today's availability</option><option>Contact me for current pricing</option></select></label></div></div>{endCardPhotoStatus && <p className={`profile-upload-status ${endCardPhotoUrl ? "approved" : "blocked"}`}>{endCardPhotoStatus}</p>}</section>
                   {creativeError && <div className="form-error" role="alert">{creativeError}</div>}
-                  <button className="primary-button creative-generate" type="submit" disabled={generatingCreative}>{generatingCreative ? "Building creative..." : creativeDraft ? "Regenerate creative draft" : selectedCreativeImages.length < 2 ? "Generate social caption" : "Generate creative draft"}</button>
+                  <button className="primary-button creative-generate" type="submit" disabled={generatingCreative || preparingRender}>{generatingCreative ? "Creating post draft..." : "Create post draft"}</button>
                 </main>
                 <aside className="creative-preview">
                   <div className="phone-preview"><div className="phone-screen">
