@@ -8,6 +8,11 @@ type ShotstackStage = "stage" | "v1";
 const INSPECTION_IMAGE_SCALE = 0.92;
 const INGEST_POLL_ATTEMPTS = 30;
 const HTML5_MARKUP_LIMIT = 1_000_000;
+const MUSIC_ENERGY_BY_STYLE = {
+  energetic: "high",
+  walkaround: "medium",
+  premium: "low",
+} as const;
 
 const VIDEO_TEMPLATES = {
   energetic: [
@@ -20,6 +25,8 @@ const VIDEO_TEMPLATES = {
       tintCss: "div{width:1080px;height:1920px;background:linear-gradient(145deg,#071116 0%,#0d2025 58%,#31520f 100%)}",
       music: "https://shotstack-assets.s3-ap-southeast-2.amazonaws.com/music/freepd/motions.mp3",
       musicVolume: 0.22,
+      musicEnergy: "high",
+      musicLabel: "High-energy · Motions",
     },
     {
       name: "Fast Cuts · Velocity",
@@ -30,6 +37,8 @@ const VIDEO_TEMPLATES = {
       tintCss: "div{width:1080px;height:1920px;background:linear-gradient(155deg,#081015 0%,#17202c 52%,#243f11 100%)}",
       music: "https://shotstack-assets.s3-ap-southeast-2.amazonaws.com/music/freepd/motions.mp3",
       musicVolume: 0.2,
+      musicEnergy: "high",
+      musicLabel: "High-energy · Motions",
     },
   ],
   walkaround: [
@@ -42,6 +51,8 @@ const VIDEO_TEMPLATES = {
       tintCss: "div{width:1080px;height:1920px;background:linear-gradient(180deg,#071116 0%,#17242a 62%,#0d181c 100%)}",
       music: "https://shotstack-assets.s3-ap-southeast-2.amazonaws.com/music/freepd/advertising.mp3",
       musicVolume: 0.16,
+      musicEnergy: "medium",
+      musicLabel: "Balanced · Advertising",
     },
     {
       name: "Walkaround · Showcase",
@@ -52,6 +63,8 @@ const VIDEO_TEMPLATES = {
       tintCss: "div{width:1080px;height:1920px;background:linear-gradient(165deg,#071116 0%,#193038 54%,#102119 100%)}",
       music: "https://shotstack-assets.s3-ap-southeast-2.amazonaws.com/music/freepd/advertising.mp3",
       musicVolume: 0.15,
+      musicEnergy: "medium",
+      musicLabel: "Balanced · Advertising",
     },
   ],
   premium: [
@@ -64,6 +77,8 @@ const VIDEO_TEMPLATES = {
       tintCss: "div{width:1080px;height:1920px;background:linear-gradient(155deg,#050607 0%,#111519 64%,#3a321d 100%)}",
       music: "https://shotstack-assets.s3-ap-southeast-2.amazonaws.com/music/freepd/fireworks.mp3",
       musicVolume: 0.13,
+      musicEnergy: "low",
+      musicLabel: "Restrained · Fireworks",
     },
     {
       name: "Premium · Gallery",
@@ -74,6 +89,8 @@ const VIDEO_TEMPLATES = {
       tintCss: "div{width:1080px;height:1920px;background:linear-gradient(145deg,#06080a 0%,#172027 62%,#2f2a21 100%)}",
       music: "https://shotstack-assets.s3-ap-southeast-2.amazonaws.com/music/freepd/fireworks.mp3",
       musicVolume: 0.12,
+      musicEnergy: "low",
+      musicLabel: "Restrained · Fireworks",
     },
   ],
 } as const;
@@ -166,6 +183,10 @@ function styleTreatment(style: string, variant: number, index: number) {
 export function buildVerticalRenderPlan(project: CreativeProjectRecord, vehicle: ImportedVehicleRecord, sourceOrigin: string | string[] = "", profilePhotoSource = project.end_card_photo_url) {
   const templateVariant = renderTemplateVariant(project.style, vehicle);
   const template = videoTemplate(project.style, vehicle);
+  const normalizedStyle = project.style in MUSIC_ENERGY_BY_STYLE ? project.style as keyof typeof MUSIC_ENERGY_BY_STYLE : "walkaround";
+  if (template.musicEnergy !== MUSIC_ENERGY_BY_STYLE[normalizedStyle]) {
+    throw new Error("The selected music does not match this video category. No render was submitted or charged.");
+  }
   const images = JSON.parse(project.selected_images || "[]") as string[];
   const renderImages = Array.isArray(sourceOrigin)
     ? sourceOrigin
@@ -243,7 +264,8 @@ export function buildVerticalRenderPlan(project: CreativeProjectRecord, vehicle:
       style: project.style,
       template: template.name,
       templateVariant: templateVariant + 1,
-      music: "Included",
+      music: template.musicLabel,
+      musicEnergy: template.musicEnergy,
       fidelity: "Original dealership VDP photos only, template-specific motion, background, pacing and music, inspection-fit framing, and a branded salesperson end card with source-time pricing disclosure",
     },
   };

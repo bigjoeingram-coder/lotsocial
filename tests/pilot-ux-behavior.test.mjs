@@ -101,6 +101,9 @@ test("each video category rotates between two stable production templates", () =
     assert.deepEqual([...variants].sort(), [0, 1]);
     assert.equal(names.size, 2);
     assert.equal(visualSignatures.size, 2, `${style} variants must differ in motion and art direction, not only name`);
+    assert.deepEqual(new Set(plans.map((plan) => plan.summary.musicEnergy)), new Set([
+      style === "energetic" ? "high" : style === "premium" ? "low" : "medium",
+    ]));
     assert.ok([...names].every((name) => name.startsWith(style === "energetic" ? "Fast Cuts ·" : style === "premium" ? "Premium ·" : "Walkaround ·")));
   }
 });
