@@ -154,6 +154,38 @@ test("the render source relay validates, caches, and serves the captured dealers
   }
 });
 
+test("the stable render source falls back to the signed relay when the dealer CDN blocks Workers", async () => {
+  const originalFetch = globalThis.fetch;
+  const objects = new Map();
+  const media = {
+    get: async (key) => objects.get(key) ?? null,
+    put: async (key, body, options) => objects.set(key, { body, size: body.byteLength, httpMetadata: options.httpMetadata }),
+  };
+  const uuidProject = { ...project, id: "00000000-0000-4000-8000-000000000002" };
+  const db = new FakeD1({ creativeProjects: [uuidProject] });
+  const requests = [];
+  try {
+    globalThis.fetch = async (url) => {
+      requests.push(String(url));
+      if (requests.length === 1) return new Response("blocked", { status: 403, headers: { "Content-Type": "text/html" } });
+      assert.match(String(url), /^https:\/\/lotsocial-render-source\.bigjoe-ingram\.workers\.dev\/image\?e=\d+&u=[A-Za-z0-9_-]+&s=[A-Za-z0-9_-]+$/);
+      return new Response(new Uint8Array([4, 5, 6]), { headers: { "Content-Type": "image/jpeg", "Content-Length": "3" } });
+    };
+    const env = testEnv({
+      DB: db,
+      MEDIA: media,
+      LOTSOCIAL_RENDER_PROXY_ORIGIN: "https://lotsocial-render-source.bigjoe-ingram.workers.dev/",
+      LOTSOCIAL_RENDER_PROXY_SECRET: "test-secret",
+    });
+    const served = await serveRenderSourceImage(uuidProject.id, "0.jpg", env);
+    assert.equal(served.status, 200);
+    assert.equal(served.headers.get("content-type"), "image/jpeg");
+    assert.equal(requests.length, 2);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("rendered end card uses the associate photo, spaced contact order, and approved disclaimer without a vehicle-title ghost", () => {
   const withPhoto = { ...project, end_card_photo_url: "https://app.example/api/profile-photos/00000000-0000-4000-8000-000000000000.jpg" };
   const plan = buildVerticalRenderPlan(withPhoto, importedVehicle({ imported_at: "2026-09-14 16:20:00" }));
