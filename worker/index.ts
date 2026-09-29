@@ -1,6 +1,7 @@
 /** Cloudflare Worker entry point for the vinext-starter template. */
 import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } from "vinext/server/image-optimization";
 import handler from "vinext/server/app-router-entry";
+import { sendDailyUsageDigest } from "../app/lib/usage.ts";
 
 interface Env {
   ASSETS: Fetcher;
@@ -10,8 +11,10 @@ interface Env {
     input(stream: ReadableStream): {
       transform(options: Record<string, unknown>): {
         output(options: { format: string; quality: number }): Promise<{ response(): Response }>;
-      };
-    };
+  };
+  NTFY_BASE_URL?: string;
+  NTFY_TOPIC?: string;
+};
   };
 }
 
@@ -45,6 +48,9 @@ const worker = {
     forwardedHeaders.set("x-forwarded-host", url.host);
     forwardedHeaders.set("x-forwarded-proto", url.protocol.replace(":", ""));
     return handler.fetch(new Request(request, { headers: forwardedHeaders }), env, ctx);
+  },
+  async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+    ctx.waitUntil(sendDailyUsageDigest(env));
   },
 };
 

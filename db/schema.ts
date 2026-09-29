@@ -12,6 +12,15 @@ export const pilotInvites = sqliteTable("pilot_invites", {
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 }, (table) => [index("pilot_invites_email_idx").on(table.email, table.createdAt)]);
 
+export const sharedJoinTokens = sqliteTable("shared_join_tokens", {
+  tokenHash: text("token_hash").primaryKey(),
+  expiresAt: text("expires_at").notNull(),
+  maxSignups: integer("max_signups").notNull(),
+  signupCount: integer("signup_count").notNull().default(0),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [index("shared_join_tokens_expiry_idx").on(table.expiresAt)]);
+
 export const associateAccounts = sqliteTable("associate_accounts", {
   id: text("id").primaryKey(),
   email: text("email").notNull().unique(),
@@ -37,6 +46,20 @@ export const associateSessions = sqliteTable("associate_sessions", {
 }, (table) => [
   index("associate_sessions_account_idx").on(table.accountId, table.createdAt),
   index("associate_sessions_expiry_idx").on(table.expiresAt),
+]);
+
+export const usageEvents = sqliteTable("usage_events", {
+  id: text("id").primaryKey(),
+  accountId: text("account_id").notNull().default(""),
+  associateEmail: text("associate_email").notNull(),
+  eventType: text("event_type").notNull(),
+  entityType: text("entity_type").notNull().default(""),
+  entityId: text("entity_id").notNull().default(""),
+  metadata: text("metadata").notNull().default("{}"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [
+  index("usage_events_associate_created_idx").on(table.associateEmail, table.createdAt),
+  index("usage_events_created_event_idx").on(table.createdAt, table.eventType),
 ]);
 
 export const accountLoginLinks = sqliteTable("account_login_links", {

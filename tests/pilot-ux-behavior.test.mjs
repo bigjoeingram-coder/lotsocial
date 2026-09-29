@@ -31,6 +31,7 @@ test("public caption names the dealership host instead of saying VDP", () => {
   const vehicle = importedVehicle({ source_host: "waconia.furymotors.com", price: "43921" });
   const copy = createCopy(vehicle, "walkaround", 30, "Joe", "Message me for details");
   assert.match(copy.socialCaption, /Total price listed on waconia\.furymotors\.com: \$43,921\./);
+  assert.match(copy.socialCaption, /Accuracy and listing limitations: https:\/\/lotsocial-authorization\.salesgenius\.chatgpt\.site\/legal\/accuracy/);
   assert.doesNotMatch(copy.socialCaption, /listed on the VDP/i);
 });
 
@@ -50,6 +51,7 @@ test("No, Light, and Extra Gravy create distinct copy without changing the compl
     assert.match(copy.socialCaption, /Confirm equipment and eligibility with the dealership/);
     assert.match(copy.socialCaption, /expires 7 days after posting or when the vehicle sells/);
     assert.match(copy.socialCaption, /Total price listed on dealer\.example: \$43,921/);
+    assert.match(copy.socialCaption, /\/legal\/accuracy/);
   }
 });
 
@@ -246,13 +248,16 @@ test("rendered end card uses a full-frame HTML5 grid with bounded rows and the a
   assert.equal(endCard.height, 1280);
   assert.match(html, /<img class="profile-photo" src="https:\/\/app\.example\/api\/profile-photos\/00000000-0000-4000-8000-000000000000\.jpg"/);
   assert.match(css, /html,body\{box-sizing:border-box;width:720px;height:1280px/);
-  assert.match(css, /\.content\{[^}]*display:grid;grid-template-rows:286px 106px 103px 93px 126px 1fr 60px/);
+  assert.match(css, /\.content\{[^}]*display:grid;grid-template-rows:280px 100px 90px 80px 122px 58px 1fr 56px/);
   assert.match(css, /\.profile-photo\{[^}]*object-fit:contain/);
   assert.doesNotMatch(css, /\.content\{[^}]*position:absolute/);
   assert.doesNotMatch(css, /\.brand\{[^}]*position:absolute/);
   assert.ok(html.indexOf("Joe") < html.indexOf("555-0100"));
   assert.ok(html.indexOf("555-0100") < html.indexOf("Message me for details"));
   assert.ok(html.indexOf("Message me for details") < html.indexOf("Pricing and availability"));
+  assert.ok(html.indexOf("Pricing and availability") < html.indexOf("Accuracy:"));
+  assert.match(html, /lotsocial-authorization\.salesgenius\.chatgpt\.site\/legal\/accuracy/);
+  assert.match(html, /Policy 2026-09-28-v0\.9/);
   assert.ok(html.indexOf("Pricing and availability") < html.indexOf("LotSocial"));
   assert.doesNotMatch(html, /2025 Ford/);
   assert.doesNotMatch(html, /<span>L<\/span><b>LotSocial/);

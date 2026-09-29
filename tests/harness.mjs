@@ -16,6 +16,13 @@ export function testEnv(overrides = {}) {
     LOTSOCIAL_DAILY_VDP_IMPORT_CAP: "25",
     LOTSOCIAL_DAILY_AUTHORIZATION_REQUEST_CAP: "10",
     LOTSOCIAL_DAILY_MANAGER_EMAIL_CAP: "5",
+    LOTSOCIAL_DAILY_BRIGHTDATA_ASSOCIATE_CAP: "25",
+    LOTSOCIAL_DAILY_BRIGHTDATA_GLOBAL_CAP: "100",
+    LOTSOCIAL_DAILY_SHOTSTACK_ASSOCIATE_CAP: "5",
+    LOTSOCIAL_DAILY_SHOTSTACK_GLOBAL_CAP: "25",
+    LOTSOCIAL_DAILY_PUBLIC_SIGNUP_CAP: "50",
+    LOTSOCIAL_SHARED_JOIN_EXPIRES_AT: "2099-12-31T23:59:59.000Z",
+    LOTSOCIAL_SHARED_JOIN_MAX_SIGNUPS: "25",
     LOTSOCIAL_MANAGER_EMAIL_DOMAIN_ALLOWLIST: "",
     ...overrides,
   };
@@ -66,6 +73,7 @@ export class FakeD1 {
     this.creativeRenderJobs = [...(seed.creativeRenderJobs ?? [])];
     this.rateLimitCounters = new Map();
     this.importOutcomes = [...(seed.importOutcomes ?? [])];
+    this.usageEvents = [...(seed.usageEvents ?? [])];
     this.preparedSql = [];
     this.failOnSql = seed.failOnSql ?? "";
   }
@@ -82,6 +90,7 @@ export class FakeD1 {
       creativeRenderJobs: structuredClone(this.creativeRenderJobs),
       rateLimitCounters: structuredClone(this.rateLimitCounters),
       importOutcomes: structuredClone(this.importOutcomes),
+      usageEvents: structuredClone(this.usageEvents),
     };
     try {
       const results = [];
@@ -93,6 +102,7 @@ export class FakeD1 {
       this.creativeRenderJobs = snapshot.creativeRenderJobs;
       this.rateLimitCounters = snapshot.rateLimitCounters;
       this.importOutcomes = snapshot.importOutcomes;
+      this.usageEvents = snapshot.usageEvents;
       throw error;
     }
   }
@@ -142,6 +152,11 @@ export class FakeD1 {
     if (matches(sql, "INSERT INTO import_outcomes")) {
       const [id, associateEmail, sourceHost, outcome, elapsedMs, fallback, brightDataUsed, notice] = values;
       this.importOutcomes.push({ id, associate_email: associateEmail, source_host: sourceHost, outcome, elapsed_ms: elapsedMs, fallback, bright_data_used: brightDataUsed, notice });
+      return 1;
+    }
+    if (matches(sql, "INSERT INTO usage_events")) {
+      const [id, accountId, associateEmail, eventType, entityType, entityId, metadata] = values;
+      this.usageEvents.push({ id, account_id: accountId, associate_email: associateEmail, event_type: eventType, entity_type: entityType, entity_id: entityId, metadata });
       return 1;
     }
     if (matches(sql, "DELETE FROM creative_render_jobs")) {

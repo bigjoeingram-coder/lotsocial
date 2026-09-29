@@ -11,6 +11,8 @@ import {
   submitRender,
   validateSignedRenderSourceUrls,
 } from "./rendering.ts";
+import { recordUsageEvent } from "./usage.ts";
+import { incrementDailyLimit, rateLimitResponse } from "./limits.ts";
 
 type RouteUser = {
   displayName: string;
@@ -33,6 +35,7 @@ type CreativeRenderDependencies = {
   archiveRenderedVideo?: typeof archiveRenderedVideo;
   updateRenderJob?: typeof updateRenderJob;
   serializeRenderJob?: typeof serializeRenderJob;
+  incrementDailyLimit?: typeof incrementDailyLimit;
 };
 
 const CURRENT_COPY_POLICY_STARTED_AT = Date.parse("2026-08-20T00:03:20Z");
@@ -74,6 +77,11 @@ export async function handleCreativeRenderPost(
   } catch (caught) {
     return Response.json({ error: caught instanceof Error ? caught.message : "The selected photos could not be prepared. No render was submitted or charged." }, { status: 422 });
   }
+  const consumeLimit = dependencies.incrementDailyLimit ?? incrementDailyLimit;
+  const associateLimit = await consumeLimit(env, "shotstack_associate", user.email);
+  if (!associateLimit.allowed) return rateLimitResponse(associateLimit, "Daily Shotstack render limit reached for this account.");
+  const globalLimit = await consumeLimit(env, "shotstack_global", "all-associates");
+  if (!globalLimit.allowed) return rateLimitResponse(globalLimit, "Daily LotSocial Shotstack render limit reached.");
   const plan = (dependencies.buildVerticalRenderPlan ?? buildVerticalRenderPlan)(project, vehicle, sourceOrigin, project.end_card_photo_url);
   const submission = await (dependencies.submitRender ?? submitRender)(plan, env, { convertAllImages: true });
   const job = await (dependencies.createRenderJob ?? createRenderJob)({
@@ -86,6 +94,7 @@ export async function handleCreativeRenderPost(
     env,
   });
   if (!job) return Response.json({ error: "The render job could not be saved." }, { status: 500 });
+  await recordUsageEvent({ associateEmail: user.email, eventType: "video_render_started", entityType: "render_job", entityId: job.id, metadata: { projectId: project.id, status: submission.status } }, env);
   return Response.json({ job: serialize(job) }, { status: submission.status === "provider_error" ? 502 : 201 });
 }
 
@@ -131,7 +140,12 @@ export async function handleCreativeRenderGet(
           errorMessage: storageWarning,
           env,
         });
-        if (refreshed) return Response.json({ job: serialize(refreshed) });
+        if (refreshed) {
+          if (providerState.status === "completed" && job.status !== "completed") {
+            await recordUsageEvent({ associateEmail: user.email, eventType: "video_render_completed", entityType: "render_job", entityId: job.id, metadata: { projectId: project.id } }, env);
+          }
+          return Response.json({ job: serialize(refreshed) });
+        }
       }
     } catch (caught) {
       return Response.json({ job: serialize(job), warning: caught instanceof Error ? caught.message : "The renderer status is temporarily unavailable." });

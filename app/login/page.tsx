@@ -6,10 +6,10 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
     <section className="account-card">
       <div className="account-brand"><span>L</span><strong>LotSocial</strong></div>
       <p className="eyebrow">Customer pilot</p>
-      <h1>Sign in to your dealership workspace</h1>
-      <p>Use the work email connected to your LotSocial pilot account. No ChatGPT account is required.</p>
+      <h1>Sign in to your workspace</h1>
+      <p>Use the work email connected to your LotSocial account. No ChatGPT account is required.</p>
       <LoginForm invalidLink={query.error === "invalid_link"} />
-      <aside className="account-note"><strong>Creating an account?</strong><span>Open the single-use invitation sent by the LotSocial pilot team.</span></aside>
+      <aside className="account-note"><strong>New to LotSocial?</strong><span>Open the private signup link Joe sent you.</span></aside>
     </section>
   </main>;
 }

@@ -3,6 +3,7 @@ import { associateAuthResponse, requireAssociate } from "../../chatgpt-auth";
 import { saveCreativeProject, serializeCreativeProject } from "../../lib/creative";
 import type { GravyLevel } from "../../lib/creative";
 import { getImportedVehicle } from "../../lib/vdp";
+import { recordUsageEvent } from "../../lib/usage";
 
 function clean(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
@@ -55,8 +56,10 @@ export async function POST(request: Request) {
     endCardCta,
     endCardPhotoUrl: cleanProfilePhotoUrl(payload.endCardPhotoUrl, request),
     gravyLevel,
+    legalAccuracyUrl: new URL("/legal/accuracy", request.url).toString(),
     env,
   });
   if (!project) return Response.json({ error: "The creative draft could not be saved." }, { status: 500 });
+  await recordUsageEvent({ accountId: user.accountId, associateEmail: user.email, eventType: "post_draft_created", entityType: "creative_project", entityId: project.id }, env);
   return Response.json({ project: serializeCreativeProject(project) }, { status: 201 });
 }
