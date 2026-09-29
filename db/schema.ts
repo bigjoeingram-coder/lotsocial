@@ -71,6 +71,25 @@ export const accountLoginLinks = sqliteTable("account_login_links", {
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 }, (table) => [index("account_login_links_account_idx").on(table.accountId, table.createdAt)]);
 
+export const accountEmailVerifications = sqliteTable("account_email_verifications", {
+  id: text("id").primaryKey(),
+  tokenHash: text("token_hash").notNull().unique(),
+  sourceType: text("source_type").notNull(),
+  sourceTokenHash: text("source_token_hash").notNull(),
+  email: text("email").notNull(),
+  displayName: text("display_name").notNull(),
+  phone: text("phone").notNull(),
+  dealershipName: text("dealership_name").notNull(),
+  dealershipDomain: text("dealership_domain").notNull(),
+  rooftopLocation: text("rooftop_location").notNull(),
+  expiresAt: text("expires_at").notNull(),
+  usedAt: text("used_at"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [
+  index("account_email_verifications_email_idx").on(table.email, table.createdAt),
+  index("account_email_verifications_expiry_idx").on(table.expiresAt),
+]);
+
 export const authorizationRequests = sqliteTable("authorization_requests", {
   id: text("id").primaryKey(),
   approvalTokenHash: text("approval_token_hash").notNull().unique(),

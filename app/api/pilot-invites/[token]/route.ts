@@ -1,5 +1,6 @@
 import { env } from "cloudflare:workers";
-import { acceptPilotInvite, acceptSharedJoin, getPilotInvite, getSharedJoinAvailability, inviteIsAvailable, isSharedJoinToken, sessionCookie } from "../../../lib/account-auth.ts";
+import { beginPilotInvite, beginSharedJoin, getPilotInvite, getSharedJoinAvailability, inviteIsAvailable, isSharedJoinToken } from "../../../lib/account-auth.ts";
+import { sendAccountAccessEmail } from "../../../lib/account-email.ts";
 import { incrementDailyLimit, rateLimitResponse } from "../../../lib/limits.ts";
 
 export async function GET(_request: Request, context: { params: Promise<{ token: string }> }) {
@@ -28,7 +29,7 @@ export async function POST(request: Request, context: { params: Promise<{ token:
       const limit = await incrementDailyLimit(env, "public_signups", ip);
       if (!limit.allowed) return rateLimitResponse(limit, "Daily private-link signup limit reached.");
     }
-    const session = shared ? await acceptSharedJoin({
+    const access = shared ? await beginSharedJoin({
       token,
       displayName: body.displayName ?? "",
       email: body.email ?? "",
@@ -37,7 +38,7 @@ export async function POST(request: Request, context: { params: Promise<{ token:
       dealershipDomain: body.dealershipDomain ?? "",
       rooftopLocation: body.rooftopLocation ?? "",
       env,
-    }) : await acceptPilotInvite({
+    }) : await beginPilotInvite({
       token,
       displayName: body.displayName ?? "",
       email: body.email ?? "",
@@ -45,8 +46,10 @@ export async function POST(request: Request, context: { params: Promise<{ token:
       rooftopLocation: body.rooftopLocation ?? "",
       env,
     });
-    return Response.json({ ok: true, redirectTo: "/" }, { status: 201, headers: { "Set-Cookie": sessionCookie(session.rawSession, session.expiresAt) } });
+    const sent = await sendAccountAccessEmail(access, env);
+    if (!sent) return Response.json({ error: "LotSocial could not send the secure email. Try again." }, { status: 503 });
+    return Response.json({ message: "Check your work email for a secure link to continue." }, { status: 202 });
   } catch (error) {
-    return Response.json({ error: error instanceof Error ? error.message : "Unable to create the account." }, { status: 400 });
+    return Response.json({ error: error instanceof Error ? error.message : "Unable to prepare secure account access." }, { status: 400 });
   }
 }

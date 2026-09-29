@@ -1,7 +1,6 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
-import { prepareProfilePhoto, readPhotoUploadResponse } from "../../lib/profile-photo-client";
 
 type Invite = { mode: "shared" | "single"; email?: string; dealershipName?: string; dealershipDomain?: string; expiresAt?: string };
 
@@ -13,8 +12,8 @@ export function JoinForm({ token }: { token: string }) {
   const [dealershipName, setDealershipName] = useState("");
   const [dealershipDomain, setDealershipDomain] = useState("");
   const [rooftopLocation, setRooftopLocation] = useState("");
-  const [photo, setPhoto] = useState<File | null>(null);
   const [error, setError] = useState("");
+  const [submitted, setSubmitted] = useState(false);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
 
@@ -43,32 +42,18 @@ export function JoinForm({ token }: { token: string }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ displayName, email, phone, dealershipName, dealershipDomain, rooftopLocation }),
       });
-      const payload = await response.json() as { redirectTo?: string; error?: string };
-      if (!response.ok) throw new Error(payload.error ?? "Unable to create the account.");
-
-      if (photo) {
-        try {
-          const prepared = await prepareProfilePhoto(photo);
-          const form = new FormData();
-          form.append("photo", prepared);
-          const upload = await fetch("/api/profile-photos", { method: "POST", body: form });
-          const uploaded = await readPhotoUploadResponse(upload);
-          if (upload.ok && uploaded.photoUrl) {
-            await fetch("/api/account-profile", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ profilePhotoUrl: uploaded.photoUrl }) });
-          }
-        } catch {
-          // Account creation remains successful; the photo can be added again inside the workspace.
-        }
-      }
-      window.location.assign(payload.redirectTo ?? "/");
+      const payload = await response.json() as { message?: string; error?: string };
+      if (!response.ok) throw new Error(payload.error ?? "Unable to send the secure email.");
+      setSubmitted(true);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Unable to create the account.");
+      setError(caught instanceof Error ? caught.message : "Unable to send the secure email.");
       setSubmitting(false);
     }
   }
 
   if (loading) return <p className="account-message">Verifying your secure invitation...</p>;
   if (!invite) return <p className="account-message error">{error}</p>;
+  if (submitted) return <div className="account-message"><strong>Check your work email.</strong><p>Use the single-use secure link to verify the address and continue. No account or session exists until that link is opened.</p></div>;
 
   return <form className="account-form" onSubmit={submit}>
     {invite.mode === "single" && <div className="account-dealer"><strong>{invite.dealershipName}</strong><span>{invite.dealershipDomain}</span></div>}
@@ -81,8 +66,8 @@ export function JoinForm({ token }: { token: string }) {
       <label><span>Dealership website</span><input inputMode="url" autoComplete="url" value={dealershipDomain} onChange={(event) => setDealershipDomain(event.target.value)} placeholder="examplemotors.com" required /></label>
     </>}
     <label><span>Dealership location</span><input autoComplete="organization" value={rooftopLocation} onChange={(event) => setRooftopLocation(event.target.value)} placeholder="Waconia, MN" required /></label>
-    <label><span>Profile or dealership photo <small>Optional</small></span><input type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif,.jpg,.jpeg,.png,.webp,.heic,.heif" onChange={(event) => setPhoto(event.target.files?.[0] ?? null)} /></label>
-    <button className="primary-button" type="submit" disabled={submitting}>{submitting ? "Creating your workspace..." : "Create my LotSocial account"}</button>
+    <p className="account-message">You can add a profile or dealership photo after verifying your email.</p>
+    <button className="primary-button" type="submit" disabled={submitting}>{submitting ? "Sending secure link..." : "Verify email and continue"}</button>
     {error && <p className="account-message error" role="alert">{error}</p>}
   </form>;
 }

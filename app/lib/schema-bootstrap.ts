@@ -120,6 +120,23 @@ export const SCHEMA_BOOTSTRAP_SQL = [
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
   )`,
   "CREATE INDEX IF NOT EXISTS account_login_links_account_idx ON account_login_links(account_id, created_at DESC)",
+  `CREATE TABLE IF NOT EXISTS account_email_verifications (
+    id TEXT PRIMARY KEY NOT NULL,
+    token_hash TEXT NOT NULL UNIQUE,
+    source_type TEXT NOT NULL,
+    source_token_hash TEXT NOT NULL,
+    email TEXT NOT NULL,
+    display_name TEXT NOT NULL,
+    phone TEXT NOT NULL,
+    dealership_name TEXT NOT NULL,
+    dealership_domain TEXT NOT NULL,
+    rooftop_location TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    used_at TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`,
+  "CREATE INDEX IF NOT EXISTS account_email_verifications_email_idx ON account_email_verifications(email, created_at DESC)",
+  "CREATE INDEX IF NOT EXISTS account_email_verifications_expiry_idx ON account_email_verifications(expires_at)",
   `CREATE TABLE IF NOT EXISTS authorization_requests (
     id TEXT PRIMARY KEY NOT NULL,
     approval_token_hash TEXT NOT NULL UNIQUE,
