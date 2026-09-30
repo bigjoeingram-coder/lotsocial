@@ -6,7 +6,7 @@ import { recordUsageEvent } from "./usage.ts";
 
 export const SESSION_COOKIE = "lotsocial_session";
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const CONSUMER_EMAIL_DOMAINS = new Set([
+export const CONSUMER_EMAIL_DOMAINS: ReadonlySet<string> = new Set([
   "aol.com", "gmail.com", "gmx.com", "hotmail.com", "icloud.com", "live.com",
   "msn.com", "outlook.com", "proton.me", "protonmail.com", "yahoo.com",
 ]);

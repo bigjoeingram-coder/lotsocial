@@ -10,6 +10,11 @@ import {
   normalizeWorkEmail,
 } from "../app/lib/account-auth.ts";
 import { sendAccountAccessEmail } from "../app/lib/account-email.ts";
+import {
+  LOGIN_GENERIC_MESSAGE,
+  LOGIN_PERSONAL_EMAIL_MESSAGE,
+  requestAccountLogin,
+} from "../app/lib/account-login.ts";
 import { accountLinkConfirmation } from "../app/lib/account-link-confirmation.ts";
 import { SqliteD1, startTier2Worker, testEnv } from "./harness.mjs";
 
@@ -98,6 +103,47 @@ test("one private multi-use link creates an account only after email verificatio
   } finally {
     DB.close();
   }
+});
+
+test("login rejects personal email domains before creating or sending a link", async () => {
+  let createCalls = 0;
+  let sendCalls = 0;
+  const result = await requestAccountLogin(" salesperson@GMAIL.com ", testEnv(), {
+    createLoginLink: async () => {
+      createCalls += 1;
+      return null;
+    },
+    sendAccessEmail: async () => {
+      sendCalls += 1;
+      return true;
+    },
+  });
+
+  assert.equal(result.status, 400);
+  assert.deepEqual(result.body, { error: LOGIN_PERSONAL_EMAIL_MESSAGE });
+  assert.equal(result.body.error, "Use your dealership work email. Personal emails like Gmail can't be used with LotSocial.");
+  assert.equal(createCalls, 0);
+  assert.equal(sendCalls, 0);
+});
+
+test("login keeps the neutral response for dealership work emails", async () => {
+  let createdFor = "";
+  let sentTo = "";
+  const result = await requestAccountLogin(" SALES@Dealer.Example ", testEnv(), {
+    createLoginLink: async (email) => {
+      createdFor = email;
+      return { token: "login-token", email, displayName: "Sales Associate", expiresAt: "2099-01-01T00:00:00.000Z" };
+    },
+    sendAccessEmail: async (email) => {
+      sentTo = email.email;
+      return true;
+    },
+  });
+
+  assert.equal(result.status, 200);
+  assert.deepEqual(result.body, { message: LOGIN_GENERIC_MESSAGE });
+  assert.equal(createdFor, "sales@dealer.example");
+  assert.equal(sentTo, "sales@dealer.example");
 });
 
 test("an existing email cannot be taken over through the shared join form", async () => {
