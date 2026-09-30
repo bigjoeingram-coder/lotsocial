@@ -35,23 +35,37 @@ const worker = {
 
     if (url.pathname === "/_vinext/image") {
       const allowedWidths = [...DEFAULT_DEVICE_SIZES, ...DEFAULT_IMAGE_SIZES];
-      return handleImageOptimization(request, {
+      return withFrameProtection(await handleImageOptimization(request, {
         fetchAsset: (path) => env.ASSETS.fetch(new Request(new URL(path, request.url))),
         transformImage: async (body, { width, format, quality }) => {
           const result = await env.IMAGES.input(body).transform(width > 0 ? { width } : {}).output({ format, quality });
           return result.response();
         },
-      }, allowedWidths);
+      }, allowedWidths));
     }
 
     const forwardedHeaders = new Headers(request.headers);
     forwardedHeaders.set("x-forwarded-host", url.host);
     forwardedHeaders.set("x-forwarded-proto", url.protocol.replace(":", ""));
-    return handler.fetch(new Request(request, { headers: forwardedHeaders }), env, ctx);
+    return withFrameProtection(await handler.fetch(new Request(request, { headers: forwardedHeaders }), env, ctx));
   },
   async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
     ctx.waitUntil(sendDailyUsageDigest(env));
   },
 };
+
+function withFrameProtection(response: Response) {
+  const headers = new Headers(response.headers);
+  headers.set("X-Frame-Options", "DENY");
+  const contentSecurityPolicy = headers.get("Content-Security-Policy")?.trim() ?? "";
+  if (!/(?:^|;)\s*frame-ancestors\s/i.test(contentSecurityPolicy)) {
+    headers.set("Content-Security-Policy", [contentSecurityPolicy, "frame-ancestors 'none'"].filter(Boolean).join("; "));
+  }
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
 
 export default worker;

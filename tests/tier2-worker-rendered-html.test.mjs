@@ -78,10 +78,29 @@ test("Tier 2 serves the workspace UI for a signed-in allowlisted associate at th
 
     assert.equal(response.status, 200);
     assert.match(response.headers.get("content-type") ?? "", /text\/html/);
+    assert.equal(response.headers.get("x-frame-options"), "DENY");
+    assert.match(response.headers.get("content-security-policy") ?? "", /frame-ancestors 'none'/);
     assert.match(html, /LotSocial Inventory Authorization/);
     assert.match(html, /Authorization workspace/);
     assert.match(html, /href="\/api\/account-logout"[^>]*>Sign out<\/a>/);
     assert.doesNotMatch(html, /signin-with-chatgpt/);
+  } finally {
+    await worker.dispose();
+  }
+});
+
+test("the Worker denies framing without weakening stricter route CSP", async () => {
+  const worker = await startTier2Worker();
+  try {
+    const api = await worker.fetch("https://lotsocial.test/api/vdp-imports");
+    assert.equal(api.headers.get("x-frame-options"), "DENY");
+    assert.match(api.headers.get("content-security-policy") ?? "", /frame-ancestors 'none'/);
+
+    const confirmation = await worker.fetch("https://lotsocial.test/login/scanner-prefetch-token");
+    const policy = confirmation.headers.get("content-security-policy") ?? "";
+    assert.equal(confirmation.headers.get("x-frame-options"), "DENY");
+    assert.match(policy, /default-src 'none'/);
+    assert.match(policy, /frame-ancestors 'none'/);
   } finally {
     await worker.dispose();
   }

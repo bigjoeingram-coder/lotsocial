@@ -16,6 +16,7 @@ import {
   requestAccountLogin,
 } from "../app/lib/account-login.ts";
 import { accountLoginNotice } from "../app/lib/account-login-notice.ts";
+import { handleAccountLoginPost } from "../app/lib/account-login-handler.ts";
 import { accountLinkConfirmation } from "../app/lib/account-link-confirmation.ts";
 import { SqliteD1, startTier2Worker, testEnv } from "./harness.mjs";
 
@@ -145,6 +146,105 @@ test("login keeps the neutral response for dealership work emails", async () => 
   assert.deepEqual(result.body, { message: LOGIN_GENERIC_MESSAGE });
   assert.equal(createdFor, "sales@dealer.example");
   assert.equal(sentTo, "sales@dealer.example");
+});
+
+test("login sends at most three emails per address in a fifteen-minute window without revealing the limit", async () => {
+  const DB = new SqliteD1();
+  let loginRequests = 0;
+  const now = new Date("2026-09-30T03:07:00.000Z");
+  try {
+    const responses = await Promise.all(Array.from({ length: 12 }, () => handleAccountLoginPost(
+      new Request("https://lotsocial.test/api/account-login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "cf-connecting-ip": "192.0.2.10" },
+        body: JSON.stringify({ email: "sales@dealer.example" }),
+      }),
+      testEnv({ DB }),
+      {
+        now: () => now,
+        requestLogin: async () => {
+          loginRequests += 1;
+          return { status: 200, body: { message: LOGIN_GENERIC_MESSAGE } };
+        },
+      },
+    )));
+
+    assert.equal(loginRequests, 3);
+    for (const response of responses) {
+      assert.equal(response.status, 200);
+      assert.deepEqual(await response.json(), { message: LOGIN_GENERIC_MESSAGE });
+    }
+    assert.equal(DB.rows("SELECT count FROM rate_limit_counters WHERE counter_scope = 'account_login_email'")[0].count, 12);
+  } finally {
+    DB.close();
+  }
+});
+
+test("a limited personal address receives the same neutral response instead of the Gmail rejection", async () => {
+  const DB = new SqliteD1();
+  const now = new Date("2026-09-30T03:07:00.000Z");
+  try {
+    const responses = [];
+    for (let index = 0; index < 4; index += 1) {
+      responses.push(await handleAccountLoginPost(new Request("https://lotsocial.test/api/account-login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "cf-connecting-ip": "192.0.2.11" },
+        body: JSON.stringify({ email: "salesperson@gmail.com" }),
+      }), testEnv({ DB }), { now: () => now }));
+    }
+    assert.deepEqual(responses.map((response) => response.status), [400, 400, 400, 200]);
+    assert.deepEqual(await responses[3].json(), { message: LOGIN_GENERIC_MESSAGE });
+  } finally {
+    DB.close();
+  }
+});
+
+test("login allows a new email window while retaining the per-IP daily ceiling", async () => {
+  const DB = new SqliteD1();
+  let loginRequests = 0;
+  let now = new Date("2026-09-30T03:07:00.000Z");
+  try {
+    const dependencies = {
+      now: () => now,
+      requestLogin: async () => {
+        loginRequests += 1;
+        return { status: 200, body: { message: LOGIN_GENERIC_MESSAGE } };
+      },
+    };
+    for (let index = 0; index < 3; index += 1) {
+      await handleAccountLoginPost(new Request("https://lotsocial.test/api/account-login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "cf-connecting-ip": "192.0.2.20" },
+        body: JSON.stringify({ email: "sales@dealer.example" }),
+      }), testEnv({ DB }), dependencies);
+    }
+    now = new Date("2026-09-30T03:22:00.000Z");
+    await handleAccountLoginPost(new Request("https://lotsocial.test/api/account-login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "cf-connecting-ip": "192.0.2.20" },
+      body: JSON.stringify({ email: "sales@dealer.example" }),
+    }), testEnv({ DB }), dependencies);
+    assert.equal(loginRequests, 4, "the address receives a fresh three-send allowance in the next fifteen-minute window");
+
+    for (let index = 0; index < 20; index += 1) {
+      const response = await handleAccountLoginPost(new Request("https://lotsocial.test/api/account-login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "cf-connecting-ip": "192.0.2.30" },
+        body: JSON.stringify({ email: `sales${index}@dealer.example` }),
+      }), testEnv({ DB }), dependencies);
+      assert.equal(response.status, 200);
+    }
+    const limited = await handleAccountLoginPost(new Request("https://lotsocial.test/api/account-login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "cf-connecting-ip": "192.0.2.30" },
+      body: JSON.stringify({ email: "sales20@dealer.example" }),
+    }), testEnv({ DB }), dependencies);
+    assert.equal(limited.status, 200);
+    assert.deepEqual(await limited.json(), { message: LOGIN_GENERIC_MESSAGE });
+    assert.equal(loginRequests, 24, "the twenty-first address on one IP does not request or send a login link");
+  } finally {
+    DB.close();
+  }
 });
 
 test("login visually distinguishes personal-email rejection from the neutral work-email response", () => {
