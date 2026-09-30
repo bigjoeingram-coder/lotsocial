@@ -10,6 +10,7 @@ import {
   normalizeWorkEmail,
 } from "../app/lib/account-auth.ts";
 import { sendAccountAccessEmail } from "../app/lib/account-email.ts";
+import { accountLinkConfirmation } from "../app/lib/account-link-confirmation.ts";
 import { SqliteD1, startTier2Worker, testEnv } from "./harness.mjs";
 
 test("customer account fields normalize work email, dealership domain, and phone", () => {
@@ -164,6 +165,37 @@ test("account access emails send the correct single-use magic-link route", async
     assert.deepEqual(requests[1].body.to, ["existing@dealer.example"]);
   } finally {
     globalThis.fetch = previousFetch;
+  }
+});
+
+test("magic-link landing pages require an explicit POST before consuming a token", async () => {
+  for (const [kind, label] of [
+    ["verification", "Verify and continue"],
+    ["login", "Sign in and continue"],
+  ]) {
+    const response = accountLinkConfirmation(kind);
+    const html = await response.text();
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("cache-control"), "no-store, max-age=0");
+    assert.match(html, /<form method="post">/);
+    assert.match(html, new RegExp(label));
+    assert.doesNotMatch(html, /http-equiv=["']refresh/i);
+    assert.doesNotMatch(html, /\.submit\s*\(/);
+  }
+});
+
+test("the built worker does not consume verification or login links on GET", async () => {
+  const worker = await startTier2Worker();
+  try {
+    for (const path of ["/verify/scanner-prefetch-token", "/login/scanner-prefetch-token"]) {
+      const response = await worker.fetch(`https://lotsocial.test${path}`);
+      const html = await response.text();
+      assert.equal(response.status, 200);
+      assert.match(html, /<form method="post">/);
+      assert.doesNotMatch(html, /invalid_(?:verification|link)/);
+    }
+  } finally {
+    await worker.dispose();
   }
 });
 
