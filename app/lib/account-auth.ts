@@ -1,9 +1,15 @@
 import { createSecureToken, hashToken } from "./authorization.ts";
 import { database, ensureLotSocialSchema } from "./schema-bootstrap.ts";
 import type { LotSocialEnvironment } from "./schema-bootstrap.ts";
+import { secureEqual } from "./telemetry.ts";
+import { recordUsageEvent } from "./usage.ts";
 
 export const SESSION_COOKIE = "lotsocial_session";
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+export const CONSUMER_EMAIL_DOMAINS: ReadonlySet<string> = new Set([
+  "aol.com", "gmail.com", "gmx.com", "hotmail.com", "icloud.com", "live.com",
+  "msn.com", "outlook.com", "proton.me", "protonmail.com", "yahoo.com",
+]);
 
 export type PilotInviteRecord = {
   id: string;
@@ -38,6 +44,28 @@ export type AccountUser = {
   rooftopLocation: string;
   profilePhotoUrl: string;
   role: "associate" | "manager" | "admin";
+};
+
+type AccountEmailVerificationRecord = {
+  id: string;
+  source_type: "shared" | "pilot";
+  source_token_hash: string;
+  email: string;
+  display_name: string;
+  phone: string;
+  dealership_name: string;
+  dealership_domain: string;
+  rooftop_location: string;
+  expires_at: string;
+  used_at: string | null;
+};
+
+export type AccountAccessEmail = {
+  kind: "verification" | "login";
+  token: string;
+  email: string;
+  displayName: string;
+  expiresAt: string;
 };
 
 export function normalizeWorkEmail(value: string) {
@@ -90,7 +118,71 @@ export function inviteIsAvailable(invite: PilotInviteRecord | null, now = new Da
   return Boolean(invite && !invite.used_at && Date.parse(invite.expires_at) > now.getTime());
 }
 
-export async function acceptPilotInvite(input: {
+export function isSharedJoinToken(token: string, env: LotSocialEnvironment) {
+  const configured = env.LOTSOCIAL_SHARED_JOIN_TOKEN?.trim() ?? "";
+  return configured.length >= 32 && secureEqual(configured, token.trim());
+}
+
+export async function getSharedJoinAvailability(token: string, env: LotSocialEnvironment, now = new Date()) {
+  if (!isSharedJoinToken(token, env)) return { available: false, expiresAt: "", remainingSignups: 0 };
+  const policy = sharedJoinPolicy(env);
+  if (Date.parse(policy.expiresAt) <= now.getTime()) return { available: false, expiresAt: policy.expiresAt, remainingSignups: 0 };
+  await ensureLotSocialSchema(env);
+  const state = await database(env, "LotSocial accounts").prepare(
+    "SELECT signup_count FROM shared_join_tokens WHERE token_hash = ? LIMIT 1",
+  ).bind(await hashToken(token.trim())).first<{ signup_count: number }>();
+  const remainingSignups = Math.max(0, policy.maxSignups - Number(state?.signup_count ?? 0));
+  return { available: remainingSignups > 0, expiresAt: policy.expiresAt, remainingSignups };
+}
+
+export async function beginSharedJoin(input: {
+  token: string;
+  displayName: string;
+  email: string;
+  phone: string;
+  dealershipName: string;
+  dealershipDomain: string;
+  rooftopLocation: string;
+  env: LotSocialEnvironment;
+}) {
+  if (!isSharedJoinToken(input.token, input.env)) throw new Error("This private signup link is invalid.");
+  const email = normalizeWorkEmail(input.email);
+  const displayName = input.displayName.trim();
+  const phone = normalizePhone(input.phone);
+  const dealershipName = input.dealershipName.trim();
+  const dealershipDomain = normalizeDealerDomain(input.dealershipDomain);
+  const rooftopLocation = input.rooftopLocation.trim();
+  if (!email || !displayName || !phone || !dealershipName || !dealershipDomain || !rooftopLocation) {
+    throw new Error("Name, work email, phone, dealership, website, and location are required.");
+  }
+  assertDealershipWorkEmail(email, dealershipDomain);
+
+  const availability = await getSharedJoinAvailability(input.token, input.env);
+  if (!availability.available) throw new Error("This private signup link is expired or full.");
+
+  await ensureLotSocialSchema(input.env);
+  const db = database(input.env, "LotSocial accounts");
+  const existing = await db.prepare("SELECT id FROM associate_accounts WHERE LOWER(email) = LOWER(?) AND status = 'active' LIMIT 1")
+    .bind(email).first<{ id: string }>();
+  if (existing) {
+    const login = await createAccountLoginLink(email, input.env);
+    if (!login) throw new Error("Unable to prepare a secure sign-in link.");
+    return { kind: "login", ...login } satisfies AccountAccessEmail;
+  }
+  return createAccountEmailVerification({
+    sourceType: "shared",
+    sourceToken: input.token,
+    email,
+    displayName,
+    phone,
+    dealershipName,
+    dealershipDomain,
+    rooftopLocation,
+    env: input.env,
+  });
+}
+
+export async function beginPilotInvite(input: {
   token: string;
   displayName: string;
   email: string;
@@ -106,25 +198,69 @@ export async function acceptPilotInvite(input: {
   const rooftopLocation = input.rooftopLocation.trim();
   if (!email || email !== invite!.email) throw new Error("Use the work email address named in the invitation.");
   if (!displayName || !phone || !rooftopLocation) throw new Error("Name, mobile number, and dealership location are required.");
+  const db = database(input.env, "LotSocial accounts");
+  const existing = await db.prepare("SELECT id FROM associate_accounts WHERE LOWER(email) = LOWER(?) AND status = 'active' LIMIT 1")
+    .bind(email).first<{ id: string }>();
+  if (existing) {
+    const login = await createAccountLoginLink(email, input.env);
+    if (!login) throw new Error("Unable to prepare a secure sign-in link.");
+    return { kind: "login", ...login } satisfies AccountAccessEmail;
+  }
+  return createAccountEmailVerification({
+    sourceType: "pilot",
+    sourceToken: input.token,
+    email,
+    displayName,
+    phone,
+    dealershipName: invite!.dealership_name,
+    dealershipDomain: invite!.dealership_domain,
+    rooftopLocation,
+    env: input.env,
+  });
+}
+
+export async function consumeAccountEmailVerification(token: string, env: LotSocialEnvironment) {
+  await ensureLotSocialSchema(env);
+  const db = database(env, "LotSocial accounts");
+  const verification = await db.prepare(`SELECT * FROM account_email_verifications
+      WHERE token_hash = ? AND used_at IS NULL AND expires_at > ? LIMIT 1`)
+    .bind(await hashToken(token), new Date().toISOString()).first<AccountEmailVerificationRecord>();
+  if (!verification) return null;
+
+  const existing = await db.prepare("SELECT id FROM associate_accounts WHERE LOWER(email) = LOWER(?) LIMIT 1")
+    .bind(verification.email).first<{ id: string }>();
+  if (existing) return null;
+
+  if (verification.source_type === "shared") {
+    const configuredToken = env.LOTSOCIAL_SHARED_JOIN_TOKEN?.trim() ?? "";
+    if (!configuredToken || !secureEqual(await hashToken(configuredToken), verification.source_token_hash)) return null;
+    await claimSharedJoinSlot(configuredToken, env);
+  } else {
+    const invite = await db.prepare("SELECT id, expires_at, used_at FROM pilot_invites WHERE token_hash = ? LIMIT 1")
+      .bind(verification.source_token_hash).first<{ id: string; expires_at: string; used_at: string | null }>();
+    if (!invite || invite.used_at || Date.parse(invite.expires_at) <= Date.now()) return null;
+  }
 
   const accountId = crypto.randomUUID();
   const rawSession = createSecureToken();
-  const sessionId = crypto.randomUUID();
-  const expiresAt = sessionExpiry(input.env);
-  const db = database(input.env, "LotSocial accounts");
-  await db.batch([
+  const expiresAt = sessionExpiry(env);
+  const statements = [
     db.prepare(`INSERT INTO associate_accounts
       (id, email, display_name, phone, dealership_name, dealership_domain, rooftop_location)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(email) DO UPDATE SET display_name = excluded.display_name, phone = excluded.phone,
-        dealership_name = excluded.dealership_name, dealership_domain = excluded.dealership_domain,
-        rooftop_location = excluded.rooftop_location, status = 'active', updated_at = CURRENT_TIMESTAMP`)
-      .bind(accountId, email, displayName, phone, invite!.dealership_name, invite!.dealership_domain, rooftopLocation),
-    db.prepare(`INSERT INTO associate_sessions (id, account_id, token_hash, expires_at)
-      VALUES (?, (SELECT id FROM associate_accounts WHERE LOWER(email) = LOWER(?) LIMIT 1), ?, ?)`)
-      .bind(sessionId, email, await hashToken(rawSession), expiresAt),
-    db.prepare("UPDATE pilot_invites SET used_at = CURRENT_TIMESTAMP WHERE id = ? AND used_at IS NULL").bind(invite!.id),
-  ]);
+      VALUES (?, ?, ?, ?, ?, ?, ?)`)
+      .bind(accountId, verification.email, verification.display_name, verification.phone,
+        verification.dealership_name, verification.dealership_domain, verification.rooftop_location),
+    db.prepare("INSERT INTO associate_sessions (id, account_id, token_hash, expires_at) VALUES (?, ?, ?, ?)")
+      .bind(crypto.randomUUID(), accountId, await hashToken(rawSession), expiresAt),
+    db.prepare("UPDATE account_email_verifications SET used_at = CURRENT_TIMESTAMP WHERE id = ? AND used_at IS NULL")
+      .bind(verification.id),
+  ];
+  if (verification.source_type === "pilot") {
+    statements.push(db.prepare("UPDATE pilot_invites SET used_at = CURRENT_TIMESTAMP WHERE token_hash = ? AND used_at IS NULL")
+      .bind(verification.source_token_hash));
+  }
+  await db.batch(statements);
+  await recordUsageEvent({ accountId, associateEmail: verification.email, eventType: "account_created" }, env);
   return { rawSession, expiresAt };
 }
 
@@ -164,6 +300,44 @@ export async function getLatestCreativeProfilePhoto(email: string, env: LotSocia
   return latestCreativeProfile?.end_card_photo_url ?? "";
 }
 
+async function createAccountEmailVerification(input: {
+  sourceType: "shared" | "pilot";
+  sourceToken: string;
+  email: string;
+  displayName: string;
+  phone: string;
+  dealershipName: string;
+  dealershipDomain: string;
+  rooftopLocation: string;
+  env: LotSocialEnvironment;
+}) {
+  const token = createSecureToken();
+  const expiresAt = new Date(Date.now() + 20 * 60 * 1000).toISOString();
+  const db = database(input.env, "LotSocial accounts");
+  await db.batch([
+    db.prepare("UPDATE account_email_verifications SET used_at = CURRENT_TIMESTAMP WHERE LOWER(email) = LOWER(?) AND used_at IS NULL")
+      .bind(input.email),
+    db.prepare(`INSERT INTO account_email_verifications
+      (id, token_hash, source_type, source_token_hash, email, display_name, phone,
+       dealership_name, dealership_domain, rooftop_location, expires_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .bind(
+        crypto.randomUUID(),
+        await hashToken(token),
+        input.sourceType,
+        await hashToken(input.sourceToken.trim()),
+        input.email,
+        input.displayName,
+        input.phone,
+        input.dealershipName,
+        input.dealershipDomain,
+        input.rooftopLocation,
+        expiresAt,
+      ),
+  ]);
+  return { kind: "verification", token, email: input.email, displayName: input.displayName, expiresAt } satisfies AccountAccessEmail;
+}
+
 export async function createAccountLoginLink(emailValue: string, env: LotSocialEnvironment) {
   const email = normalizeWorkEmail(emailValue);
   if (!email) return null;
@@ -194,6 +368,9 @@ export async function consumeAccountLoginLink(token: string, env: LotSocialEnvir
     db.prepare("INSERT INTO associate_sessions (id, account_id, token_hash, expires_at) VALUES (?, ?, ?, ?)")
       .bind(crypto.randomUUID(), link.account_id, await hashToken(rawSession), expiresAt),
   ]);
+  const account = await db.prepare("SELECT email FROM associate_accounts WHERE id = ? LIMIT 1")
+    .bind(link.account_id).first<{ email: string }>();
+  if (account) await recordUsageEvent({ accountId: link.account_id, associateEmail: account.email, eventType: "signed_in" }, env);
   return { rawSession, expiresAt };
 }
 
@@ -234,6 +411,42 @@ function sessionExpiry(env: LotSocialEnvironment) {
   const configured = Number(env.LOTSOCIAL_SESSION_TTL_HOURS ?? "168");
   const hours = Number.isFinite(configured) ? Math.min(Math.max(configured, 1), 720) : 168;
   return new Date(Date.now() + hours * 60 * 60 * 1000).toISOString();
+}
+
+function sharedJoinPolicy(env: LotSocialEnvironment) {
+  const expiresAt = env.LOTSOCIAL_SHARED_JOIN_EXPIRES_AT?.trim() ?? "";
+  const maxSignups = Number(env.LOTSOCIAL_SHARED_JOIN_MAX_SIGNUPS?.trim() ?? "");
+  if (!expiresAt || !Number.isFinite(Date.parse(expiresAt))) throw new Error("The private signup link expiry is not configured.");
+  if (!Number.isInteger(maxSignups) || maxSignups < 1 || maxSignups > 1000) throw new Error("The private signup link seat limit is not configured.");
+  return { expiresAt: new Date(expiresAt).toISOString(), maxSignups };
+}
+
+async function claimSharedJoinSlot(token: string, env: LotSocialEnvironment, now = new Date()) {
+  const policy = sharedJoinPolicy(env);
+  if (Date.parse(policy.expiresAt) <= now.getTime()) throw new Error("This private signup link has expired.");
+  const db = database(env, "LotSocial accounts");
+  const tokenHash = await hashToken(token.trim());
+  await db.prepare(`INSERT INTO shared_join_tokens
+      (token_hash, expires_at, max_signups, signup_count)
+      VALUES (?, ?, ?, 0)
+      ON CONFLICT(token_hash) DO UPDATE SET expires_at = excluded.expires_at,
+        max_signups = excluded.max_signups, updated_at = CURRENT_TIMESTAMP`)
+    .bind(tokenHash, policy.expiresAt, policy.maxSignups).run();
+  const claimed = await db.prepare(`UPDATE shared_join_tokens
+      SET signup_count = signup_count + 1, updated_at = CURRENT_TIMESTAMP
+      WHERE token_hash = ? AND expires_at > ? AND signup_count < max_signups
+      RETURNING signup_count`)
+    .bind(tokenHash, now.toISOString()).first<{ signup_count: number }>();
+  if (!claimed) throw new Error("This private signup link has reached its pilot seat limit.");
+}
+
+function assertDealershipWorkEmail(email: string, dealershipDomain: string) {
+  const emailDomain = email.split("@").at(-1) ?? "";
+  if (CONSUMER_EMAIL_DOMAINS.has(emailDomain)) throw new Error("Use your dealership work email, not a personal email provider.");
+  const domainsMatch = emailDomain === dealershipDomain
+    || emailDomain.endsWith(`.${dealershipDomain}`)
+    || dealershipDomain.endsWith(`.${emailDomain}`);
+  if (!domainsMatch) throw new Error("Your work-email domain must match the dealership website. Ask for a direct invitation if your dealer group uses a different domain.");
 }
 
 function cookieValue(cookieHeader: string, name: string) {

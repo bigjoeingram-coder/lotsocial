@@ -97,12 +97,43 @@ test("render jobs use the LotSocial source relay instead of provider hotlinks", 
         },
         createRenderJob: async () => ({ id: "job_retry", status: "queued" }),
         serializeRenderJob: (job) => ({ id: job.id, status: job.status }),
+        incrementDailyLimit: async () => ({ allowed: true, count: 1, cap: 5, retryAfterDay: "2099-01-01" }),
       },
     );
 
     assert.equal(response.status, 201);
     assert.match(submittedPlan.summary.origin[0], /^https:\/\/lotsocial-render-source\.bigjoe-ingram\.workers\.dev\/image\.jpg\?/);
     assert.deepEqual(submittedOptions, { convertAllImages: true });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("Shotstack account cap blocks the paid provider submission", async () => {
+  let submitted = false;
+  const selectedProject = { ...cleanProject, selected_images: JSON.stringify(["https://dealer.example/photo.jpg"]) };
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(new Uint8Array([1]), { headers: { "Content-Type": "image/jpeg" } });
+  try {
+    const response = await handleCreativeRenderPost(
+      new Request("https://app.example/api/creative-projects/project_1/render", { method: "POST" }),
+      testEnv({ LOTSOCIAL_RENDER_PROXY_ORIGIN: "https://lotsocial-render-source.bigjoe-ingram.workers.dev", LOTSOCIAL_RENDER_PROXY_SECRET: "test-secret" }),
+      { params: Promise.resolve({ id: "project_1" }) },
+      {
+        associate: signedInUser,
+        getCreativeProject: async () => selectedProject,
+        getLatestRenderJob: async () => null,
+        getImportedVehicle: async () => ({ id: "vehicle_1" }),
+        incrementDailyLimit: async (_env, name) => ({ allowed: name !== "shotstack_associate", count: 6, cap: 5, retryAfterDay: "2099-01-01" }),
+        submitRender: async () => {
+          submitted = true;
+          return { status: "queued", providerRenderId: "never", errorMessage: "" };
+        },
+      },
+    );
+    assert.equal(response.status, 429);
+    assert.equal(submitted, false);
+    assert.match((await json(response)).error, /Shotstack render limit/i);
   } finally {
     globalThis.fetch = originalFetch;
   }

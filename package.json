@@ -8,6 +8,8 @@
   },
   "scripts": {
     "dev": "vinext dev",
+    "legal:generate": "node scripts/generate-legal-content.mjs",
+    "prebuild": "npm run legal:generate",
     "build": "vinext build",
     "start": "vinext start",
     "test": "npm run build && node --test tests/*.test.mjs && npm run db:bootstrap-check && npm run db:check && npm run lint",

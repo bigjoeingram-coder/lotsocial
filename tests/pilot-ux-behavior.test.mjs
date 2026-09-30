@@ -31,6 +31,7 @@ test("public caption names the dealership host instead of saying VDP", () => {
   const vehicle = importedVehicle({ source_host: "waconia.furymotors.com", price: "43921" });
   const copy = createCopy(vehicle, "walkaround", 30, "Joe", "Message me for details");
   assert.match(copy.socialCaption, /Total price listed on waconia\.furymotors\.com: \$43,921\./);
+  assert.match(copy.socialCaption, /Accuracy and listing limitations: https:\/\/lotsocial-authorization\.salesgenius\.chatgpt\.site\/legal\/accuracy/);
   assert.doesNotMatch(copy.socialCaption, /listed on the VDP/i);
 });
 
@@ -50,6 +51,7 @@ test("No, Light, and Extra Gravy create distinct copy without changing the compl
     assert.match(copy.socialCaption, /Confirm equipment and eligibility with the dealership/);
     assert.match(copy.socialCaption, /expires 7 days after posting or when the vehicle sells/);
     assert.match(copy.socialCaption, /Total price listed on dealer\.example: \$43,921/);
+    assert.match(copy.socialCaption, /\/legal\/accuracy/);
   }
 });
 
@@ -101,6 +103,9 @@ test("each video category rotates between two stable production templates", () =
     assert.deepEqual([...variants].sort(), [0, 1]);
     assert.equal(names.size, 2);
     assert.equal(visualSignatures.size, 2, `${style} variants must differ in motion and art direction, not only name`);
+    assert.deepEqual(new Set(plans.map((plan) => plan.summary.musicEnergy)), new Set([
+      style === "energetic" ? "high" : style === "premium" ? "low" : "medium",
+    ]));
     assert.ok([...names].every((name) => name.startsWith(style === "energetic" ? "Fast Cuts ·" : style === "premium" ? "Premium ·" : "Walkaround ·")));
   }
 });
@@ -131,11 +136,41 @@ test("energetic render plans use Shotstack-valid fast transitions", () => {
   assert.doesNotMatch(JSON.stringify(plan), /zoom(?:Fast)?"/);
 });
 
+test("short portrait renders keep every vehicle fully visible over a bright crossfade", () => {
+  const shortProject = {
+    ...project,
+    style: "premium",
+    duration_seconds: 15,
+    selected_images: JSON.stringify(Array.from({ length: 7 }, (_, index) => `https://dealer.example/photo-${index + 1}.jpg`)),
+  };
+  const plan = buildVerticalRenderPlan(shortProject, importedVehicle());
+  const tracks = plan.render.timeline.tracks;
+  const foregroundTracks = tracks.slice(1, 8);
+  const foregroundClips = foregroundTracks.map((track) => track.clips[0]);
+  const tintTrack = tracks[8];
+  const wallpaperTrack = tracks[9];
+
+  assert.equal(foregroundTracks.length, 7, "overlapping foreground shots must use separate tracks");
+  assert.ok(foregroundClips.every((clip) => clip.fit === "contain" && clip.scale <= 0.9));
+  assert.ok(foregroundClips.every((clip) => !String(clip.effect).includes("zoom")));
+  assert.ok(foregroundClips.every((clip) => !JSON.stringify(clip.transition).includes("Slow")));
+  assert.ok(foregroundClips.slice(0, -1).every((clip) => clip.length > foregroundClips.at(-1).length), "short shots overlap by the fast fade duration");
+  foregroundClips.slice(0, -1).forEach((clip, index) => {
+    assert.equal(Number((clip.start + clip.length - foregroundClips[index + 1].start).toFixed(2)), 0.5);
+  });
+  assert.equal(tintTrack.clips.length, 1);
+  assert.ok(tintTrack.clips[0].opacity <= 0.4);
+  assert.ok(wallpaperTrack.clips.every((clip) => !("filter" in clip)));
+  wallpaperTrack.clips.slice(0, -1).forEach((clip, index) => {
+    assert.equal(Number((clip.start + clip.length).toFixed(2)), wallpaperTrack.clips[index + 1].start, "background clips must not overlap on one Shotstack track");
+  });
+});
+
 test("render plans omit the optional profile track when no salesperson photo is supplied", () => {
   const plan = buildVerticalRenderPlan({ ...project, end_card_photo_url: "" }, importedVehicle());
 
   assert.ok(plan.render.timeline.tracks.every((track) => track.clips.length > 0));
-  assert.equal(plan.render.timeline.tracks.length, 5);
+  assert.equal(plan.render.timeline.tracks.length, 6);
 });
 
 test("production plans relay dealership images through the LotSocial source endpoint", () => {
@@ -243,13 +278,16 @@ test("rendered end card uses a full-frame HTML5 grid with bounded rows and the a
   assert.equal(endCard.height, 1280);
   assert.match(html, /<img class="profile-photo" src="https:\/\/app\.example\/api\/profile-photos\/00000000-0000-4000-8000-000000000000\.jpg"/);
   assert.match(css, /html,body\{box-sizing:border-box;width:720px;height:1280px/);
-  assert.match(css, /\.content\{[^}]*display:grid;grid-template-rows:286px 106px 103px 93px 126px 1fr 60px/);
+  assert.match(css, /\.content\{[^}]*display:grid;grid-template-rows:280px 100px 90px 80px 122px 58px 1fr 56px/);
   assert.match(css, /\.profile-photo\{[^}]*object-fit:contain/);
   assert.doesNotMatch(css, /\.content\{[^}]*position:absolute/);
   assert.doesNotMatch(css, /\.brand\{[^}]*position:absolute/);
   assert.ok(html.indexOf("Joe") < html.indexOf("555-0100"));
   assert.ok(html.indexOf("555-0100") < html.indexOf("Message me for details"));
   assert.ok(html.indexOf("Message me for details") < html.indexOf("Pricing and availability"));
+  assert.ok(html.indexOf("Pricing and availability") < html.indexOf("Accuracy:"));
+  assert.match(html, /lotsocial-authorization\.salesgenius\.chatgpt\.site\/legal\/accuracy/);
+  assert.match(html, /Policy 2026-09-28-v0\.9/);
   assert.ok(html.indexOf("Pricing and availability") < html.indexOf("LotSocial"));
   assert.doesNotMatch(html, /2025 Ford/);
   assert.doesNotMatch(html, /<span>L<\/span><b>LotSocial/);

@@ -2,6 +2,7 @@ import { env } from "cloudflare:workers";
 import { associateAuthResponse, requireAssociate } from "../../../chatgpt-auth";
 import { getRenderJob } from "../../../lib/creative";
 import { getStoredVideo } from "../../../lib/media";
+import { recordUsageEvent } from "../../../lib/usage";
 
 export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
   let user;
@@ -17,6 +18,9 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   if (!object) return Response.json({ error: "The stored video could not be found." }, { status: 404 });
 
   const url = new URL(request.url);
+  if (url.searchParams.get("download") === "1") {
+    await recordUsageEvent({ accountId: user.accountId, associateEmail: user.email, eventType: "video_downloaded", entityType: "render_job", entityId: job.id }, env);
+  }
   const headers = new Headers();
   object.writeHttpMetadata(headers);
   headers.set("etag", object.httpEtag);

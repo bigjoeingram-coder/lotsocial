@@ -12,6 +12,7 @@ import {
 import type { ExtractedVehicle, ImportedVehicleRecord } from "./vdp.ts";
 import { writeImportOutcome } from "./telemetry.ts";
 import { recordImportEvidence } from "./evidence.ts";
+import { recordUsageEvent } from "./usage.ts";
 
 type RouteUser = {
   displayName: string;
@@ -93,6 +94,7 @@ export async function handleVdpImportsPost(
       associateEmail: user.email, sourceHost, outcome, elapsedMs: Date.now() - startedAt,
       fallback: trace.fallback, brightDataUsed: trace.brightDataUsed, notice: trace.notice,
     }, env);
+    await recordUsageEvent({ associateEmail: user.email, eventType: "vehicle_imported", entityType: "vehicle", entityId: record.id, metadata: { sourceHost } }, env);
     return Response.json({ vehicle: serialize(record), evidence, notice: trace.notice || undefined }, { status: 201 });
   } catch (error) {
     const outcome = trace.budgetSkipped ? "skipped_budget_failure" : trace.networkTimedOut ? "network_timeout" : "parse_failure";
