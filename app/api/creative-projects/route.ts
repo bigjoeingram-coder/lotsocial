@@ -2,7 +2,7 @@ import { env } from "cloudflare:workers";
 import { associateAuthResponse, requireAssociate } from "../../chatgpt-auth";
 import { saveCreativeProject, serializeCreativeProject } from "../../lib/creative";
 import type { GravyLevel } from "../../lib/creative";
-import { getImportedVehicle } from "../../lib/vdp";
+import { getImportedVehicle, usableVehicleImageUrl } from "../../lib/vdp";
 import { recordUsageEvent } from "../../lib/usage";
 
 function clean(value: unknown) {
@@ -32,7 +32,7 @@ export async function POST(request: Request) {
   const vehicleId = clean(payload.vehicleId);
   const vehicle = await getImportedVehicle(vehicleId, user.email, env);
   if (!vehicle) return Response.json({ error: "That vehicle is not in your inventory." }, { status: 404 });
-  const availableImages = JSON.parse(vehicle.image_urls || "[]") as string[];
+  const availableImages = (JSON.parse(vehicle.image_urls || "[]") as string[]).filter(usableVehicleImageUrl);
   const selectedImages = Array.isArray(payload.selectedImages)
     ? payload.selectedImages.filter((image): image is string => typeof image === "string" && availableImages.includes(image)).slice(0, 10)
     : [];

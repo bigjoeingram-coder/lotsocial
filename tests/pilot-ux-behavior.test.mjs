@@ -136,11 +136,41 @@ test("energetic render plans use Shotstack-valid fast transitions", () => {
   assert.doesNotMatch(JSON.stringify(plan), /zoom(?:Fast)?"/);
 });
 
+test("short portrait renders keep every vehicle fully visible over a bright crossfade", () => {
+  const shortProject = {
+    ...project,
+    style: "premium",
+    duration_seconds: 15,
+    selected_images: JSON.stringify(Array.from({ length: 7 }, (_, index) => `https://dealer.example/photo-${index + 1}.jpg`)),
+  };
+  const plan = buildVerticalRenderPlan(shortProject, importedVehicle());
+  const tracks = plan.render.timeline.tracks;
+  const foregroundTracks = tracks.slice(1, 8);
+  const foregroundClips = foregroundTracks.map((track) => track.clips[0]);
+  const tintTrack = tracks[8];
+  const wallpaperTrack = tracks[9];
+
+  assert.equal(foregroundTracks.length, 7, "overlapping foreground shots must use separate tracks");
+  assert.ok(foregroundClips.every((clip) => clip.fit === "contain" && clip.scale <= 0.9));
+  assert.ok(foregroundClips.every((clip) => !String(clip.effect).includes("zoom")));
+  assert.ok(foregroundClips.every((clip) => !JSON.stringify(clip.transition).includes("Slow")));
+  assert.ok(foregroundClips.slice(0, -1).every((clip) => clip.length > foregroundClips.at(-1).length), "short shots overlap by the fast fade duration");
+  foregroundClips.slice(0, -1).forEach((clip, index) => {
+    assert.equal(Number((clip.start + clip.length - foregroundClips[index + 1].start).toFixed(2)), 0.5);
+  });
+  assert.equal(tintTrack.clips.length, 1);
+  assert.ok(tintTrack.clips[0].opacity <= 0.4);
+  assert.ok(wallpaperTrack.clips.every((clip) => !("filter" in clip)));
+  wallpaperTrack.clips.slice(0, -1).forEach((clip, index) => {
+    assert.equal(Number((clip.start + clip.length).toFixed(2)), wallpaperTrack.clips[index + 1].start, "background clips must not overlap on one Shotstack track");
+  });
+});
+
 test("render plans omit the optional profile track when no salesperson photo is supplied", () => {
   const plan = buildVerticalRenderPlan({ ...project, end_card_photo_url: "" }, importedVehicle());
 
   assert.ok(plan.render.timeline.tracks.every((track) => track.clips.length > 0));
-  assert.equal(plan.render.timeline.tracks.length, 5);
+  assert.equal(plan.render.timeline.tracks.length, 6);
 });
 
 test("production plans relay dealership images through the LotSocial source endpoint", () => {

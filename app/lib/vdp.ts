@@ -182,12 +182,15 @@ function imageUrlsFromTag(tag: string, baseUrl: URL) {
   return [...direct, ...sourceSets];
 }
 
-function usableImageUrl(url: string) {
+export function usableVehicleImageUrl(url: string) {
   try {
     const parsed = new URL(url);
     if (!(["http:", "https:"] as string[]).includes(parsed.protocol)) return false;
     if (/\.(?:svg|ico|gif|pdf)(?:\?|$)/i.test(parsed.pathname)) return false;
-    return !/(?:logo|icon|avatar|pixel|badge|spacer|tracking|favicon|loader|placeholder)/i.test(url);
+    if (/(?:logo|icon|avatar|pixel|badge|spacer|tracking|favicon|loader|placeholder|adchoice|banner|sprite|\/graphics\/)/i.test(url)) return false;
+    const width = Number(parsed.searchParams.get("w") || parsed.searchParams.get("width"));
+    const height = Number(parsed.searchParams.get("h") || parsed.searchParams.get("height"));
+    return (!width || width >= 320) && (!height || height >= 320);
   } catch {
     return false;
   }
@@ -379,7 +382,7 @@ export function parseDealerInspireMarkdown(markdown: string, sourceUrl: URL, cap
   ].map(normalizeListedPrice).find(Boolean) || "";
   const markdownImages = Array.from(vehicleBlock.matchAll(/!\[[^\]]*\]\((https?:\/\/[^)]+)\)/gi))
     .flatMap((match) => resolveImage(match[1], sourceUrl))
-    .filter(usableImageUrl);
+    .filter(usableVehicleImageUrl);
   const imageUrls = Array.from(new Set(markdownImages)).slice(0, 24);
   const year = title.match(/\b(20\d{2}|19\d{2})\b/)?.[1] || "";
   const titleParts = title.replace(/^New\s+|^Used\s+/i, "").split(/\s+/).filter(Boolean);
@@ -662,7 +665,7 @@ export async function parseVehicleHtml(html: string, finalUrl: URL): Promise<Ext
     ...resolveImage(meta(html, "og:image"), finalUrl),
     ...galleryTags.flatMap((tag) => imageUrlsFromTag(tag, finalUrl)),
     ...imageTags.flatMap((tag) => imageUrlsFromTag(tag, finalUrl)),
-  ].filter(usableImageUrl);
+  ].filter(usableVehicleImageUrl);
   const uniqueImages = Array.from(new Set(images)).slice(0, 24);
   const vin = textValue(vehicleNode.vehicleIdentificationNumber) || textValue(vehicleNode.vin) || visibleText.match(/\b[A-HJ-NPR-Z0-9]{17}\b/i)?.[0]?.toUpperCase() || "";
   const year = normalizeVehicleYear(textValue(vehicleNode.vehicleModelDate) || name.match(/\b(20\d{2}|19\d{2})\b/)?.[1] || "");
@@ -785,7 +788,7 @@ export function serializeVehicle(record: ImportedVehicleRecord) {
     price: record.price,
     currency: record.currency,
     description: record.description,
-    imageUrls: JSON.parse(record.image_urls || "[]") as string[],
+    imageUrls: (JSON.parse(record.image_urls || "[]") as string[]).filter(usableVehicleImageUrl),
     facts: JSON.parse(record.facts || "{}") as Record<string, string>,
     sourceType: record.source_type,
     certifiedAt: record.authorization_certified_at,

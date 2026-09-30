@@ -6,7 +6,7 @@ import { LEGAL_ACCURACY_URL, LEGAL_VERSIONS } from "../legal/generated-content.t
 
 type RenderEnvironment = { SHOTSTACK_API_KEY?: string; SHOTSTACK_STAGE?: string };
 type ShotstackStage = "stage" | "v1";
-const INSPECTION_IMAGE_SCALE = 0.92;
+const FOREGROUND_CROSSFADE_SECONDS = 0.5;
 const INGEST_POLL_ATTEMPTS = 30;
 const HTML5_MARKUP_LIMIT = 1_000_000;
 const MUSIC_ENERGY_BY_STYLE = {
@@ -20,9 +20,9 @@ const VIDEO_TEMPLATES = {
     {
       name: "Fast Cuts · Surge",
       background: "#071116",
-      wallpaperScale: 1.24,
-      wallpaperOpacity: 0.46,
-      tintOpacity: 0.86,
+      wallpaperScale: 1.08,
+      wallpaperOpacity: 0.62,
+      tintOpacity: 0.32,
       tintCss: "div{width:1080px;height:1920px;background:linear-gradient(145deg,#071116 0%,#0d2025 58%,#31520f 100%)}",
       music: "https://shotstack-assets.s3-ap-southeast-2.amazonaws.com/music/freepd/motions.mp3",
       musicVolume: 0.22,
@@ -32,9 +32,9 @@ const VIDEO_TEMPLATES = {
     {
       name: "Fast Cuts · Velocity",
       background: "#10121a",
-      wallpaperScale: 1.3,
-      wallpaperOpacity: 0.42,
-      tintOpacity: 0.88,
+      wallpaperScale: 1.08,
+      wallpaperOpacity: 0.6,
+      tintOpacity: 0.34,
       tintCss: "div{width:1080px;height:1920px;background:linear-gradient(155deg,#081015 0%,#17202c 52%,#243f11 100%)}",
       music: "https://shotstack-assets.s3-ap-southeast-2.amazonaws.com/music/freepd/motions.mp3",
       musicVolume: 0.2,
@@ -46,9 +46,9 @@ const VIDEO_TEMPLATES = {
     {
       name: "Walkaround · Glide",
       background: "#17242a",
-      wallpaperScale: 1.18,
-      wallpaperOpacity: 0.38,
-      tintOpacity: 0.94,
+      wallpaperScale: 1.06,
+      wallpaperOpacity: 0.58,
+      tintOpacity: 0.36,
       tintCss: "div{width:1080px;height:1920px;background:linear-gradient(180deg,#071116 0%,#17242a 62%,#0d181c 100%)}",
       music: "https://shotstack-assets.s3-ap-southeast-2.amazonaws.com/music/freepd/advertising.mp3",
       musicVolume: 0.16,
@@ -58,9 +58,9 @@ const VIDEO_TEMPLATES = {
     {
       name: "Walkaround · Showcase",
       background: "#0b171c",
-      wallpaperScale: 1.14,
-      wallpaperOpacity: 0.34,
-      tintOpacity: 0.92,
+      wallpaperScale: 1.06,
+      wallpaperOpacity: 0.56,
+      tintOpacity: 0.36,
       tintCss: "div{width:1080px;height:1920px;background:linear-gradient(165deg,#071116 0%,#193038 54%,#102119 100%)}",
       music: "https://shotstack-assets.s3-ap-southeast-2.amazonaws.com/music/freepd/advertising.mp3",
       musicVolume: 0.15,
@@ -72,9 +72,9 @@ const VIDEO_TEMPLATES = {
     {
       name: "Premium · Noir",
       background: "#08090b",
-      wallpaperScale: 1.12,
-      wallpaperOpacity: 0.28,
-      tintOpacity: 0.96,
+      wallpaperScale: 1.05,
+      wallpaperOpacity: 0.54,
+      tintOpacity: 0.4,
       tintCss: "div{width:1080px;height:1920px;background:linear-gradient(155deg,#050607 0%,#111519 64%,#3a321d 100%)}",
       music: "https://shotstack-assets.s3-ap-southeast-2.amazonaws.com/music/freepd/fireworks.mp3",
       musicVolume: 0.13,
@@ -84,9 +84,9 @@ const VIDEO_TEMPLATES = {
     {
       name: "Premium · Gallery",
       background: "#0d1013",
-      wallpaperScale: 1.08,
-      wallpaperOpacity: 0.24,
-      tintOpacity: 0.96,
+      wallpaperScale: 1.05,
+      wallpaperOpacity: 0.52,
+      tintOpacity: 0.4,
       tintCss: "div{width:1080px;height:1920px;background:linear-gradient(145deg,#06080a 0%,#172027 62%,#2f2a21 100%)}",
       music: "https://shotstack-assets.s3-ap-southeast-2.amazonaws.com/music/freepd/fireworks.mp3",
       musicVolume: 0.12,
@@ -153,31 +153,31 @@ function capturedAtLabel(value: string) {
 function styleTreatment(style: string, variant: number, index: number) {
   if (style === "energetic") {
     const effects = variant === 0
-      ? ["zoomInFast", "slideLeftFast", "zoomOutFast", "slideRightFast"]
-      : ["slideRightFast", "zoomInFast", "slideLeftFast", "zoomOutFast"];
+      ? ["slideLeftFast", "slideRightFast"]
+      : ["slideRightFast", "slideLeftFast"];
     return {
       effect: effects[index % effects.length],
       transition: index === 0
         ? { out: "fadeFast" }
         : { in: variant === 0 ? (index % 2 ? "wipeLeftFast" : "wipeRightFast") : (index % 2 ? "wipeRightFast" : "wipeLeftFast"), out: "fadeFast" },
-      scale: variant === 0 ? 0.96 : 0.92,
+      scale: variant === 0 ? 0.9 : 0.88,
     };
   }
   if (style === "premium") {
     return {
       effect: variant === 0
-        ? (index % 2 ? "zoomOutSlow" : "zoomInSlow")
+        ? (index % 2 ? "slideRightSlow" : "slideLeftSlow")
         : (index % 2 ? "slideLeftSlow" : "slideRightSlow"),
-      transition: index === 0 ? { out: "fadeSlow" } : { in: "fadeSlow", out: "fadeSlow" },
+      transition: index === 0 ? { out: "fadeFast" } : { in: "fadeFast", out: "fadeFast" },
       scale: variant === 0 ? 0.88 : 0.84,
     };
   }
   return {
     effect: variant === 0
       ? (index % 2 ? "slideRightSlow" : "slideLeftSlow")
-      : (index % 2 ? "zoomInSlow" : "zoomOutSlow"),
-    transition: index === 0 ? { out: "fade" } : { in: "fade", out: "fade" },
-    scale: variant === 0 ? INSPECTION_IMAGE_SCALE : 0.88,
+      : (index % 2 ? "slideLeftSlow" : "slideRightSlow"),
+    transition: index === 0 ? { out: "fadeFast" } : { in: "fadeFast", out: "fadeFast" },
+    scale: variant === 0 ? 0.9 : 0.88,
   };
 }
 
@@ -196,29 +196,29 @@ export function buildVerticalRenderPlan(project: CreativeProjectRecord, vehicle:
     : images;
   const total = Math.max(15, project.duration_seconds);
   const endCardLength = Math.min(6, Math.max(5, total * 0.15));
-  const imageLength = (total - endCardLength) / images.length;
-  const timedImages = renderImages.map((src, index) => ({
-    src,
-    start: Number((index * imageLength).toFixed(2)),
-    length: Number((imageLength + (index < images.length - 1 ? 0.25 : 0)).toFixed(2)),
-  }));
-  const wallpaperClips = timedImages.map(({ src, start, length }, index) => ({
+  const endCardStart = Number((total - endCardLength).toFixed(2));
+  const imageLength = endCardStart / images.length;
+  const crossfadeLength = Math.min(FOREGROUND_CROSSFADE_SECONDS, imageLength / 2);
+  const imageStarts = renderImages.map((_src, index) => Number((index * imageLength).toFixed(2)));
+  const timedImages = renderImages.map((src, index) => {
+    const start = imageStarts[index];
+    const nextStart = imageStarts[index + 1] ?? endCardStart;
+    const slotLength = Number((nextStart - start).toFixed(2));
+    return {
+      src,
+      start,
+      slotLength,
+      length: Number((slotLength + (index < images.length - 1 ? crossfadeLength : 0)).toFixed(2)),
+    };
+  });
+  const wallpaperClips = timedImages.map(({ src, start, slotLength }) => ({
     asset: { type: "image", src },
     start,
-    length,
+    length: slotLength,
     fit: "crop",
     scale: template.wallpaperScale,
     position: "center",
     opacity: template.wallpaperOpacity,
-    filter: "darken",
-    transition: index === 0 ? { out: "fade" } : { in: "fade", out: "fade" },
-  }));
-  const wallpaperTintClips = timedImages.map(({ start, length }, index) => ({
-    asset: { type: "html", html: "<div></div>", css: template.tintCss, width: 1080, height: 1920 },
-    start,
-    length,
-    opacity: template.tintOpacity,
-    transition: index === 0 ? { out: "fade" } : { in: "fade", out: "fade" },
   }));
   const clips = timedImages.map(({ src, start, length }, index) => {
     const treatment = styleTreatment(project.style, templateVariant, index);
@@ -242,14 +242,13 @@ export function buildVerticalRenderPlan(project: CreativeProjectRecord, vehicle:
   // Shotstack HD portrait output is 720x1280. HTML5 clips render at their natural
   // pixel size, so the document and clip must match that viewport exactly.
   const endCardCss = "html,body{box-sizing:border-box;width:720px;height:1280px;margin:0;padding:0;overflow:hidden;background:#071116}.end-card{box-sizing:border-box;width:720px;height:1280px;padding:74px 80px 60px;font-family:Arial,Helvetica,sans-serif;color:white;text-align:center;background:linear-gradient(180deg,#071116 0%,#101f24 58%,#05090b 100%);overflow:hidden}.content{box-sizing:border-box;width:560px;height:1146px;display:grid;grid-template-rows:280px 100px 90px 80px 122px 58px 1fr 56px;row-gap:12px;align-items:center;justify-items:center}.photo-space,.profile-photo{display:block;box-sizing:border-box;width:240px;height:280px;margin:0}.profile-photo{border:7px solid #c8ff43;border-radius:23px;object-fit:contain;object-position:center;background:#071116}.end-card h1{max-width:546px;max-height:96px;margin:0;font-size:39px;line-height:1.06;letter-spacing:-.03em;overflow:hidden;overflow-wrap:anywhere}.contact{max-width:546px;max-height:86px;margin:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;overflow:hidden}.phone{margin:0;color:#e8f1eb;font-size:22px;line-height:1.2;font-weight:850;overflow-wrap:anywhere}.email{margin:0;color:#e8f1eb;font-size:17px;line-height:1.25;font-weight:650;overflow-wrap:anywhere}.end-card p{max-width:546px;max-height:76px;margin:0;color:#c8ff43;font-size:23px;line-height:1.16;font-weight:900;letter-spacing:.02em;text-transform:uppercase;overflow:hidden;overflow-wrap:anywhere}.disclaimer{max-width:546px;max-height:116px;margin:0;color:#c8d2cd;font-size:15px;line-height:1.35;font-weight:650;overflow:hidden;overflow-wrap:anywhere}.accuracy{max-width:546px;max-height:54px;margin:0;color:#9fb3aa;font-size:12px;line-height:1.35;font-weight:650;overflow:hidden;overflow-wrap:anywhere}.brand{align-self:end;color:#c8ff43;white-space:nowrap}.brand span{display:inline-block;box-sizing:border-box;width:29px;height:44px;border:5px solid #c8ff43;border-right:0;vertical-align:middle}.brand b{display:inline-block;margin-left:9px;color:#c8ff43;font-size:23px;letter-spacing:.08em;vertical-align:middle}";
-  const endCardStart = Number((total - endCardLength).toFixed(2));
   const render = {
     timeline: {
       background: template.background,
       tracks: [
         { clips: [{ asset: { type: "html5", html: endCardHtml, css: endCardCss }, start: endCardStart, length: endCardLength, width: 720, height: 1280 }] },
-        { clips },
-        { clips: wallpaperTintClips },
+        ...clips.map((clip) => ({ clips: [clip] })),
+        { clips: [{ asset: { type: "html", html: "<div></div>", css: template.tintCss, width: 1080, height: 1920 }, start: 0, length: endCardStart, opacity: template.tintOpacity }] },
         { clips: wallpaperClips },
         { clips: [{ asset: { type: "audio", src: template.music, volume: template.musicVolume, effect: "fadeInFadeOut" }, start: 0, length: total }] },
       ],

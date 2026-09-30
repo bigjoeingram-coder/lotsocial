@@ -121,6 +121,19 @@ test("meta-only VDP (no JSON-LD): title, price, VIN and stock come from meta tag
   assert.deepEqual(vehicle.imageUrls, ["https://www.crowndodge.example/img/gc-1.jpg", "https://www.crowndodge.example/img/gc-2.jpg"]);
 });
 
+test("dealer banners and undersized thumbnails are excluded from vehicle photos", async () => {
+  const html = `<!doctype html><html><head><title>New 2024 Ford Escape</title></head><body>
+    <p>VIN: 1FMCU0E13RUA12345</p>
+    <div class="vehicle-gallery">
+      <img src="https://pictures.web.dealer.com/escape-front.jpg?impolicy=resize&w=1024" alt="vehicle photo">
+      <img src="https://images.dealer.com/graphics/v9/ford/adchoice/adchoice-new.png" alt="vehicle badge">
+      <img src="https://pictures.dealer.com/escape-thumb.jpg?impolicy=downsize&h=160" alt="vehicle photo">
+    </div>
+  </body></html>`;
+  const vehicle = await parseVehicleHtml(html, new URL("https://dealer.example/new-2024-ford-escape/"));
+  assert.deepEqual(vehicle.imageUrls, ["https://pictures.web.dealer.com/escape-front.jpg?impolicy=resize&w=1024"]);
+});
+
 test("a page with no vehicle evidence is refused, never saved as 'Imported vehicle'", async () => {
   await assert.rejects(
     () => parseVehicleHtml("<html><head><title>Welcome</title></head><body>Hours and directions</body></html>", new URL("https://dealer.example/about/")),
