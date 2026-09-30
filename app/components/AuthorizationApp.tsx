@@ -678,7 +678,7 @@ export function AuthorizationApp({ user }: { user: User }) {
         </nav>
         <div className="topbar-actions">
           <span className="environment-chip"><span className="live-dot" /> {currentUser.dealershipName || "Authorization workspace"}</span>
-          {currentUser.dealershipName && <a className="account-signout" href="/api/account-logout">Sign out</a>}
+          <a className="account-signout" href="/api/account-logout">Sign out</a>
           <div className="avatar" title={currentUser.email}>{currentUser.name.slice(0, 2).toUpperCase()}</div>
         </div>
       </header>

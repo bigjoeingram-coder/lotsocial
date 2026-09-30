@@ -15,6 +15,7 @@ import {
   LOGIN_PERSONAL_EMAIL_MESSAGE,
   requestAccountLogin,
 } from "../app/lib/account-login.ts";
+import { accountLoginNotice } from "../app/lib/account-login-notice.ts";
 import { accountLinkConfirmation } from "../app/lib/account-link-confirmation.ts";
 import { SqliteD1, startTier2Worker, testEnv } from "./harness.mjs";
 
@@ -144,6 +145,19 @@ test("login keeps the neutral response for dealership work emails", async () => 
   assert.deepEqual(result.body, { message: LOGIN_GENERIC_MESSAGE });
   assert.equal(createdFor, "sales@dealer.example");
   assert.equal(sentTo, "sales@dealer.example");
+});
+
+test("login visually distinguishes personal-email rejection from the neutral work-email response", () => {
+  assert.deepEqual(accountLoginNotice(false, { error: LOGIN_PERSONAL_EMAIL_MESSAGE }), {
+    message: LOGIN_PERSONAL_EMAIL_MESSAGE,
+    className: "account-message error",
+    role: "alert",
+  });
+  assert.deepEqual(accountLoginNotice(true, { message: LOGIN_GENERIC_MESSAGE }), {
+    message: LOGIN_GENERIC_MESSAGE,
+    className: "account-message",
+    role: "status",
+  });
 });
 
 test("an existing email cannot be taken over through the shared join form", async () => {

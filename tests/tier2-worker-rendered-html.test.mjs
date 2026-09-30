@@ -80,6 +80,7 @@ test("Tier 2 serves the workspace UI for a signed-in allowlisted associate at th
     assert.match(response.headers.get("content-type") ?? "", /text\/html/);
     assert.match(html, /LotSocial Inventory Authorization/);
     assert.match(html, /Authorization workspace/);
+    assert.match(html, /href="\/api\/account-logout"[^>]*>Sign out<\/a>/);
     assert.doesNotMatch(html, /signin-with-chatgpt/);
   } finally {
     await worker.dispose();
