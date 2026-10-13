@@ -291,9 +291,11 @@ Phase A and B code: schema and migration, state table, store, dispatcher, reconc
 - One existing file outside the plan changed: `tests/harness.mjs`, one line, so the in-memory fake database accepts `CREATE UNIQUE INDEX`.
 - No new dependency was added. A test now fails if one is.
 
-**Not built yet**
-- The protected tick route and its handler.
+**Added after checkpoint 2**
+- Protected tick route (`POST /api/ops/posting/tick`) and handler, off unless `LOTSOCIAL_POSTING_ENABLED` is `true`, with 4 tests. The production adapter registry is empty, so it cannot send. `npm test`: 130 of 130 pass.
 - `.env.example` and README notes.
+
+**Not built yet**
 - Any wiring from `creative_projects` screens to variants. The engine is reachable only from tests.
 - LinkedIn and YouTube adapters (Phase C and D).
 - Human-review timeout handling for a slot that stays `UNCERTAIN`; it stays put and is counted, but nothing alerts a person yet.
