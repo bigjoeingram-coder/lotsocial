@@ -15,6 +15,8 @@ export type PostingDeps = {
   retryCapSeconds: number;
   batchSize: number;
   uncertainTimeoutSeconds: number;
+  // How long after a lease expires a worker might still be mid-send. A "no such post" answer is not trusted before then.
+  sendGraceSeconds: number;
 };
 
 export function defaultDeps(db: D1DatabaseLike, adapters: AdapterRegistry, overrides: Partial<PostingDeps> = {}): PostingDeps {
@@ -30,6 +32,7 @@ export function defaultDeps(db: D1DatabaseLike, adapters: AdapterRegistry, overr
     retryCapSeconds: 3600,
     batchSize: 25,
     uncertainTimeoutSeconds: 6 * 3600,
+    sendGraceSeconds: 900,
     ...overrides,
   };
 }
@@ -50,7 +53,7 @@ export type SlotRow = {
 };
 
 export type AttemptRow = {
-  id: string; slot_id: string; idempotency_key: string; adapter: string; outcome: string;
+  id: string; slot_id: string; idempotency_key: string; adapter: string; request_snapshot: string; outcome: string;
   platform_post_id: string; platform_url: string; error_code: string; error_message: string;
   started_at: string; finished_at: string | null;
 };
@@ -85,6 +88,12 @@ export async function getSlot(deps: PostingDeps, id: string) {
 
 export async function latestAttempt(deps: PostingDeps, slotId: string) {
   return deps.db.prepare("SELECT * FROM delivery_attempts WHERE slot_id = ? ORDER BY started_at DESC, rowid DESC LIMIT 1").bind(slotId).first<AttemptRow>();
+}
+
+// The attempt that holds a platform post id, if any attempt of this slot ever got one.
+// `liveOnly` leaves out attempts whose post the platform reported as failed or rejected.
+export async function attemptWithPost(deps: PostingDeps, slotId: string, liveOnly = false) {
+  return deps.db.prepare(`SELECT * FROM delivery_attempts WHERE slot_id = ? AND platform_post_id <> ''${liveOnly ? " AND outcome <> 'failed'" : ""} ORDER BY started_at DESC, rowid DESC LIMIT 1`).bind(slotId).first<AttemptRow>();
 }
 
 export async function getDestination(deps: PostingDeps, id: string) {

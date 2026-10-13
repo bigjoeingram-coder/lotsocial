@@ -10,7 +10,15 @@ export type NewVariant = {
 
 const EDITABLE = { caption: "caption", title: "title", description: "description", platformOptions: "platform_options", mediaStorageKey: "media_storage_key", mediaChecksum: "media_checksum", renderJobId: "render_job_id" } as const;
 
+// Every action a person takes is recorded under a real address. A blank or malformed one is refused.
+function requirePerson(email: string) {
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email ?? "")) throw new Error("A named person is required for this action.");
+}
+
+const POST_SEND = "('IN_FLIGHT','UNCERTAIN','PROCESSING','NEEDS_REVIEW')";
+
 export async function createVariant(deps: PostingDeps, input: NewVariant, actorEmail: string) {
+  requirePerson(actorEmail);
   const id = deps.newId();
   const platformOptions = JSON.stringify(input.platformOptions ?? {});
   const hash = await revisionHash({
@@ -27,6 +35,9 @@ export async function createVariant(deps: PostingDeps, input: NewVariant, actorE
     await deps.db.prepare(`UPDATE post_slots SET slot_status = 'SUPERSEDED', updated_at = ?
       WHERE variant_id = ? AND slot_status IN ('DRAFT','READY_FOR_REVIEW','APPROVED','QUEUED','RETRY_READY','RATE_LIMITED','AUTH_REQUIRED')`)
       .bind(now, input.supersedesId).run();
+    // The old variant can never send again, whatever state its slots are in: approval is the send-time gate.
+    await deps.db.prepare("UPDATE post_variants SET approval_status = 'SUPERSEDED', approved_revision_hash = '', updated_at = ? WHERE id = ?")
+      .bind(now, input.supersedesId).run();
     await audit(deps, { variantId: input.supersedesId, actorType: "person", actorEmail, action: "variant_superseded", metadata: { by: id } });
   }
   await audit(deps, { variantId: id, actorType: "person", actorEmail, action: "variant_created", metadata: { revisionHash: hash } });
@@ -36,6 +47,7 @@ export async function createVariant(deps: PostingDeps, input: NewVariant, actorE
 // Any edit to a publish-affecting field makes a new revision and voids approval.
 // Slots that were waiting on the old approval go back to DRAFT and cannot send.
 export async function editVariant(deps: PostingDeps, variantId: string, changes: Partial<Record<keyof typeof EDITABLE, unknown>>, actorEmail: string) {
+  requirePerson(actorEmail);
   const variant = await requireVariant(deps, variantId);
   const next: VariantRow = { ...variant };
   for (const [key, column] of Object.entries(EDITABLE)) {
@@ -59,7 +71,9 @@ export async function editVariant(deps: PostingDeps, variantId: string, changes:
 }
 
 export async function approveVariant(deps: PostingDeps, variantId: string, approverEmail: string) {
+  requirePerson(approverEmail);
   const variant = await requireVariant(deps, variantId);
+  if (variant.approval_status === "SUPERSEDED") return { ok: false as const, errors: ["This variant was replaced by a newer one and cannot be approved."] };
   const adapter = deps.adapters[variant.platform];
   if (!adapter) throw new Error(`No adapter is registered for ${variant.platform}.`);
   if (!variant.media_storage_key) return reject(deps, variant, ["A rendered asset is required before approval."]);
@@ -67,9 +81,11 @@ export async function approveVariant(deps: PostingDeps, variantId: string, appro
   if (!validation.ok) return reject(deps, variant, validation.errors);
   const hash = await currentHash(variant);
   const now = iso(deps.now());
-  await deps.db.prepare(`UPDATE post_variants SET approval_status = 'APPROVED', approved_revision_hash = ?, approved_by = ?, approved_at = ?,
-      validation_status = 'valid', validation_errors = '[]', updated_at = ? WHERE id = ? AND revision_hash = ?`)
+  const approved = await deps.db.prepare(`UPDATE post_variants SET approval_status = 'APPROVED', approved_revision_hash = ?, approved_by = ?, approved_at = ?,
+      validation_status = 'valid', validation_errors = '[]', updated_at = ? WHERE id = ? AND revision_hash = ? AND approval_status <> 'SUPERSEDED'`)
     .bind(hash, approverEmail, now, now, variantId, hash).run();
+  // An edit landed between the read and the write. Nothing was approved, so say so.
+  if (approved.meta.changes === 0) return { ok: false as const, errors: ["The variant changed while it was being approved. Review it again."] };
   await audit(deps, { variantId, actorType: "person", actorEmail: approverEmail, action: "variant_approved", metadata: { revisionHash: hash, revision: variant.revision } });
   return { ok: true as const, revisionHash: hash };
 }
@@ -83,6 +99,7 @@ async function reject(deps: PostingDeps, variant: VariantRow, errors: string[]) 
 // Queues one post. Refuses unless the variant is approved at its current revision,
 // has an asset, passed validation, and the destination is usable.
 export async function queueSlot(deps: PostingDeps, input: { variantId: string; scheduledAtUtc: string; timezone?: string }, actorEmail: string) {
+  requirePerson(actorEmail);
   const variant = await requireVariant(deps, input.variantId);
   const errors: string[] = [];
   if (variant.approval_status !== "APPROVED") errors.push("The variant is not approved.");
@@ -92,6 +109,16 @@ export async function queueSlot(deps: PostingDeps, input: { variantId: string; s
   const destination = await getDestination(deps, variant.destination_id);
   if (!destination || destination.status !== "active" || destination.connection_status !== "active" || destination.health_state === "DISABLED") errors.push("The destination is not available.");
   if (Number.isNaN(Date.parse(input.scheduledAtUtc))) errors.push("The scheduled time is not a valid UTC timestamp.");
+  if (variant.supersedes_id) {
+    // The post this one replaces may already be live or still unresolved. Sending the replacement now could put both up.
+    const unresolved = await deps.db.prepare(`SELECT id, slot_status FROM post_slots WHERE variant_id = ? AND slot_status IN ${POST_SEND} LIMIT 1`)
+      .bind(variant.supersedes_id).first<{ id: string; slot_status: string }>();
+    if (unresolved) errors.push(`The post this one replaces is still unresolved (${unresolved.slot_status}). Resolve it first.`);
+  }
+  // A failed post is retried by a named person with a reason, never by queueing a fresh slot around it.
+  const failed = await deps.db.prepare("SELECT id FROM post_slots WHERE variant_id = ? AND destination_id = ? AND slot_status = 'FAILED' LIMIT 1")
+    .bind(variant.id, variant.destination_id).first<{ id: string }>();
+  if (failed) return { ok: false as const, errors: [...errors, "This post has a failed slot. Use the operator retry, with a reason."], existingSlotId: failed.id };
   if (errors.length) return { ok: false as const, errors };
 
   const now = iso(deps.now());
@@ -107,7 +134,7 @@ export async function queueSlot(deps: PostingDeps, input: { variantId: string; s
   if (existing) {
     // The slot went back to DRAFT when an edit voided approval. Re-approval revives the same slot.
     const revived = await deps.db.prepare(`UPDATE post_slots SET slot_status = 'QUEUED', scheduled_at_utc = ?, timezone = ?, idempotency_key = ?,
-        approved_revision_hash = ?, next_retry_at = NULL, uncertain_since = NULL, send_started_at = NULL, updated_at = ?
+        approved_revision_hash = ?, attempt_count = 0, next_retry_at = NULL, uncertain_since = NULL, send_started_at = NULL, updated_at = ?
       WHERE id = ? AND slot_status = 'DRAFT'`)
       .bind(scheduled, input.timezone ?? "UTC", `${existing.id}:${variant.revision_hash}`, variant.revision_hash, now, existing.id).run();
     if (revived.meta.changes === 0) return { ok: false as const, errors: ["The slot changed while it was being queued. Try again."] };
@@ -132,6 +159,7 @@ export async function queueSlot(deps: PostingDeps, input: { variantId: string; s
 // A person may retry a slot that failed or that reconciliation could not resolve.
 // The engine never does this on its own, and the decision is recorded with the person's name.
 export async function operatorRetry(deps: PostingDeps, slotId: string, actorEmail: string, reason: string) {
+  requirePerson(actorEmail);
   if (!reason.trim()) throw new Error("A reason is required to retry a slot by hand.");
   const slot = await getSlot(deps, slotId);
   if (!slot || !["FAILED", "NEEDS_REVIEW"].includes(slot.slot_status)) return false;
@@ -150,10 +178,22 @@ export async function operatorRetry(deps: PostingDeps, slotId: string, actorEmai
 }
 
 export async function cancelSlot(deps: PostingDeps, slotId: string, actorEmail: string) {
+  requirePerson(actorEmail);
   const result = await deps.db.prepare(`UPDATE post_slots SET slot_status = 'CANCELED', updated_at = ?
     WHERE id = ? AND slot_status IN ('DRAFT','READY_FOR_REVIEW','APPROVED','QUEUED','RETRY_READY','RATE_LIMITED','AUTH_REQUIRED')`)
     .bind(iso(deps.now()), slotId).run();
   if (result.meta.changes > 0) await audit(deps, { slotId, actorType: "person", actorEmail, action: "slot_canceled" });
+  return result.meta.changes > 0;
+}
+
+// A person reconnected the account. Health goes back to UNVERIFIED, which lets held slots resume;
+// the next send proves the connection one way or the other.
+export async function markConnectionReconnected(deps: PostingDeps, connectionId: string, actorEmail: string) {
+  requirePerson(actorEmail);
+  const now = iso(deps.now());
+  const result = await deps.db.prepare("UPDATE social_connections SET health_state = 'UNVERIFIED', health_checked_at = ?, updated_at = ? WHERE id = ? AND health_state = 'AUTH_REQUIRED'")
+    .bind(now, now, connectionId).run();
+  if (result.meta.changes > 0) await audit(deps, { actorType: "person", actorEmail, action: "connection_reconnected", metadata: { connectionId } });
   return result.meta.changes > 0;
 }
 

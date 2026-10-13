@@ -17,7 +17,8 @@ export const ALLOWED_TRANSITIONS: Record<SlotState, SlotState[]> = {
   QUEUED: ["IN_FLIGHT", "DRAFT", "CANCELED", "SUPERSEDED"],
   // An expired or unknown send goes to UNCERTAIN. IN_FLIGHT never returns to QUEUED.
   IN_FLIGHT: ["PUBLISHED", "PROCESSING", "UNCERTAIN", "RATE_LIMITED", "AUTH_REQUIRED", "FAILED", "RETRY_READY", "DRAFT"],
-  PROCESSING: ["PUBLISHED", "FAILED"],
+  // A post that never finishes processing goes to a person after the time limit.
+  PROCESSING: ["PUBLISHED", "FAILED", "NEEDS_REVIEW"],
   PUBLISHED: [],
   // An UNCERTAIN slot that cannot be resolved in time goes to a person. It is never re-sent on its own.
   UNCERTAIN: ["PUBLISHED", "PROCESSING", "RETRY_READY", "FAILED", "NEEDS_REVIEW"],
