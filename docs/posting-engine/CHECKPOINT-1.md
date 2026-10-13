@@ -349,6 +349,35 @@ This lives on a separate branch, `claude/posting-engine-linkedin`, stacked on th
 - The four shared media-upload methods are stubs for LinkedIn; the upload runs inside `createPost`.
 - No OAuth connect or token refresh flow. The adapter takes a token from an injected lookup.
 
+## 14. Checkpoint 5: YouTube adapter on recorded fixtures (2026-10-13, created by Fable, not graded)
+
+This lives on branch `claude/posting-engine-youtube`, stacked on the LinkedIn branch.
+
+**Source.** Written against four official pages, all read on 2026-10-13: the [resumable upload guide](https://developers.google.com/youtube/v3/guides/using_resumable_upload_protocol) (page dated 2026-09-14), [videos.insert](https://developers.google.com/youtube/v3/docs/videos/insert) (2026-10-08), [videos.list](https://developers.google.com/youtube/v3/docs/videos/list) (2026-09-14) and the [video resource](https://developers.google.com/youtube/v3/docs/videos) (2026-10-08). Test fixtures copy the sample requests and responses on those pages.
+
+**Built.** `app/lib/posting/adapters/youtube.ts`, using `fetch` only. Open a resumable session, send the file, check and resume an interrupted upload, map the result, and read back by video id. 16 fixture tests.
+
+**Status.** Every capability is `DOCUMENTED_NOT_LIVE_TESTED` or `UNSUPPORTED`. The adapter is not registered for production, and a test fails if it is. No request has gone to YouTube. No credential was used. No contract change.
+
+**Facts from the docs that shape the design**
+
+| Fact | Effect |
+| --- | --- |
+| The session URI answers "did the upload finish?". `308` means incomplete; otherwise it repeats the original final answer. | An interrupted upload is resolved inside `createPost`. A confirmed `308` after the last attempt is a clean retryable failure: no video exists. Only an unreachable session is `UNCERTAIN`. |
+| `videos.insert` has its own quota bucket: 100 calls per day. | `uploadLimitExceeded` and `quotaExceeded` map to `RATE_LIMITED`, not a permanent failure. |
+| Title: 100 characters. Description: 5000 bytes. Neither may contain `<` or `>`. | Checked before any request. |
+| `uploadStatus` is one of `uploaded`, `processed`, `failed`, `rejected`, `deleted`. | `uploaded` is `PROCESSING`; the reconciler reads back until `processed`. |
+| Privacy defaults to public, but some uploads "might default to private based on creator account settings". | If YouTube returns a different privacy than requested, the slot fails with the video id in the message. A private video is not reported as a published post. |
+| No client-supplied idempotency key. | `findByClientRef` is unsupported. |
+
+**Known limits**
+
+- The session URI is held in memory only. If the Worker dies mid-upload, the slot goes to `UNCERTAIN` and then to a person. Storing the URI on the attempt row would let the reconciler ask YouTube directly. That is a contract change and is not made here.
+- Listing a channel's uploads (to find a lost video) uses a different API method that was not read or built.
+- The read scope for `videos.list` is not stated on the page read. `youtube.readonly` is assumed and must be confirmed in the credential inventory.
+- The file is held in memory. The default cap is 100 MB.
+- The 15-minute length limit in the manifest is a conservative assumption, not from the pages read.
+
 ## 15. Checkpoint 6: fixes from the independent adversarial review (2026-10-13, created by Fable, not graded)
 
 Gene routed the code review to a non-author seat. Codex on Joe's desktop did not answer, so Fable ran an independent reviewer with a fresh context and its own in-memory SQLite harness. It reproduced the defects below with scripts; the fixes each carry a test that fails on the old code. Reviewer's repro scripts are not in the repo.
