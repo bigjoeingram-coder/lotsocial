@@ -90,7 +90,8 @@ export class LinkedInAdapter implements PlatformAdapter {
     const token = await this.deps.getAccessToken(destination.credentialsRef);
     if (!token) return { state: "failed" as const, detail: "No LinkedIn token is stored for this connection." };
     const response = await this.deps.fetch(`${API}/videos/${encodeURIComponent(mediaRef)}`, { method: "GET", headers: this.headers(token) });
-    if (!response.ok) return { state: "failed" as const, detail: `LinkedIn answered ${response.status}.` };
+    // A bad answer to a status poll is not a verdict on the video. Keep polling; the poll budget is the limit.
+    if (!response.ok) return { state: "processing" as const, detail: `LinkedIn answered ${response.status} to the status poll.` };
     const status = String((await response.json() as { status?: string }).status ?? "");
     if (status === "AVAILABLE") return { state: "ready" as const, detail: status };
     if (status === "PROCESSING_FAILED") return { state: "failed" as const, detail: status };
@@ -123,14 +124,19 @@ export class LinkedInAdapter implements PlatformAdapter {
 
     // From here the write may or may not land. A network error is thrown to the dispatcher, which records it as uncertain.
     const response = await this.deps.fetch(`${API}/posts`, { method: "POST", headers: this.headers(token, true), body: JSON.stringify(body) });
-    if (response.status === 201) {
-      const postUrn = response.headers.get("x-restli-id") ?? "";
-      if (!postUrn) return { kind: "uncertain", detail: "LinkedIn answered 201 without a post id." };
+    const postUrn = response.headers.get("x-restli-id") ?? "";
+    // Any success that names the post is a publish. The documented answer is 201, but a 200 or 202 with an id is still the post.
+    if (response.ok && postUrn) {
       return { kind: "published", platformPostId: postUrn, platformUrl: postUrl(postUrn), providerRequestId: response.headers.get("x-li-uuid") ?? undefined };
     }
-    // A server error after the request was sent does not prove the post was not created.
-    if (response.status >= 500) return { kind: "uncertain", detail: `LinkedIn answered ${response.status} to the create request.` };
-    return await failedFromResponse(response);
+    // After the request was sent, only a clear 4xx proves the post was not created.
+    // A success without an id, a redirect, a timeout, a conflict, a duplicate complaint, or a server error leaves it unknown.
+    if (response.ok || response.status >= 500 || (response.status >= 300 && response.status < 400) || response.status === 408 || response.status === 409) {
+      return { kind: "uncertain", detail: `LinkedIn answered ${response.status} to the create request${postUrn ? "" : " without a post id"}.` };
+    }
+    const failure = await failedFromResponse(response);
+    if (/duplicate/i.test(failure.message)) return { kind: "uncertain", detail: `LinkedIn reports a duplicate: ${failure.message}` };
+    return failure;
   }
 
   async readbackPost(destination: DestinationRef, platformPostId: string): Promise<LookupResult> {

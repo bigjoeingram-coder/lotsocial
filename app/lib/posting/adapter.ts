@@ -41,8 +41,9 @@ export type VariantSnapshot = {
 export type ValidationResult = { ok: true } | { ok: false; errors: string[] };
 
 export type Outcome =
-  | { kind: "published"; platformPostId: string; platformUrl: string; providerRequestId?: string }
-  | { kind: "processing"; platformPostId: string; providerRequestId?: string }
+  // `warning` reports a post that exists but is not what was asked for (for example, kept private). The id is never dropped.
+  | { kind: "published"; platformPostId: string; platformUrl: string; providerRequestId?: string; warning?: string }
+  | { kind: "processing"; platformPostId: string; providerRequestId?: string; warning?: string }
   | { kind: "uncertain"; detail: string }
   | { kind: "failed"; code: ErrorCode; message: string; retryable: boolean; retryAfterSeconds?: number };
 

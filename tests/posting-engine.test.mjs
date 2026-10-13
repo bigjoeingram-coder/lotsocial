@@ -8,7 +8,7 @@ import { defaultDeps } from "../app/lib/posting/engine.ts";
 import { reconcile } from "../app/lib/posting/reconciler.ts";
 import { ALLOWED_TRANSITIONS, canTransition } from "../app/lib/posting/states.ts";
 import { runPostingTick } from "../app/lib/posting/tick.ts";
-import { approveVariant, cancelSlot, createVariant, editVariant, localDisplay, operatorRetry, queueSlot } from "../app/lib/posting/workflow.ts";
+import { approveVariant, cancelSlot, createVariant, editVariant, localDisplay, markConnectionReconnected, operatorRetry, queueSlot } from "../app/lib/posting/workflow.ts";
 import { SqliteD1 } from "./harness.mjs";
 
 const START = Date.parse("2026-10-13T12:00:00.000Z");
@@ -397,6 +397,9 @@ test("an uncertain send the platform confirms never happened is retried once", a
   await runPostingTick(w.deps);
   assert.equal(w.slot(slotId).slot_status, "UNCERTAIN");
   await runPostingTick(w.deps);
+  assert.equal(w.slot(slotId).slot_status, "UNCERTAIN", "a worker could still be sending, so 'no such post' is not trusted yet");
+  w.advance(300 + 900 + 1);
+  await runPostingTick(w.deps);
   assert.equal(w.slot(slotId).slot_status, "PUBLISHED");
   assert.equal(w.mock.posts.length, 1);
   assert.ok(w.auditActions(slotId).includes("reconcile_confirmed_no_post"));
@@ -535,7 +538,9 @@ test("the delivery record stores no credentials", async () => {
   const w = await world();
   const { slotId } = await queuedSlot(w);
   await runPostingTick(w.deps);
-  assert.deepEqual(Object.keys(JSON.parse(w.attempts(slotId)[0].request_snapshot)), ["revisionHash"]);
+  const raw = w.attempts(slotId)[0].request_snapshot;
+  assert.deepEqual(Object.keys(JSON.parse(raw)), ["revisionHash", "sent"]);
+  assert.ok(!raw.includes("SECRET_NAME_ONLY") && !/credential|token/i.test(raw));
 });
 
 // ---- Third-party boundary ----
@@ -550,4 +555,240 @@ test("no dependency is added beyond the reviewed allowlist", async () => {
   ]);
   const present = [...Object.keys(manifest.dependencies ?? {}), ...Object.keys(manifest.devDependencies ?? {})];
   assert.deepEqual(present.filter((name) => !allowed.has(name)), [], "A new dependency needs a boundary review (spec section 29 C2) before it is added here.");
+});
+
+// ---- Independent review, 2026-10-13 (defects D1-D4, D8-D10, D13) ----
+
+// Waits until the slow worker has reached the platform call (hashing runs off-thread, so this takes real time).
+const settle = async (reached) => { for (let turn = 0; turn < 500 && !reached(); turn += 1) await new Promise((resolve) => setTimeout(resolve, 2)); };
+
+test("a send that outlives its lease is not re-sent by another worker (review D1)", async () => {
+  const w = await world();
+  const { slotId } = await queuedSlot(w);
+  const real = w.mock.createPost.bind(w.mock);
+  let release;
+  w.mock.createPost = async (...args) => { await new Promise((resolve) => { release = resolve; }); return real(...args); };
+  const slow = dispatchSlot(w.deps, slotId);
+  await settle(() => Boolean(release));
+  assert.ok(release, "worker A is inside the platform call");
+  w.advance(301);
+  const other = { ...w.deps, workerId: "worker-b" };
+  await runPostingTick(other);
+  assert.equal(w.slot(slotId).slot_status, "UNCERTAIN");
+  await runPostingTick(other);
+  assert.equal(w.slot(slotId).slot_status, "UNCERTAIN", "'no such post' is not trusted while a worker may still be sending");
+  release();
+  const result = await slow;
+  assert.equal(result.status, "PUBLISHED", "the late worker's answer settles its own attempt");
+  assert.equal(w.slot(slotId).slot_status, "PUBLISHED");
+  assert.equal(w.mock.posts.length, 1);
+  assert.equal(w.mock.createCalls.length, 1);
+});
+
+test("a late worker cannot settle a slot that a newer attempt owns", async () => {
+  const w = await world();
+  const { slotId } = await queuedSlot(w);
+  const real = w.mock.createPost.bind(w.mock);
+  let release;
+  w.mock.createPost = async (...args) => { await new Promise((resolve) => { release = resolve; }); return real(...args); };
+  const slow = dispatchSlot(w.deps, slotId);
+  await settle(() => Boolean(release));
+  w.db.db.prepare("UPDATE post_slots SET attempt_id = 'newer-attempt' WHERE id = ?").run(slotId);
+  release();
+  assert.equal((await slow).status, "LEASE_LOST");
+  assert.equal(w.slot(slotId).slot_status, "IN_FLIGHT");
+});
+
+test("the send marker is refused once the lease has expired (review D2)", async () => {
+  const w = await world();
+  const { slotId } = await queuedSlot(w);
+  let stalled = false;
+  const stalling = { ...w.deps, db: { prepare: (sql) => {
+    // The worker stalls for longer than its lease right before it would write the marker.
+    if (!stalled && sql.includes("SET send_started_at = ?")) { stalled = true; w.advance(301); }
+    return w.db.prepare(sql);
+  }, batch: (statements) => w.db.batch(statements) } };
+  const result = await dispatchSlot(stalling, slotId);
+  assert.equal(result.status, "LEASE_LOST");
+  assert.equal(w.mock.createCalls.length, 0, "no marker, no send");
+  await runPostingTick({ ...w.deps, workerId: "worker-b" });
+  assert.equal(w.slot(slotId).slot_status, "PUBLISHED");
+  assert.equal(w.mock.posts.length, 1);
+});
+
+test("lease expiry reads the marker and moves the slot in one statement (review D2)", async () => {
+  const w = await world();
+  const { slotId } = await queuedSlot(w);
+  await claimAndDieMidSend(w, slotId);
+  w.advance(301);
+  const summary = await reconcile({ ...w.deps, adapters: {} });
+  assert.equal(summary.neverSentRequeued, 0);
+  assert.equal(summary.expiredLeases, 1);
+  assert.equal(w.slot(slotId).slot_status, "UNCERTAIN");
+});
+
+test("a stale reconcile answer does not move a newer attempt (review D3)", async () => {
+  const w = await world();
+  w.mock.enqueue({ kind: "throw_without_post" });
+  const { slotId } = await queuedSlot(w);
+  await runPostingTick(w.deps);
+  w.advance(1201);
+  const real = w.mock.findByClientRef.bind(w.mock);
+  w.mock.findByClientRef = async (...args) => {
+    // While this lookup is in the air, another pass retries the slot and it lands in UNCERTAIN again.
+    w.db.db.prepare("UPDATE post_slots SET attempt_id = 'newer-attempt' WHERE id = ?").run(slotId);
+    return real(...args);
+  };
+  const summary = await reconcile(w.deps);
+  assert.equal(summary.retryReady, 0);
+  assert.equal(w.slot(slotId).slot_status, "UNCERTAIN");
+});
+
+test("a replaced post can never send again, and its replacement waits until it is resolved (review D4)", async () => {
+  const w = await world();
+  w.mock.enqueue({ kind: "throw_without_post" });
+  const { variantId, slotId } = await queuedSlot(w);
+  await runPostingTick(w.deps);
+  assert.equal(w.slot(slotId).slot_status, "UNCERTAIN");
+  const next = await approvedVariant(w, { caption: "Come see the 2026 F-150 Lightning.", supersedesId: variantId });
+  assert.equal(next.approval.ok, true);
+  const blocked = await queueSlot(w.deps, { variantId: next.variantId, scheduledAtUtc: w.at(-1) }, AUTHOR);
+  assert.equal(blocked.ok, false);
+  assert.match(blocked.errors.join(" "), /still unresolved/);
+  w.advance(1201);
+  await runPostingTick(w.deps);
+  await runPostingTick(w.deps);
+  assert.equal(w.mock.createCalls.length, 1, "the old content is never sent again");
+  assert.equal(w.slot(slotId).slot_status, "DRAFT");
+  assert.equal((await approveVariant(w.deps, variantId, APPROVER)).ok, false, "a replaced variant cannot be re-approved");
+  const queued = await queueSlot(w.deps, { variantId: next.variantId, scheduledAtUtc: w.at(-1) }, AUTHOR);
+  assert.equal(queued.ok, true);
+  await runPostingTick(w.deps);
+  assert.deepEqual(w.mock.posts.map((post) => post.destination), ["dest-1"]);
+  assert.equal(w.mock.createCalls.at(-1).caption, "Come see the 2026 F-150 Lightning.");
+});
+
+test("a slot is never sent again when an earlier attempt already has a platform post", async () => {
+  const w = await world();
+  const { slotId } = await queuedSlot(w);
+  await runPostingTick(w.deps);
+  assert.equal(w.mock.posts.length, 1);
+  w.db.db.prepare("UPDATE post_slots SET slot_status = 'RETRY_READY' WHERE id = ?").run(slotId);
+  await runPostingTick(w.deps);
+  await runPostingTick(w.deps);
+  assert.equal(w.mock.createCalls.length, 1);
+  assert.equal(w.slot(slotId).slot_status, "PUBLISHED");
+  assert.ok(w.auditActions(slotId).includes("send_blocked_earlier_attempt_has_post"));
+});
+
+test("a post that never finishes processing goes to a person (review D8)", async () => {
+  const w = await world({ uncertainTimeoutSeconds: 3600 });
+  w.mock.enqueue({ kind: "processing", readyAfterChecks: 1_000_000 });
+  const { slotId } = await queuedSlot(w);
+  await runPostingTick(w.deps);
+  assert.equal(w.slot(slotId).slot_status, "PROCESSING");
+  w.advance(1800);
+  await runPostingTick(w.deps);
+  assert.equal(w.slot(slotId).slot_status, "PROCESSING");
+  w.advance(1801);
+  await runPostingTick(w.deps);
+  assert.equal(w.slot(slotId).slot_status, "NEEDS_REVIEW");
+  assert.ok(canTransition("PROCESSING", "NEEDS_REVIEW"));
+  assert.ok(w.auditActions(slotId).includes("processing_timeout_needs_review"));
+});
+
+test("a processing post whose record disappears goes to a person, not into a loop (review D8)", async () => {
+  const w = await world({ uncertainTimeoutSeconds: 3600 });
+  w.mock.enqueue({ kind: "processing", readyAfterChecks: 5 });
+  const { slotId } = await queuedSlot(w);
+  await runPostingTick(w.deps);
+  w.mock.posts.length = 0;
+  w.advance(3601);
+  await runPostingTick(w.deps);
+  assert.equal(w.slot(slotId).slot_status, "NEEDS_REVIEW");
+  assert.equal(w.mock.createCalls.length, 1);
+});
+
+test("a held slot resumes when the hold clears, without a GREEN health record (review D9)", async () => {
+  const w = await world();
+  w.db.db.exec("UPDATE social_connections SET health_state = 'UNVERIFIED' WHERE id = 'conn-1'");
+  const { slotId } = await queuedSlot(w);
+  w.db.db.exec("UPDATE social_destinations SET status = 'paused' WHERE id = 'dest-1'");
+  for (let pass = 0; pass < 5; pass += 1) await runPostingTick(w.deps);
+  assert.equal(w.slot(slotId).slot_status, "AUTH_REQUIRED");
+  assert.equal(w.slot(slotId).attempt_count, 0, "a hold does not use up the retry budget");
+  w.db.db.exec("UPDATE social_destinations SET status = 'active' WHERE id = 'dest-1'");
+  await runPostingTick(w.deps);
+  await runPostingTick(w.deps);
+  assert.equal(w.slot(slotId).slot_status, "PUBLISHED");
+});
+
+test("after a platform refusal the slot waits for a person to reconnect, then sends (review D9)", async () => {
+  const w = await world();
+  w.mock.enqueue({ kind: "fail", code: "PERMISSION_DENIED", retryable: false });
+  const { slotId } = await queuedSlot(w);
+  for (let pass = 0; pass < 4; pass += 1) await runPostingTick(w.deps);
+  assert.equal(w.slot(slotId).slot_status, "AUTH_REQUIRED");
+  assert.equal(w.mock.createCalls.length, 1, "the engine does not keep hitting a refused connection");
+  await assert.rejects(markConnectionReconnected(w.deps, "conn-1", ""), /named person/);
+  assert.equal(await markConnectionReconnected(w.deps, "conn-1", AUTHOR), true);
+  await runPostingTick(w.deps);
+  await runPostingTick(w.deps);
+  assert.equal(w.slot(slotId).slot_status, "PUBLISHED");
+  assert.equal(w.mock.posts.length, 1);
+});
+
+test("every person action needs a real address (review D10)", async () => {
+  const w = await world();
+  w.mock.enqueue({ kind: "fail", code: "PLATFORM_REJECTED", retryable: false });
+  const { variantId, slotId } = await queuedSlot(w);
+  await runPostingTick(w.deps);
+  assert.equal(w.slot(slotId).slot_status, "FAILED");
+  for (const actor of ["", " ", "engine"]) {
+    await assert.rejects(operatorRetry(w.deps, slotId, actor, "try again"), /named person/);
+    await assert.rejects(approveVariant(w.deps, variantId, actor), /named person/);
+    await assert.rejects(queueSlot(w.deps, { variantId, scheduledAtUtc: w.at(-1) }, actor), /named person/);
+    await assert.rejects(cancelSlot(w.deps, slotId, actor), /named person/);
+  }
+  assert.equal(w.slot(slotId).slot_status, "FAILED");
+});
+
+test("a failed post cannot be re-sent by queueing a new slot around it (review D10)", async () => {
+  const w = await world();
+  w.mock.enqueue({ kind: "fail", code: "PLATFORM_REJECTED", retryable: false });
+  const { variantId, slotId } = await queuedSlot(w);
+  await runPostingTick(w.deps);
+  const again = await queueSlot(w.deps, { variantId, scheduledAtUtc: w.at(-1) }, AUTHOR);
+  assert.equal(again.ok, false);
+  assert.equal(again.existingSlotId, slotId);
+  assert.equal(w.db.rows("SELECT COUNT(*) AS n FROM post_slots")[0].n, 1);
+  assert.equal(await operatorRetry(w.deps, slotId, APPROVER, "Platform outage is over."), true);
+});
+
+test("approval reports failure when the variant changed underneath it (review D13)", async () => {
+  const w = await world();
+  const variantId = await createVariant(w.deps, { creativeProjectId: "proj-1", destinationId: "dest-1", platform: "mock", caption: "First.", mediaStorageKey: "renders/proj-1.mp4" }, AUTHOR);
+  let raced = false;
+  const racing = { ...w.deps, db: { prepare: (sql) => {
+    if (!raced && sql.includes("SET approval_status = 'APPROVED'")) { raced = true; w.db.db.prepare("UPDATE post_variants SET revision_hash = 'changed-by-an-edit' WHERE id = ?").run(variantId); }
+    return w.db.prepare(sql);
+  }, batch: (statements) => w.db.batch(statements) } };
+  const result = await approveVariant(racing, variantId, APPROVER);
+  assert.equal(result.ok, false);
+  assert.ok(!w.auditActions(variantId).includes("variant_approved"));
+});
+
+test("a lost answer is still matched after the caption is edited, because the match uses what was sent (review D11)", async () => {
+  const w = await world();
+  w.mock.supportsClientRef = false;
+  w.mock.enqueue({ kind: "accept_then_throw" });
+  const { variantId, slotId } = await queuedSlot(w);
+  await runPostingTick(w.deps);
+  assert.equal(w.slot(slotId).slot_status, "UNCERTAIN");
+  await editVariant(w.deps, variantId, { caption: "Come see the 2026 F-150 today." }, AUTHOR);
+  w.advance(1201);
+  await runPostingTick(w.deps);
+  assert.equal(w.slot(slotId).slot_status, "PUBLISHED");
+  assert.equal(w.mock.createCalls.length, 1);
+  assert.equal(w.mock.posts.length, 1);
 });

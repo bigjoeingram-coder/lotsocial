@@ -1,6 +1,6 @@
-import type { Outcome } from "./adapter.ts";
+import type { Outcome, VariantSnapshot } from "./adapter.ts";
 import type { PostingDeps, SlotRow } from "./engine.ts";
-import { addSeconds, audit, backoffSeconds, currentHash, destinationRef, getDestination, getVariant, iso, moveSlot, snapshot } from "./engine.ts";
+import { addSeconds, attemptWithPost, audit, backoffSeconds, currentHash, destinationRef, getDestination, getVariant, iso, moveSlot, snapshot } from "./engine.ts";
 
 type Claimed = Pick<SlotRow, "id" | "variant_id" | "destination_id" | "approved_revision_hash" | "idempotency_key" | "attempt_count">;
 
@@ -34,9 +34,19 @@ export async function dispatchSlot(deps: PostingDeps, slotId: string): Promise<D
   if (!claim) return null;
   const attemptId = claim.attemptId;
   const finish = async (status: string, sent: boolean, extra: Parameters<typeof moveSlot>[4] = {}) => {
-    await moveSlot(deps, slotId, ["IN_FLIGHT"], status, { ...extra, attemptId });
-    return { slotId, status, sent };
+    // A worker that outlived its lease finds the slot UNCERTAIN. Its answer is still the truth for
+    // this attempt, so it may settle the slot. A newer attempt (different attempt id) is never touched.
+    const moved = await moveSlot(deps, slotId, ["IN_FLIGHT", "UNCERTAIN"], status, { ...extra, attemptId });
+    return { slotId, status: moved ? status : "LEASE_LOST", sent };
   };
+
+  // If any earlier attempt of this slot already has a platform post, never send again.
+  // The slot goes back to reconciliation, which reads that post.
+  const earlier = await attemptWithPost(deps, slotId, true);
+  if (earlier) {
+    await audit(deps, { slotId, variantId: claim.variant_id, actorType: "engine", action: "send_blocked_earlier_attempt_has_post", metadata: { attemptId: earlier.id, platformPostId: earlier.platform_post_id } });
+    return finish("UNCERTAIN", false, { uncertainSince: iso(deps.now()) });
+  }
 
   const variant = await getVariant(deps, claim.variant_id);
   const destination = await getDestination(deps, claim.destination_id);
@@ -60,24 +70,27 @@ export async function dispatchSlot(deps: PostingDeps, slotId: string): Promise<D
   // A paused or unauthorized connection is recoverable, so the slot waits instead of failing.
   if (destination.status !== "active" || destination.connection_status !== "active" || destination.health_state === "DISABLED" || destination.health_state === "AUTH_REQUIRED") {
     await audit(deps, { slotId, variantId: variant.id, actorType: "engine", action: "send_held_connection_unavailable", metadata: { health: destination.health_state, destination: destination.status, connection: destination.connection_status } });
+    // A hold is not a send attempt, so it does not use up the retry budget.
+    await deps.db.prepare("UPDATE post_slots SET attempt_count = MAX(0, attempt_count - 1) WHERE id = ? AND attempt_id = ?").bind(slotId, attemptId).run();
     return finish("AUTH_REQUIRED", false);
   }
   const content = snapshot(variant);
   const validation = adapter.validateContent(content);
   if (!validation.ok) {
-    await recordAttempt(deps, attemptId, slotId, claim.idempotency_key, variant.platform, content.revisionHash);
+    await recordAttempt(deps, attemptId, slotId, claim.idempotency_key, variant.platform, content);
     await closeAttempt(deps, attemptId, { kind: "failed", code: "VALIDATION", message: validation.errors.join(" "), retryable: false }, "rejected_validation");
     await audit(deps, { slotId, variantId: variant.id, actorType: "engine", action: "send_blocked_validation", metadata: { errors: validation.errors } });
     return finish("FAILED", false);
   }
 
-  await recordAttempt(deps, attemptId, slotId, claim.idempotency_key, variant.platform, content.revisionHash);
+  await recordAttempt(deps, attemptId, slotId, claim.idempotency_key, variant.platform, content);
   await audit(deps, { slotId, variantId: variant.id, actorType: "engine", action: "send_started", metadata: { attemptId, revisionHash: content.revisionHash, approvedBy: variant.approved_by, approvedAt: variant.approved_at } });
 
   // The send marker is written immediately before the platform call. A slot whose lease
   // expires without it was provably never sent; one with it may have been.
-  const marked = await deps.db.prepare("UPDATE post_slots SET send_started_at = ?, updated_at = ? WHERE id = ? AND slot_status = 'IN_FLIGHT' AND attempt_id = ?")
-    .bind(iso(deps.now()), iso(deps.now()), slotId, attemptId).run();
+  // The lease must still be live in the same statement, so the marker and lease expiry cannot cross.
+  const marked = await deps.db.prepare("UPDATE post_slots SET send_started_at = ?, updated_at = ? WHERE id = ? AND slot_status = 'IN_FLIGHT' AND attempt_id = ? AND lease_expires_at > ?")
+    .bind(iso(deps.now()), iso(deps.now()), slotId, attemptId, iso(deps.now())).run();
   if (marked.meta.changes === 0) {
     // The lease was lost between the claim and here. Another pass owns the slot now, so send nothing.
     await closeAttempt(deps, attemptId, { kind: "failed", code: "INTERNAL", message: "The lease was lost before the send started.", retryable: false }, "abandoned");
@@ -101,12 +114,14 @@ export async function dispatchSlot(deps: PostingDeps, slotId: string): Promise<D
     await closeAttempt(deps, attemptId, outcome, "published");
     await deps.db.prepare("UPDATE social_connections SET last_success_at = ?, health_state = 'GREEN', health_checked_at = ?, updated_at = ? WHERE id = ?")
       .bind(iso(now), iso(now), iso(now), destination.connection_id).run();
-    await audit(deps, { slotId, variantId: variant.id, actorType: "engine", action: "published", metadata: { platformPostId: outcome.platformPostId, platformUrl: outcome.platformUrl, revisionHash: content.revisionHash } });
+    await audit(deps, { slotId, variantId: variant.id, actorType: "engine", action: outcome.warning ? "published_with_warning" : "published", metadata: { platformPostId: outcome.platformPostId, platformUrl: outcome.platformUrl, revisionHash: content.revisionHash, warning: outcome.warning } });
     return finish("PUBLISHED", true);
   }
   if (outcome.kind === "processing") {
     await closeAttempt(deps, attemptId, outcome, "processing");
-    return finish("PROCESSING", true);
+    if (outcome.warning) await audit(deps, { slotId, variantId: variant.id, actorType: "engine", action: "processing_with_warning", metadata: { platformPostId: outcome.platformPostId, warning: outcome.warning } });
+    // uncertain_since doubles as "waiting since", so a post that never finishes processing reaches a person.
+    return finish("PROCESSING", true, { uncertainSince: iso(now) });
   }
   if (outcome.kind === "uncertain") {
     await closeAttempt(deps, attemptId, outcome, "uncertain");
@@ -136,11 +151,12 @@ export async function dispatchSlot(deps: PostingDeps, slotId: string): Promise<D
   return finish("FAILED", true);
 }
 
-async function recordAttempt(deps: PostingDeps, attemptId: string, slotId: string, idempotencyKey: string, adapter: string, revisionHash: string) {
-  // The snapshot holds identifiers only. Tokens and secrets never go in it.
+async function recordAttempt(deps: PostingDeps, attemptId: string, slotId: string, idempotencyKey: string, adapter: string, content: VariantSnapshot) {
+  // The snapshot is the content exactly as sent, so a later lookup compares against what went out,
+  // not against a variant that may have been edited since. Tokens and secrets never go in it.
   await deps.db.prepare(`INSERT INTO delivery_attempts (id, slot_id, idempotency_key, adapter, request_snapshot, outcome, started_at)
     VALUES (?, ?, ?, ?, ?, 'in_flight', ?)`)
-    .bind(attemptId, slotId, idempotencyKey, adapter, JSON.stringify({ revisionHash }), iso(deps.now())).run();
+    .bind(attemptId, slotId, idempotencyKey, adapter, JSON.stringify({ revisionHash: content.revisionHash, sent: content }), iso(deps.now())).run();
 }
 
 export async function closeAttempt(deps: PostingDeps, attemptId: string, outcome: Outcome | { kind: "published" | "processing"; platformPostId: string; platformUrl?: string }, label: string) {

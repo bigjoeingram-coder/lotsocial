@@ -122,7 +122,7 @@ test("a missing token is an auth failure with no request sent", async () => {
 });
 
 test("documented error codes map to the engine's error types", async () => {
-  const cases = [[401, "AUTH_REQUIRED", false], [403, "PERMISSION_DENIED", false], [400, "VALIDATION", false], [422, "VALIDATION", false], [409, "TRANSIENT_PROVIDER", true], [429, "RATE_LIMITED", true]];
+  const cases = [[401, "AUTH_REQUIRED", false], [403, "PERMISSION_DENIED", false], [400, "VALIDATION", false], [422, "VALIDATION", false], [429, "RATE_LIMITED", true]]; // 409 on create is uncertain since the review (see below)
   for (const [status, code, retryable] of cases) {
     const { adapter } = harness([{ match: () => true, respond: () => json(status, { code: "X", message: "sample" }, status === 429 ? { "retry-after": "90" } : {}) }]);
     const outcome = await adapter.createPost(destination, textVariant, "client-ref");
@@ -167,4 +167,32 @@ test("find by client reference is unsupported and the content match is conservat
   assert.deepEqual(await list([{ id: POST_URN, commentary: "Sample text Post", createdAt: Date.parse(since) - 3_600_000, lifecycleState: "PUBLISHED" }]), { kind: "not_found", definitive: false }, "an older post with the same text is not this send");
   assert.deepEqual(await list([]), { kind: "not_found", definitive: false }, "an empty list is never proof the post is absent");
   assert.deepEqual(await list([], 403), { kind: "unsupported" }, "no read permission");
+});
+
+// ---- Independent review, 2026-10-13 (D7) ----
+
+test("any success that names the post is a publish; anything unclear after the send is uncertain, never a clean failure", async () => {
+  const published = (status) => ({ match: (url, method) => method === "POST" && url.endsWith("/rest/posts"), respond: () => json(status, null, { "x-restli-id": POST_URN }) });
+  for (const status of [200, 201, 202]) {
+    const { adapter } = harness([published(status)]);
+    assert.equal((await adapter.createPost(destination, textVariant, "ref")).kind, "published", `status ${status}`);
+  }
+  const unclear = (status, body = null) => ({ match: (url, method) => method === "POST" && url.endsWith("/rest/posts"), respond: () => json(status, body) });
+  for (const [status, body] of [[200, null], [202, null], [302, null], [408, null], [409, null], [500, null], [422, { code: "DUPLICATE_POST", message: "Content is a duplicate of a recent post." }]]) {
+    const { adapter } = harness([unclear(status, body)]);
+    assert.equal((await adapter.createPost(destination, textVariant, "ref")).kind, "uncertain", `status ${status}`);
+  }
+  const { adapter } = harness([unclear(422, { code: "FIELD_LENGTH_TOO_LONG", message: "commentary" })]);
+  const outcome = await adapter.createPost(destination, textVariant, "ref");
+  assert.equal(outcome.kind, "failed");
+  assert.equal(outcome.retryable, false);
+});
+
+test("a bad answer to a video status poll keeps polling instead of failing the post", async () => {
+  const routes = videoRoutes();
+  let polls = 0;
+  routes[3] = { match: (url, method) => method === "GET" && url.includes("/rest/videos/"), respond: () => (++polls === 1 ? json(503, null) : json(200, { id: VIDEO_URN, status: "AVAILABLE" })) };
+  const { adapter } = harness([...routes, createOk]);
+  assert.equal((await adapter.createPost(destination, videoVariant, "ref")).kind, "published");
+  assert.equal(polls, 2);
 });
