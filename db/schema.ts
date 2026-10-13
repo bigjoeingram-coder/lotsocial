@@ -240,3 +240,121 @@ export const importOutcomes = sqliteTable("import_outcomes", {
   index("import_outcomes_created_idx").on(table.createdAt),
   index("import_outcomes_host_created_idx").on(table.sourceHost, table.createdAt),
 ]);
+
+// Posting engine v1. Spec: docs/posting-engine/CHECKPOINT-1.md.
+// Tokens are never stored here: credentials_ref names the secret that holds them.
+export const socialConnections = sqliteTable("social_connections", {
+  id: text("id").primaryKey(),
+  ownerEmail: text("owner_email").notNull(),
+  platform: text("platform").notNull(),
+  accountLabel: text("account_label").notNull().default(""),
+  credentialsRef: text("credentials_ref").notNull().default(""),
+  grantedScopes: text("granted_scopes").notNull().default("[]"),
+  healthState: text("health_state").notNull().default("UNVERIFIED"),
+  healthCheckedAt: text("health_checked_at"),
+  lastSuccessAt: text("last_success_at"),
+  status: text("status").notNull().default("active"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [
+  index("social_connections_owner_idx").on(table.ownerEmail, table.platform),
+]);
+
+export const socialDestinations = sqliteTable("social_destinations", {
+  id: text("id").primaryKey(),
+  connectionId: text("connection_id").notNull(),
+  platform: text("platform").notNull(),
+  platformRef: text("platform_ref").notNull(),
+  kind: text("kind").notNull().default("member"),
+  displayName: text("display_name").notNull().default(""),
+  status: text("status").notNull().default("active"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [
+  uniqueIndex("social_destinations_connection_ref_unique").on(table.connectionId, table.platformRef),
+]);
+
+export const postVariants = sqliteTable("post_variants", {
+  id: text("id").primaryKey(),
+  creativeProjectId: text("creative_project_id").notNull(),
+  destinationId: text("destination_id").notNull(),
+  platform: text("platform").notNull(),
+  caption: text("caption").notNull().default(""),
+  title: text("title").notNull().default(""),
+  description: text("description").notNull().default(""),
+  platformOptions: text("platform_options").notNull().default("{}"),
+  renderJobId: text("render_job_id").notNull().default(""),
+  mediaStorageKey: text("media_storage_key").notNull().default(""),
+  revision: integer("revision").notNull().default(1),
+  revisionHash: text("revision_hash").notNull(),
+  approvalStatus: text("approval_status").notNull().default("DRAFT"),
+  approvedRevisionHash: text("approved_revision_hash").notNull().default(""),
+  approvedBy: text("approved_by").notNull().default(""),
+  approvedAt: text("approved_at"),
+  validationStatus: text("validation_status").notNull().default("unchecked"),
+  validationErrors: text("validation_errors").notNull().default("[]"),
+  supersedesId: text("supersedes_id"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [
+  index("post_variants_project_idx").on(table.creativeProjectId, table.createdAt),
+]);
+
+export const postSlots = sqliteTable("post_slots", {
+  id: text("id").primaryKey(),
+  variantId: text("variant_id").notNull(),
+  destinationId: text("destination_id").notNull(),
+  scheduledAtUtc: text("scheduled_at_utc").notNull(),
+  timezone: text("timezone").notNull().default("UTC"),
+  slotStatus: text("slot_status").notNull().default("DRAFT"),
+  idempotencyKey: text("idempotency_key").notNull().unique(),
+  approvedRevisionHash: text("approved_revision_hash").notNull().default(""),
+  workerId: text("worker_id").notNull().default(""),
+  attemptId: text("attempt_id").notNull().default(""),
+  claimedAt: text("claimed_at"),
+  leaseExpiresAt: text("lease_expires_at"),
+  attemptCount: integer("attempt_count").notNull().default(0),
+  nextRetryAt: text("next_retry_at"),
+  uncertainSince: text("uncertain_since"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [
+  index("post_slots_due_idx").on(table.slotStatus, table.scheduledAtUtc),
+  index("post_slots_lease_idx").on(table.slotStatus, table.leaseExpiresAt),
+  index("post_slots_variant_idx").on(table.variantId),
+]);
+
+export const deliveryAttempts = sqliteTable("delivery_attempts", {
+  id: text("id").primaryKey(),
+  slotId: text("slot_id").notNull(),
+  idempotencyKey: text("idempotency_key").notNull(),
+  adapter: text("adapter").notNull(),
+  requestSnapshot: text("request_snapshot").notNull().default("{}"),
+  outcome: text("outcome").notNull().default("in_flight"),
+  platformPostId: text("platform_post_id").notNull().default(""),
+  platformUrl: text("platform_url").notNull().default(""),
+  providerRequestId: text("provider_request_id").notNull().default(""),
+  errorCode: text("error_code").notNull().default(""),
+  errorMessage: text("error_message").notNull().default(""),
+  retryable: integer("retryable").notNull().default(0),
+  rawResponseKey: text("raw_response_key").notNull().default(""),
+  startedAt: text("started_at").notNull(),
+  finishedAt: text("finished_at"),
+  lastCheckedAt: text("last_checked_at"),
+}, (table) => [
+  index("delivery_attempts_slot_idx").on(table.slotId, table.startedAt),
+]);
+
+export const postingAuditEvents = sqliteTable("posting_audit_events", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  slotId: text("slot_id").notNull().default(""),
+  variantId: text("variant_id").notNull().default(""),
+  actorType: text("actor_type").notNull(),
+  actorEmail: text("actor_email").notNull().default(""),
+  action: text("action").notNull(),
+  metadata: text("metadata").notNull().default("{}"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [
+  index("posting_audit_slot_idx").on(table.slotId, table.createdAt),
+  index("posting_audit_variant_idx").on(table.variantId, table.createdAt),
+]);

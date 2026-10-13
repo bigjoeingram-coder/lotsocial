@@ -270,3 +270,30 @@ Not modified, not replaced, not bypassed:
 ## 10. Next step after this checkpoint
 
 Phase A and B code: schema and migration, state table, store, dispatcher, reconciler, mock adapter, and tests 1 to 27. No live credentials, no deploy, no post.
+
+## 11. Checkpoint 2: Phase A and Phase B code (2026-10-13, created by Fable, not graded)
+
+**Built on this branch**
+- Migration `0013` with the six tables, plus matching bootstrap blocks. Both schema checks pass.
+- `app/lib/posting/`: `states.ts`, `revision.ts`, `adapter.ts`, `engine.ts`, `workflow.ts`, `dispatcher.ts`, `reconciler.ts`, `tick.ts`, `adapters/mock.ts`.
+- `tests/posting-engine.test.mjs`: 28 behavior tests on real SQLite.
+
+**Results**
+- `npm test`: 126 of 126 tests pass (98 existing, 28 new). Build, bootstrap parity, drift check and lint pass. Lint reports 0 errors; its 9 warnings are all in the existing `AuthorizationApp.tsx`.
+- `tsc --noEmit`: no errors in the posting files or `db/schema.ts`.
+- Mutation check: removing the send-time hash check, making the claim unconditional, sending expired leases back to `QUEUED`, and retrying on a non-definitive lookup each made at least one test fail. The tests catch the failures they claim to catch.
+
+**Differences from the plan above**
+- `engine.ts` holds the shared store helpers instead of a separate `store.ts`. `workflow.ts` holds create, edit, approve, queue and cancel. No `health.ts` yet; health state changes live in the dispatcher and reconciler.
+- `post_slots` gained `uncertain_since` and an index on `variant_id`. It has no `latest_attempt_id`; the latest attempt is read from `delivery_attempts`.
+- `delivery_attempts.id` is the attempt id, so there is no separate `attempt_id` column there.
+- Lookups return a `LookupResult` with `not_found` and a `definitive` flag. A retry happens only when the platform definitively shows no post.
+- One existing file outside the plan changed: `tests/harness.mjs`, one line, so the in-memory fake database accepts `CREATE UNIQUE INDEX`.
+- No new dependency was added. A test now fails if one is.
+
+**Not built yet**
+- The protected tick route and its handler.
+- `.env.example` and README notes.
+- Any wiring from `creative_projects` screens to variants. The engine is reachable only from tests.
+- LinkedIn and YouTube adapters (Phase C and D).
+- Human-review timeout handling for a slot that stays `UNCERTAIN`; it stays put and is counted, but nothing alerts a person yet.
