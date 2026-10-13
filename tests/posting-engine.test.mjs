@@ -8,7 +8,7 @@ import { defaultDeps } from "../app/lib/posting/engine.ts";
 import { reconcile } from "../app/lib/posting/reconciler.ts";
 import { ALLOWED_TRANSITIONS, canTransition } from "../app/lib/posting/states.ts";
 import { runPostingTick } from "../app/lib/posting/tick.ts";
-import { approveVariant, cancelSlot, createVariant, editVariant, localDisplay, queueSlot } from "../app/lib/posting/workflow.ts";
+import { approveVariant, cancelSlot, createVariant, editVariant, localDisplay, operatorRetry, queueSlot } from "../app/lib/posting/workflow.ts";
 import { SqliteD1 } from "./harness.mjs";
 
 const START = Date.parse("2026-10-13T12:00:00.000Z");
@@ -91,18 +91,181 @@ test("a retry after a retryable failure creates exactly one post", async () => {
   assert.equal(w.mock.createCalls.length, 2);
 });
 
-test("an expired lease becomes UNCERTAIN and never returns to QUEUED", async () => {
+// Simulates a worker that claimed a slot, wrote the send marker, called the platform, and died.
+async function claimAndDieMidSend(w, slotId) {
+  const claim = await claimSlot(w.deps, slotId);
+  assert.ok(claim);
+  const now = new Date(w.clock.ms).toISOString();
+  w.db.db.prepare("INSERT INTO delivery_attempts (id, slot_id, idempotency_key, adapter, started_at) VALUES (?, ?, ?, 'mock', ?)").run(claim.attemptId, slotId, claim.idempotency_key, now);
+  w.db.db.prepare("UPDATE post_slots SET send_started_at = ? WHERE id = ?").run(now, slotId);
+  return claim;
+}
+
+test("a worker that dies mid-send leaves the slot UNCERTAIN, never QUEUED", async () => {
   const w = await world();
   w.mock.lookupsDefinitive = false;
   const { slotId } = await queuedSlot(w);
-  assert.ok(await claimSlot(w.deps, slotId));
+  await claimAndDieMidSend(w, slotId);
   w.advance(301);
   const summary = await runPostingTick(w.deps);
   assert.equal(summary.reconcile.expiredLeases, 1);
   assert.equal(w.slot(slotId).slot_status, "UNCERTAIN");
-  assert.equal(w.mock.createCalls.length, 0, "an expired lease is never blindly re-sent");
+  assert.equal(w.mock.createCalls.length, 0, "an expired mid-send lease is never blindly re-sent");
   assert.equal(canTransition("IN_FLIGHT", "QUEUED"), false);
   assert.ok(!ALLOWED_TRANSITIONS.UNCERTAIN.includes("QUEUED"));
+});
+
+test("a worker that dies before the send started is retried, not stuck (Gene F2)", async () => {
+  const w = await world();
+  const { slotId } = await queuedSlot(w);
+  assert.ok(await claimSlot(w.deps, slotId));
+  assert.equal(w.slot(slotId).send_started_at, null);
+  w.advance(301);
+  const first = await runPostingTick(w.deps);
+  assert.equal(first.reconcile.neverSentRequeued, 1);
+  assert.equal(first.reconcile.expiredLeases, 0);
+  assert.equal(w.slot(slotId).slot_status, "PUBLISHED", "the same pass re-claims and sends it");
+  assert.equal(w.mock.createCalls.length, 1);
+  assert.equal(w.mock.posts.length, 1);
+  assert.ok(w.auditActions(slotId).includes("lease_expired_never_sent"));
+  assert.equal(w.attempts(slotId)[0].outcome, "published");
+});
+
+test("the send marker is set only when the platform call starts", async () => {
+  const w = await world();
+  const { slotId } = await queuedSlot(w);
+  let seenDuringSend = null;
+  const original = w.mock.createPost.bind(w.mock);
+  w.mock.createPost = async (...args) => { seenDuringSend = w.slot(slotId).send_started_at; return original(...args); };
+  await runPostingTick(w.deps);
+  assert.ok(seenDuringSend, "marker is present by the time createPost runs");
+});
+
+test("an UNCERTAIN slot past the time limit goes to a person and is never re-sent (Gene F2)", async () => {
+  const w = await world({ uncertainTimeoutSeconds: 7200 });
+  w.mock.lookupsDefinitive = false;
+  w.mock.enqueue({ kind: "throw_without_post" });
+  const { slotId } = await queuedSlot(w);
+  await runPostingTick(w.deps);
+  w.advance(3600);
+  await runPostingTick(w.deps);
+  assert.equal(w.slot(slotId).slot_status, "UNCERTAIN");
+  w.advance(3601);
+  const summary = await runPostingTick(w.deps);
+  assert.equal(summary.reconcile.needsReview, 1);
+  assert.equal(w.slot(slotId).slot_status, "NEEDS_REVIEW");
+  assert.ok(w.auditActions(slotId).includes("uncertain_timeout_needs_review"));
+  for (let pass = 0; pass < 3; pass += 1) { w.advance(3600); await runPostingTick(w.deps); }
+  assert.equal(w.slot(slotId).slot_status, "NEEDS_REVIEW");
+  assert.equal(w.mock.createCalls.length, 1);
+});
+
+test("stuck slots do not block a newer slot from resolving (Gene F3)", async () => {
+  const w = await world({ batchSize: 2 });
+  w.mock.lookupsDefinitive = false;
+  w.mock.enqueue({ kind: "throw_without_post" }, { kind: "throw_without_post" }, { kind: "throw_without_post" }, { kind: "processing", readyAfterChecks: 0 });
+  const stuck = [];
+  for (let index = 0; index < 3; index += 1) stuck.push((await queuedSlot(w, { offsetSeconds: -100 + index, fields: { caption: `Stuck post ${index}.` } })).slotId);
+  const newer = await queuedSlot(w, { offsetSeconds: -1, fields: { caption: "Newer post." } });
+  await runPostingTick(w.deps);
+  await runPostingTick(w.deps);
+  assert.equal(w.slot(newer.slotId).slot_status, "PROCESSING");
+  for (const id of stuck) assert.equal(w.slot(id).slot_status, "UNCERTAIN");
+  for (let pass = 0; pass < 3; pass += 1) { w.advance(10); await reconcile(w.deps); }
+  assert.equal(w.slot(newer.slotId).slot_status, "PUBLISHED", "3 stuck slots with batchSize 2 must not starve it");
+});
+
+test("a content match never claims a post that belongs to another slot", async () => {
+  const w = await world();
+  w.mock.supportsClientRef = false;
+  w.mock.lookupsDefinitive = false;
+  // Two different posts with identical content to the same destination. The first send is lost; the second lands.
+  w.mock.enqueue({ kind: "throw_without_post" }, { kind: "publish" });
+  const lost = await queuedSlot(w, { offsetSeconds: -10 });
+  const landed = await queuedSlot(w, { offsetSeconds: -5, fields: { creativeProjectId: "proj-2" } });
+  await runPostingTick(w.deps);
+  assert.equal(w.slot(landed.slotId).slot_status, "PUBLISHED");
+  for (let pass = 0; pass < 3; pass += 1) { w.advance(10); await reconcile(w.deps); }
+  assert.equal(w.slot(lost.slotId).slot_status, "UNCERTAIN", "it must not adopt the other slot's post");
+  assert.equal(w.mock.posts.length, 1);
+});
+
+test("queueing the same post twice is refused and sends once (Gene F1)", async () => {
+  const w = await world();
+  const { variantId, slotId } = await queuedSlot(w);
+  const second = await queueSlot(w.deps, { variantId, scheduledAtUtc: w.at(-1) }, AUTHOR);
+  assert.equal(second.ok, false);
+  assert.equal(second.existingSlotId, slotId);
+  await runPostingTick(w.deps);
+  assert.equal(w.mock.createCalls.length, 1);
+  assert.equal(w.mock.posts.length, 1);
+  const third = await queueSlot(w.deps, { variantId, scheduledAtUtc: w.at(0) }, AUTHOR);
+  assert.equal(third.ok, false, "a published post cannot be queued again");
+  await runPostingTick(w.deps);
+  assert.equal(w.mock.posts.length, 1);
+});
+
+test("the database itself refuses a second live slot for the same post (Gene F1)", async () => {
+  const w = await world();
+  const { variantId } = await queuedSlot(w);
+  assert.throws(() => w.db.db.prepare("INSERT INTO post_slots (id, variant_id, destination_id, scheduled_at_utc, idempotency_key) VALUES ('rogue', ?, 'dest-1', ?, 'rogue-key')").run(variantId, w.at(-1)), /UNIQUE/i);
+});
+
+test("a slot voided by an edit is revived by re-approval, not duplicated", async () => {
+  const w = await world();
+  const { variantId, slotId } = await queuedSlot(w);
+  await editVariant(w.deps, variantId, { caption: "Second draft." }, AUTHOR);
+  assert.equal((await queueSlot(w.deps, { variantId, scheduledAtUtc: w.at(-1) }, AUTHOR)).ok, false, "not approved yet");
+  await approveVariant(w.deps, variantId, APPROVER);
+  const requeued = await queueSlot(w.deps, { variantId, scheduledAtUtc: w.at(-1) }, AUTHOR);
+  assert.equal(requeued.slotId, slotId);
+  assert.equal(w.db.rows("SELECT count(*) AS n FROM post_slots")[0].n, 1);
+  await runPostingTick(w.deps);
+  assert.equal(w.mock.createCalls[0].caption, "Second draft.");
+  assert.equal(w.mock.posts.length, 1);
+});
+
+test("only a person can retry a failed slot, and the retry is audited (Gene H2)", async () => {
+  const w = await world();
+  w.mock.enqueue({ kind: "fail", code: "PLATFORM_REJECTED", retryable: false });
+  const { slotId } = await queuedSlot(w);
+  await runPostingTick(w.deps);
+  assert.equal(w.slot(slotId).slot_status, "FAILED");
+  w.advance(86400);
+  await runPostingTick(w.deps);
+  assert.equal(w.mock.createCalls.length, 1, "the engine never retries a failed slot on its own");
+  await assert.rejects(() => operatorRetry(w.deps, slotId, APPROVER, " "));
+  assert.equal(await operatorRetry(w.deps, slotId, APPROVER, "Platform outage is over."), true);
+  await runPostingTick(w.deps);
+  assert.equal(w.slot(slotId).slot_status, "PUBLISHED");
+  const event = w.db.rows("SELECT actor_email, metadata FROM posting_audit_events WHERE slot_id = ? AND action = 'operator_retry'", slotId)[0];
+  assert.equal(event.actor_email, APPROVER);
+  assert.match(event.metadata, /Platform outage is over/);
+});
+
+test("a different file at the same storage key voids approval (Gene H3)", async () => {
+  const w = await world();
+  const { variantId, slotId } = await queuedSlot(w, { fields: { mediaChecksum: "sha256-aaa" } });
+  await editVariant(w.deps, variantId, { mediaChecksum: "sha256-bbb" }, AUTHOR);
+  assert.equal(w.slot(slotId).slot_status, "DRAFT");
+  const other = await queuedSlot(w, { fields: { mediaChecksum: "sha256-ccc", destinationId: "dest-2" } });
+  w.db.db.prepare("UPDATE post_variants SET media_checksum = 'sha256-swapped' WHERE id = ?").run(other.variantId);
+  await runPostingTick(w.deps);
+  assert.equal(w.mock.createCalls.length, 0);
+  assert.equal(w.slot(other.slotId).slot_status, "DRAFT");
+});
+
+test("a paused connection holds the slot and it resumes with an audit record (Gene H4, H5)", async () => {
+  const w = await world();
+  const { slotId } = await queuedSlot(w);
+  w.db.db.exec("UPDATE social_connections SET status = 'paused' WHERE id = 'conn-1'");
+  await runPostingTick(w.deps);
+  assert.equal(w.slot(slotId).slot_status, "AUTH_REQUIRED", "held, not failed");
+  assert.equal(w.mock.createCalls.length, 0);
+  w.db.db.exec("UPDATE social_connections SET status = 'active' WHERE id = 'conn-1'");
+  await runPostingTick(w.deps);
+  assert.equal(w.slot(slotId).slot_status, "PUBLISHED");
+  assert.ok(w.auditActions(slotId).includes("resumed_after_reconnect"));
 });
 
 test("a canceled slot never dispatches", async () => {
@@ -171,10 +334,10 @@ test("an immediate slot publishes now and a future slot waits for its time", asy
 
 test("1,000 queued slots dispatch once each, in scheduled order", async () => {
   const w = await world();
-  const { variantId } = await approvedVariant(w);
   const expected = [];
   for (let index = 0; index < 1000; index += 1) {
     const offset = -((index * 7919) % 1000) - 1;
+    const { variantId } = await approvedVariant(w, { creativeProjectId: `proj-${index}`, caption: `Post ${index}.` });
     const queued = await queueSlot(w.deps, { variantId, scheduledAtUtc: w.at(offset) }, AUTHOR);
     expected.push({ id: queued.slotId, at: w.at(offset) });
   }
@@ -267,6 +430,7 @@ test("a rate limit waits for the platform's retry window and backoff is capped",
   await runPostingTick(w.deps);
   await runPostingTick(w.deps);
   assert.equal(w.slot(slotId).slot_status, "PUBLISHED");
+  assert.ok(w.auditActions(slotId).includes("resumed_after_rate_limit"));
 });
 
 test("an auth failure pauses the slot and it resumes after the connection is healthy", async () => {

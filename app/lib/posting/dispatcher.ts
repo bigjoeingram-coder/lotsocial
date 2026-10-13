@@ -10,7 +10,7 @@ export async function claimSlot(deps: PostingDeps, slotId: string): Promise<(Cla
   const attemptId = deps.newId();
   const row = await deps.db.prepare(`UPDATE post_slots
       SET slot_status = 'IN_FLIGHT', worker_id = ?, attempt_id = ?, claimed_at = ?, lease_expires_at = ?,
-          attempt_count = attempt_count + 1, updated_at = ?
+          send_started_at = NULL, attempt_count = attempt_count + 1, updated_at = ?
     WHERE id = ? AND slot_status IN ('QUEUED','RETRY_READY') AND scheduled_at_utc <= ?
       AND (next_retry_at IS NULL OR next_retry_at <= ?)
     RETURNING id, variant_id, destination_id, approved_revision_hash, idempotency_key, attempt_count`)
@@ -53,12 +53,13 @@ export async function dispatchSlot(deps: PostingDeps, slotId: string): Promise<D
     await audit(deps, { slotId, variantId: variant.id, actorType: "engine", action: "send_blocked_no_asset" });
     return finish("FAILED", false);
   }
-  if (!adapter || !destination || destination.status !== "active" || destination.connection_status !== "active" || destination.health_state === "DISABLED") {
-    await audit(deps, { slotId, variantId: variant.id, actorType: "engine", action: "send_blocked_destination_unavailable" });
+  if (!adapter || !destination) {
+    await audit(deps, { slotId, variantId: variant.id, actorType: "engine", action: "send_blocked_destination_missing" });
     return finish("FAILED", false);
   }
-  if (destination.health_state === "AUTH_REQUIRED") {
-    await audit(deps, { slotId, variantId: variant.id, actorType: "engine", action: "send_blocked_auth_required" });
+  // A paused or unauthorized connection is recoverable, so the slot waits instead of failing.
+  if (destination.status !== "active" || destination.connection_status !== "active" || destination.health_state === "DISABLED" || destination.health_state === "AUTH_REQUIRED") {
+    await audit(deps, { slotId, variantId: variant.id, actorType: "engine", action: "send_held_connection_unavailable", metadata: { health: destination.health_state, destination: destination.status, connection: destination.connection_status } });
     return finish("AUTH_REQUIRED", false);
   }
   const content = snapshot(variant);
@@ -72,6 +73,16 @@ export async function dispatchSlot(deps: PostingDeps, slotId: string): Promise<D
 
   await recordAttempt(deps, attemptId, slotId, claim.idempotency_key, variant.platform, content.revisionHash);
   await audit(deps, { slotId, variantId: variant.id, actorType: "engine", action: "send_started", metadata: { attemptId, revisionHash: content.revisionHash, approvedBy: variant.approved_by, approvedAt: variant.approved_at } });
+
+  // The send marker is written immediately before the platform call. A slot whose lease
+  // expires without it was provably never sent; one with it may have been.
+  const marked = await deps.db.prepare("UPDATE post_slots SET send_started_at = ?, updated_at = ? WHERE id = ? AND slot_status = 'IN_FLIGHT' AND attempt_id = ?")
+    .bind(iso(deps.now()), iso(deps.now()), slotId, attemptId).run();
+  if (marked.meta.changes === 0) {
+    // The lease was lost between the claim and here. Another pass owns the slot now, so send nothing.
+    await closeAttempt(deps, attemptId, { kind: "failed", code: "INTERNAL", message: "The lease was lost before the send started.", retryable: false }, "abandoned");
+    return { slotId, status: "LEASE_LOST", sent: false };
+  }
 
   let outcome: Outcome;
   try {

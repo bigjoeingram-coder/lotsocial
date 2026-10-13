@@ -301,12 +301,15 @@ export const SCHEMA_BOOTSTRAP_SQL = [
       attempt_count integer DEFAULT 0 NOT NULL,
       next_retry_at text,
       uncertain_since text,
+      send_started_at text,
+      last_reconciled_at text,
       created_at text DEFAULT CURRENT_TIMESTAMP NOT NULL,
       updated_at text DEFAULT CURRENT_TIMESTAMP NOT NULL
   )`,
   "CREATE UNIQUE INDEX IF NOT EXISTS post_slots_idempotency_key_unique ON post_slots (idempotency_key)",
   "CREATE INDEX IF NOT EXISTS post_slots_due_idx ON post_slots (slot_status,scheduled_at_utc)",
   "CREATE INDEX IF NOT EXISTS post_slots_lease_idx ON post_slots (slot_status,lease_expires_at)",
+  "CREATE UNIQUE INDEX IF NOT EXISTS post_slots_live_variant_destination_unique ON post_slots (variant_id,destination_id) WHERE slot_status NOT IN ('CANCELED','SUPERSEDED','FAILED')",
   "CREATE INDEX IF NOT EXISTS post_slots_variant_idx ON post_slots (variant_id)",
   `CREATE TABLE IF NOT EXISTS post_variants (
       id text PRIMARY KEY NOT NULL,
@@ -319,6 +322,7 @@ export const SCHEMA_BOOTSTRAP_SQL = [
       platform_options text DEFAULT '{}' NOT NULL,
       render_job_id text DEFAULT '' NOT NULL,
       media_storage_key text DEFAULT '' NOT NULL,
+      media_checksum text DEFAULT '' NOT NULL,
       revision integer DEFAULT 1 NOT NULL,
       revision_hash text NOT NULL,
       approval_status text DEFAULT 'DRAFT' NOT NULL,

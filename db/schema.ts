@@ -285,6 +285,7 @@ export const postVariants = sqliteTable("post_variants", {
   platformOptions: text("platform_options").notNull().default("{}"),
   renderJobId: text("render_job_id").notNull().default(""),
   mediaStorageKey: text("media_storage_key").notNull().default(""),
+  mediaChecksum: text("media_checksum").notNull().default(""),
   revision: integer("revision").notNull().default(1),
   revisionHash: text("revision_hash").notNull(),
   approvalStatus: text("approval_status").notNull().default("DRAFT"),
@@ -316,12 +317,17 @@ export const postSlots = sqliteTable("post_slots", {
   attemptCount: integer("attempt_count").notNull().default(0),
   nextRetryAt: text("next_retry_at"),
   uncertainSince: text("uncertain_since"),
+  sendStartedAt: text("send_started_at"),
+  lastReconciledAt: text("last_reconciled_at"),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 }, (table) => [
   index("post_slots_due_idx").on(table.slotStatus, table.scheduledAtUtc),
   index("post_slots_lease_idx").on(table.slotStatus, table.leaseExpiresAt),
   index("post_slots_variant_idx").on(table.variantId),
+  // One live slot per variant and destination. The database refuses a duplicate post.
+  uniqueIndex("post_slots_live_variant_destination_unique").on(table.variantId, table.destinationId)
+    .where(sql`slot_status NOT IN ('CANCELED','SUPERSEDED','FAILED')`),
 ]);
 
 export const deliveryAttempts = sqliteTable("delivery_attempts", {

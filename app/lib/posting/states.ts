@@ -3,7 +3,7 @@
 export const SLOT_STATES = [
   "DRAFT", "READY_FOR_REVIEW", "APPROVED", "QUEUED", "IN_FLIGHT", "PROCESSING",
   "PUBLISHED", "UNCERTAIN", "RATE_LIMITED", "AUTH_REQUIRED", "FAILED",
-  "RETRY_READY", "CANCELED", "SUPERSEDED",
+  "RETRY_READY", "CANCELED", "SUPERSEDED", "NEEDS_REVIEW",
 ] as const;
 
 export type SlotState = (typeof SLOT_STATES)[number];
@@ -19,10 +19,13 @@ export const ALLOWED_TRANSITIONS: Record<SlotState, SlotState[]> = {
   IN_FLIGHT: ["PUBLISHED", "PROCESSING", "UNCERTAIN", "RATE_LIMITED", "AUTH_REQUIRED", "FAILED", "RETRY_READY", "DRAFT"],
   PROCESSING: ["PUBLISHED", "FAILED"],
   PUBLISHED: [],
-  UNCERTAIN: ["PUBLISHED", "PROCESSING", "RETRY_READY", "FAILED"],
+  // An UNCERTAIN slot that cannot be resolved in time goes to a person. It is never re-sent on its own.
+  UNCERTAIN: ["PUBLISHED", "PROCESSING", "RETRY_READY", "FAILED", "NEEDS_REVIEW"],
   RATE_LIMITED: ["RETRY_READY", "CANCELED", "SUPERSEDED", "DRAFT"],
   AUTH_REQUIRED: ["RETRY_READY", "CANCELED", "SUPERSEDED", "DRAFT"],
-  FAILED: [],
+  // Only a person can retry a failed or reviewed slot, and the retry is audited.
+  FAILED: ["RETRY_READY"],
+  NEEDS_REVIEW: ["RETRY_READY", "PUBLISHED", "CANCELED"],
   RETRY_READY: ["IN_FLIGHT", "CANCELED", "SUPERSEDED", "DRAFT"],
   CANCELED: [],
   SUPERSEDED: [],

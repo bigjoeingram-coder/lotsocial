@@ -8,12 +8,14 @@ export type PublishFields = {
   description: string;
   platformOptions: string;
   mediaStorageKey: string;
+  // Checksum or version of the file itself, so a different file at the same key voids approval.
+  mediaChecksum: string;
 };
 
 export async function revisionHash(fields: PublishFields): Promise<string> {
   const canonical = JSON.stringify([
     fields.platform, fields.destinationId, fields.caption, fields.title,
-    fields.description, canonicalJson(fields.platformOptions), fields.mediaStorageKey,
+    fields.description, canonicalJson(fields.platformOptions), fields.mediaStorageKey, fields.mediaChecksum,
   ]);
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(canonical));
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");

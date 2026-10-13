@@ -299,3 +299,24 @@ Phase A and B code: schema and migration, state table, store, dispatcher, reconc
 - Any wiring from `creative_projects` screens to variants. The engine is reachable only from tests.
 - LinkedIn and YouTube adapters (Phase C and D).
 - Human-review timeout handling for a slot that stays `UNCERTAIN`; it stays put and is counted, but nothing alerts a person yet.
+
+## 12. Checkpoint 3: fixes from Gene's grade (2026-10-13, created by Fable, not graded)
+
+Gene graded the plan PASS and the code REVISION_NEEDED, with three reproduced defects and five cleanup items. All are addressed here, each with a test.
+
+| Item | Defect | Fix | Test |
+| --- | --- | --- | --- |
+| F1 | Queueing the same post twice sent it twice. | `queueSlot` refuses a second live slot for the same variant and destination. A partial unique index (`post_slots_live_variant_destination_unique`) makes the database refuse it too. A slot voided by an edit is revived on re-approval, not duplicated. | "queueing the same post twice is refused", "the database itself refuses a second live slot", "a slot voided by an edit is revived" |
+| F2 | A worker that died before sending left the slot stuck in `UNCERTAIN` forever. | New column `send_started_at`, set immediately before the platform call. Expired lease with no marker goes to `RETRY_READY` (provably never sent). With the marker it goes to `UNCERTAIN`. An `UNCERTAIN` slot older than `uncertainTimeoutSeconds` (default 6 hours) moves to the new `NEEDS_REVIEW` state with an audit event, and the engine stops touching it. | "dies before the send started is retried", "dies mid-send leaves the slot UNCERTAIN", "send marker is set only when the platform call starts", "past the time limit goes to a person" |
+| F3 | Stuck slots starved newer ones in reconcile. | New column `last_reconciled_at`. Reconcile takes the least-recently-checked slots first. | "stuck slots do not block a newer slot" (3 stuck, batch size 2) |
+| H1 | `tsconfig.tsbuildinfo` was committed. | Removed and ignored. | n/a |
+| H2 | `FAILED` had no way out. | `operatorRetry`: a named person, with a required reason, moves `FAILED` or `NEEDS_REVIEW` to `RETRY_READY`. Audited. The engine never does this itself. | "only a person can retry a failed slot" |
+| H3 | The hash covered the storage key, not the file. | New column `post_variants.media_checksum`, included in the revision hash. Nothing fills it yet: the render path must write the checksum. **Phase C blocker for video.** | "a different file at the same storage key voids approval" |
+| H4 | An inactive connection failed the slot for good. | The slot now holds in `AUTH_REQUIRED` and resumes when the connection and destination are active and healthy. Only a missing destination or adapter fails. | "a paused connection holds the slot" |
+| H5 | Bulk resumes skipped the transition check and the audit. | Resumes go through `moveSlot` one slot at a time, each with an audit event. | same test, plus the rate-limit test |
+
+**One more defect, found by Fable while writing the F3 test.** Content-match reconciliation could let a lost slot adopt a post that belonged to a different slot with identical content. The reconciler now refuses a content match whose platform post id is already recorded against another slot. Test: "a content match never claims a post that belongs to another slot". **Known limit:** a post made outside the engine (by hand, or by AdaptlyPost) with identical content cannot be told apart by content match alone. Adapters should prefer a client reference wherever the platform offers one.
+
+**Schema:** migration `0014` adds `post_slots.send_started_at`, `post_slots.last_reconciled_at`, `post_variants.media_checksum` and the partial unique index. Bootstrap parity and drift checks pass.
+
+**Results:** `npm test` exit 0, 141 of 141 tests pass (98 existing, the rest posting). Lint 0 errors. Mutation checks: removing each of the F1 guard, the F2 marker branch, the F3 ordering, and the ownership check fails its test.

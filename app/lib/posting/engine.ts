@@ -14,6 +14,7 @@ export type PostingDeps = {
   retryBaseSeconds: number;
   retryCapSeconds: number;
   batchSize: number;
+  uncertainTimeoutSeconds: number;
 };
 
 export function defaultDeps(db: D1DatabaseLike, adapters: AdapterRegistry, overrides: Partial<PostingDeps> = {}): PostingDeps {
@@ -28,6 +29,7 @@ export function defaultDeps(db: D1DatabaseLike, adapters: AdapterRegistry, overr
     retryBaseSeconds: 60,
     retryCapSeconds: 3600,
     batchSize: 25,
+    uncertainTimeoutSeconds: 6 * 3600,
     ...overrides,
   };
 }
@@ -35,7 +37,7 @@ export function defaultDeps(db: D1DatabaseLike, adapters: AdapterRegistry, overr
 export type VariantRow = {
   id: string; creative_project_id: string; destination_id: string; platform: string;
   caption: string; title: string; description: string; platform_options: string;
-  render_job_id: string; media_storage_key: string; revision: number; revision_hash: string;
+  render_job_id: string; media_storage_key: string; media_checksum: string; revision: number; revision_hash: string;
   approval_status: string; approved_revision_hash: string; approved_by: string; approved_at: string | null;
   validation_status: string; validation_errors: string; supersedes_id: string | null;
 };
@@ -44,7 +46,7 @@ export type SlotRow = {
   id: string; variant_id: string; destination_id: string; scheduled_at_utc: string; timezone: string;
   slot_status: string; idempotency_key: string; approved_revision_hash: string; worker_id: string;
   attempt_id: string; claimed_at: string | null; lease_expires_at: string | null; attempt_count: number;
-  next_retry_at: string | null; uncertain_since: string | null;
+  next_retry_at: string | null; uncertain_since: string | null; send_started_at: string | null; last_reconciled_at: string | null;
 };
 
 export type AttemptRow = {
@@ -109,7 +111,7 @@ export function snapshot(variant: VariantRow): VariantSnapshot {
 export function currentHash(variant: VariantRow) {
   return revisionHash({
     platform: variant.platform, destinationId: variant.destination_id, caption: variant.caption, title: variant.title,
-    description: variant.description, platformOptions: variant.platform_options, mediaStorageKey: variant.media_storage_key,
+    description: variant.description, platformOptions: variant.platform_options, mediaStorageKey: variant.media_storage_key, mediaChecksum: variant.media_checksum,
   });
 }
 
