@@ -33,8 +33,6 @@ const API = "https://www.googleapis.com/youtube/v3/videos";
 const MAX_TITLE = 100;
 const MAX_DESCRIPTION_BYTES = 5000;
 const PRIVACY = ["public", "unlisted", "private"];
-// The four codes the upload guide lists as resumable.
-const RESUMABLE = [500, 502, 503, 504];
 
 type Failed = Extract<Outcome, { kind: "failed" }>;
 type VideoResource = { id?: string; status?: { uploadStatus?: string; privacyStatus?: string; failureReason?: string; rejectionReason?: string } };
@@ -146,17 +144,25 @@ export class YouTubeAdapter implements PlatformAdapter {
     if (!sessionUri) return failed("TRANSIENT_PROVIDER", "YouTube did not return an upload session.", true);
 
     // Step 2: send the file. From here the video may or may not exist, so every unclear answer is checked with the session.
+    // Once bytes have been sent, only two answers prove anything: a video resource (created) or 308 (incomplete).
+    // Everything else, from either the upload answer or a status check, leaves the result unknown.
     let response = await this.put(sessionUri, token, { "Content-Type": "video/mp4" }, bytes);
     const attempts = this.deps.resumeAttempts ?? 2;
     for (let attempt = 0; attempt <= attempts; attempt += 1) {
-      const settled = response ? await this.settle(response, wantedPrivacy) : null;
+      const settled = response ? await this.settle(response, wantedPrivacy, true) : null;
       if (settled) return settled;
 
-      // Interrupted. Ask the session how far it got.
+      // Interrupted or unclear. Ask the session how far it got.
       await (this.deps.sleep ?? defaultSleep)(1000 * 2 ** attempt);
       const status = await this.put(sessionUri, token, { "Content-Range": `bytes */${total}` }, null);
-      if (!status || RESUMABLE.includes(status.status)) { response = null; continue; }
-      if (status.status !== 308) { response = status; continue; }
+      if (!status) { response = null; continue; }
+      if (status.status !== 308) {
+        // A status check can settle only with a video resource. Any other code is noise, not a verdict.
+        const fromStatus = await this.settle(status, wantedPrivacy, false);
+        if (fromStatus) return fromStatus;
+        response = null;
+        continue;
+      }
 
       // 308 proves the upload is incomplete and no video exists.
       if (attempt === attempts) return failed("TRANSIENT_PROVIDER", "The upload to YouTube was interrupted and did not finish. No video was created.", true);
@@ -164,7 +170,7 @@ export class YouTubeAdapter implements PlatformAdapter {
       const next = received ? Number(received[1]) + 1 : 0;
       response = await this.put(sessionUri, token, { "Content-Type": "video/mp4", "Content-Range": `bytes ${next}-${total - 1}/${total}` }, bytes.slice(next));
     }
-    const last = response ? await this.settle(response, wantedPrivacy) : null;
+    const last = response ? await this.settle(response, wantedPrivacy, true) : null;
     return last ?? { kind: "uncertain", detail: "YouTube did not confirm whether the upload finished." };
   }
 
@@ -193,22 +199,28 @@ export class YouTubeAdapter implements PlatformAdapter {
     return { kind: "unsupported" };
   }
 
-  // Turns a final answer into an outcome. Returns null when the answer does not settle anything.
-  private async settle(response: Response, wantedPrivacy: string): Promise<Outcome | null> {
+  // Turns an answer into an outcome. Returns null when the answer does not settle anything.
+  // `direct` is the answer to an upload PUT; a status-check answer can settle only with a video resource.
+  private async settle(response: Response, wantedPrivacy: string, direct: boolean): Promise<Outcome | null> {
     if (response.status === 200 || response.status === 201) {
       let video: VideoResource = {};
       try { video = await response.json() as VideoResource; } catch { video = {}; }
       if (!video.id) return { kind: "uncertain", detail: `YouTube answered ${response.status} without a video id.` };
+      // The video exists from here on. Its id is never dropped: a wrong privacy or a rejection is reported
+      // on the post, and the readback decides what happens to it.
       const status = video.status?.uploadStatus;
-      if (status === "failed" || status === "rejected") return failed("PLATFORM_REJECTED", rejection(video), false);
       const privacy = video.status?.privacyStatus;
-      if (privacy && privacy !== wantedPrivacy) {
-        return failed("PLATFORM_REJECTED", `YouTube created video ${video.id} as ${privacy}, not ${wantedPrivacy}. Change it in YouTube Studio or remove it.`, false);
-      }
-      if (status === "processed") return { kind: "published", platformPostId: video.id, platformUrl: watchUrl(video.id) };
-      return { kind: "processing", platformPostId: video.id };
+      let warning: string | undefined;
+      if (status === "failed" || status === "rejected") warning = rejection(video);
+      else if (privacy && privacy !== wantedPrivacy) warning = `YouTube created video ${video.id} as ${privacy}, not ${wantedPrivacy}. Change it in YouTube Studio.`;
+      if (status === "processed") return { kind: "published", platformPostId: video.id, platformUrl: watchUrl(video.id), ...(warning ? { warning } : {}) };
+      return { kind: "processing", platformPostId: video.id, ...(warning ? { warning } : {}) };
     }
-    if (RESUMABLE.includes(response.status) || response.status === 308) return null;
+    if (!direct) return null;
+    if (response.status >= 500 || response.status === 308) return null;
+    // The documented meaning of a 4xx to the upload itself is a permanent failure. A timeout or a rate
+    // limit is not that: the bytes may have been received, so those stay unsettled and go to the session check.
+    if (response.status === 408 || response.status === 429) return null;
     // An expired session. The upload must start again from the beginning.
     if (response.status === 404) return failed("TRANSIENT_PROVIDER", "The YouTube upload session expired. No video was created.", true);
     return await failedFromResponse(response);

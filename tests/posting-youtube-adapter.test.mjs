@@ -156,16 +156,17 @@ test("an expired session is a retryable failure", async () => {
   assert.equal(outcome.retryable, true);
 });
 
-test("a video YouTube rejects, or keeps private against the request, is a failure that names the video", async () => {
+test("a video YouTube rejects, or keeps private against the request, keeps its id and carries a warning (review D6)", async () => {
   const rejected = harness([opened, () => created("rejected", "public", { rejectionReason: "duplicate" })]);
   const first = await rejected.adapter.createPost(destination, variant, "ref");
-  assert.equal(first.code, "PLATFORM_REJECTED");
-  assert.match(first.message, /duplicate/);
-  const lockedPrivate = harness([opened, () => created("uploaded", "private")]);
+  assert.equal(first.kind, "processing");
+  assert.equal(first.platformPostId, VIDEO_ID);
+  assert.match(first.warning, /duplicate/);
+  const lockedPrivate = harness([opened, () => created("processed", "private")]);
   const second = await lockedPrivate.adapter.createPost(destination, variant, "ref");
-  assert.equal(second.code, "PLATFORM_REJECTED");
-  assert.equal(second.retryable, false);
-  assert.match(second.message, new RegExp(VIDEO_ID));
+  assert.equal(second.kind, "published");
+  assert.equal(second.platformPostId, VIDEO_ID);
+  assert.match(second.warning, /private, not public/);
   const askedPrivate = harness([opened, () => created("processed", "private")]);
   assert.equal((await askedPrivate.adapter.createPost(destination, { ...variant, platformOptions: { privacyStatus: "private" } }, "ref")).kind, "published");
 });
@@ -202,4 +203,29 @@ test("lookups without a known video id are unsupported, so a lost upload goes to
   assert.deepEqual(await adapter.findByClientRef(destination, "ref"), { kind: "unsupported" });
   assert.deepEqual(await adapter.findRecentCandidates(destination, variant, "2026-10-13T00:00:00Z"), { kind: "unsupported" });
   assert.equal(calls.length, 0);
+});
+
+// ---- Independent review, 2026-10-13 (D5) ----
+
+test("after bytes were sent, nothing but a video resource or a 308 settles the result (review D5)", async () => {
+  // Status-check answers that are not a video resource are noise: the result stays uncertain.
+  for (const status of [401, 403, 404, 429, 500, 520]) {
+    const { adapter } = harness([opened, dropped, () => googleError(status, "whatever"), dropped], { resumeAttempts: 1 });
+    assert.equal((await adapter.createPost(destination, variant, "ref")).kind, "uncertain", `status check ${status}`);
+  }
+  // A 5xx outside the four documented codes, a timeout or a rate limit on the upload itself goes to the session check, not to a verdict.
+  for (const status of [507, 520, 408, 429]) {
+    const { adapter } = harness([opened, () => googleError(status, "whatever"), () => created("uploaded")]);
+    assert.deepEqual(await adapter.createPost(destination, variant, "ref"), { kind: "processing", platformPostId: VIDEO_ID }, `upload answer ${status}`);
+  }
+  // A status check that returns the finished video settles it.
+  const { adapter } = harness([opened, () => googleError(503, "backendError"), () => created("processed")]);
+  assert.equal((await adapter.createPost(destination, variant, "ref")).kind, "published");
+});
+
+test("a 4xx answer to the upload itself is still the documented permanent failure", async () => {
+  const { adapter } = harness([opened, () => googleError(400, "invalidVideoMetadata")]);
+  const outcome = await adapter.createPost(destination, variant, "ref");
+  assert.equal(outcome.kind, "failed");
+  assert.equal(outcome.retryable, false);
 });
