@@ -44,3 +44,4 @@ next-env.d.ts
 # Deploy packaging output (regenerable, never committed)
 lotsocial-*.tar.gz
 sites-package-stage-*/
+tsconfig.tsbuildinfo
