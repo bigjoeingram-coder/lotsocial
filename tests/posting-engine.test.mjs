@@ -777,3 +777,18 @@ test("approval reports failure when the variant changed underneath it (review D1
   assert.equal(result.ok, false);
   assert.ok(!w.auditActions(variantId).includes("variant_approved"));
 });
+
+test("a lost answer is still matched after the caption is edited, because the match uses what was sent (review D11)", async () => {
+  const w = await world();
+  w.mock.supportsClientRef = false;
+  w.mock.enqueue({ kind: "accept_then_throw" });
+  const { variantId, slotId } = await queuedSlot(w);
+  await runPostingTick(w.deps);
+  assert.equal(w.slot(slotId).slot_status, "UNCERTAIN");
+  await editVariant(w.deps, variantId, { caption: "Come see the 2026 F-150 today." }, AUTHOR);
+  w.advance(1201);
+  await runPostingTick(w.deps);
+  assert.equal(w.slot(slotId).slot_status, "PUBLISHED");
+  assert.equal(w.mock.createCalls.length, 1);
+  assert.equal(w.mock.posts.length, 1);
+});

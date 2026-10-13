@@ -1,5 +1,6 @@
 import type { LookupResult } from "./adapter.ts";
 import type { PostingDeps, SlotRow } from "./engine.ts";
+import type { VariantSnapshot } from "./adapter.ts";
 import { addSeconds, attemptWithPost, audit, destinationRef, getDestination, getVariant, iso, latestAttempt, moveSlot } from "./engine.ts";
 import { closeAttempt } from "./dispatcher.ts";
 
@@ -126,7 +127,11 @@ async function lookup(deps: PostingDeps, slot: SlotRow): Promise<LookupResult> {
     if (attempt.platform_post_id) return await adapter.readbackPost(ref, attempt.platform_post_id);
     const byRef = await adapter.findByClientRef(ref, slot.idempotency_key);
     if (byRef.kind !== "unsupported" && !(byRef.kind === "not_found" && !byRef.definitive)) return byRef;
-    const byContent = await adapter.findRecentCandidates(ref, slot.approved_revision_hash, attempt.started_at);
+    // The match runs against the content as it was sent, never against the variant as it is now:
+    // an edit after a lost answer must not hide the post that went out.
+    const sent = sentContent(attempt.request_snapshot);
+    if (!sent) return { kind: "not_found", definitive: false };
+    const byContent = await adapter.findRecentCandidates(ref, sent, attempt.started_at);
     if (byContent.kind === "unsupported") return { kind: "not_found", definitive: false };
     // A content match is weaker than an id or a client reference: two slots can carry identical
     // content. Never let this slot claim a platform post that another slot already owns.
@@ -138,6 +143,15 @@ async function lookup(deps: PostingDeps, slot: SlotRow): Promise<LookupResult> {
     return { kind: "not_found", definitive: false };
   } finally {
     await deps.db.prepare("UPDATE delivery_attempts SET last_checked_at = ? WHERE id = ?").bind(iso(deps.now()), attempt.id).run();
+  }
+}
+
+function sentContent(raw: string): VariantSnapshot | null {
+  try {
+    const parsed = JSON.parse(raw || "{}") as { sent?: VariantSnapshot };
+    return parsed.sent && typeof parsed.sent.caption === "string" ? parsed.sent : null;
+  } catch {
+    return null;
   }
 }
 

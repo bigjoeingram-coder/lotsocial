@@ -81,7 +81,8 @@ export interface PlatformAdapter {
   createPost(destination: DestinationRef, variant: VariantSnapshot, clientRef: string): Promise<Outcome>;
   readbackPost(destination: DestinationRef, platformPostId: string): Promise<LookupResult>;
   findByClientRef(destination: DestinationRef, clientRef: string): Promise<LookupResult>;
-  findRecentCandidates(destination: DestinationRef, fingerprint: string, sinceIso: string): Promise<LookupResult>;
+  // Content match, for platforms with no client reference. It gets the variant so it can compare real fields.
+  findRecentCandidates(destination: DestinationRef, variant: VariantSnapshot, sinceIso: string): Promise<LookupResult>;
 
   scheduleNativePost?(destination: DestinationRef, variant: VariantSnapshot, atIso: string): Promise<Outcome>;
   unscheduleNativePost?(destination: DestinationRef, platformPostId: string): Promise<void>;

@@ -321,6 +321,34 @@ Gene graded the plan PASS and the code REVISION_NEEDED, with three reproduced de
 
 **Results:** `npm test` exit 0, 141 of 141 tests pass (98 existing, the rest posting). Lint 0 errors. Mutation checks: removing each of the F1 guard, the F2 marker branch, the F3 ordering, and the ownership check fails its test.
 
+## 13. Checkpoint 4: LinkedIn adapter on recorded fixtures (2026-10-13, created by Fable, not graded)
+
+This lives on a separate branch, `claude/posting-engine-linkedin`, stacked on the engine branch, so Gene's re-grade of the fixes is not mixed with new code.
+
+**Source.** Written against two official pages, both read on 2026-10-13: the [Posts API](https://learn.microsoft.com/en-us/linkedin/marketing/community-management/shares/posts-api) (page dated 2026-05-07) and the [Videos API](https://learn.microsoft.com/en-us/linkedin/marketing/community-management/shares/videos-api) (page dated 2026-02-12). Test fixtures copy the sample requests and responses on those pages.
+
+**Built.** `app/lib/posting/adapters/linkedin.ts`, using `fetch` only. Text post, video upload (initialize, upload parts, finalize with ETags, poll status), create post, readback, and a content-match lookup. 13 fixture tests.
+
+**Status.** Every capability is marked `DOCUMENTED_NOT_LIVE_TESTED`. The adapter is not registered for production, and a test fails if it is. No request has gone to LinkedIn. No credential was used.
+
+**One contract change.** `findRecentCandidates` now receives the variant, not only its hash, so an adapter can compare real fields such as the post text. The mock and the reconciler were updated to match.
+
+**Facts from the docs that shape the design**
+- LinkedIn accepts no client idempotency key. `findByClientRef` is unsupported.
+- Listing a member's posts needs `r_member_social`, which the page calls restricted to approved users. Without it, a lost send on Joe's personal profile cannot be confirmed either way. The slot goes to `NEEDS_REVIEW` after the time limit and is never re-sent automatically.
+- Organization posting needs `w_organization_social` and a page role of administrator, direct sponsored content poster, or content admin.
+- The `Linkedin-Version` header is required and versions are retired on a schedule. It is configuration, set to `202609` in tests.
+
+**Not verified**
+- The post text limit. The Posts API page does not state one. The adapter defaults to 3,000 and relies on LinkedIn's `FIELD_LENGTH_TOO_LONG` error past the real limit.
+- Whether a post can be created while its video is still processing. The adapter waits for `AVAILABLE` first. If the wait runs out it returns a retryable result, and the retry uploads the video again.
+- Which scopes our existing LinkedIn app holds. This needs Data's Phase 0 inventory.
+
+**Limits in this version**
+- The video is held in memory during upload, capped at 100 MB. LinkedIn allows up to 500 MB.
+- The four shared media-upload methods are stubs for LinkedIn; the upload runs inside `createPost`.
+- No OAuth connect or token refresh flow. The adapter takes a token from an injected lookup.
+
 ## 15. Checkpoint 6: fixes from the independent adversarial review (2026-10-13, created by Fable, not graded)
 
 Gene routed the code review to a non-author seat. Codex on Joe's desktop did not answer, so Fable ran an independent reviewer with a fresh context and its own in-memory SQLite harness. It reproduced the defects below with scripts; the fixes each carry a test that fails on the old code. Reviewer's repro scripts are not in the repo.
