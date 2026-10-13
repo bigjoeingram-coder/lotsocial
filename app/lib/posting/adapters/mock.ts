@@ -106,9 +106,9 @@ export class MockAdapter implements PlatformAdapter {
     return this.describe(this.posts.find((post) => post.clientRef === clientRef));
   }
 
-  async findRecentCandidates(destination: DestinationRef, fingerprint: string): Promise<LookupResult> {
-    this.lookupCalls.push(`candidates:${fingerprint}`);
-    return this.describe(this.posts.find((post) => post.fingerprint === fingerprint && post.destination === destination.id));
+  async findRecentCandidates(destination: DestinationRef, variant: VariantSnapshot): Promise<LookupResult> {
+    this.lookupCalls.push(`candidates:${variant.revisionHash}`);
+    return this.describe(this.posts.find((post) => post.fingerprint === variant.revisionHash && post.destination === destination.id));
   }
 
   private describe(post: StoredPost | undefined): LookupResult {

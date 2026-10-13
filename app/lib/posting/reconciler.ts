@@ -1,6 +1,6 @@
 import type { LookupResult } from "./adapter.ts";
 import type { PostingDeps, SlotRow } from "./engine.ts";
-import { audit, destinationRef, getDestination, getVariant, iso, latestAttempt, moveSlot } from "./engine.ts";
+import { audit, destinationRef, getDestination, getVariant, iso, latestAttempt, moveSlot, snapshot } from "./engine.ts";
 import { closeAttempt } from "./dispatcher.ts";
 
 export type ReconcileSummary = { expiredLeases: number; neverSentRequeued: number; needsReview: number; published: number; processing: number; retryReady: number; failed: number; stillUncertain: number; resumed: number };
@@ -109,7 +109,7 @@ async function lookup(deps: PostingDeps, slot: SlotRow): Promise<LookupResult> {
     if (attempt.platform_post_id) return await adapter.readbackPost(ref, attempt.platform_post_id);
     const byRef = await adapter.findByClientRef(ref, slot.idempotency_key);
     if (byRef.kind !== "unsupported" && !(byRef.kind === "not_found" && !byRef.definitive)) return byRef;
-    const byContent = await adapter.findRecentCandidates(ref, slot.approved_revision_hash, attempt.started_at);
+    const byContent = await adapter.findRecentCandidates(ref, snapshot(variant), attempt.started_at);
     if (byContent.kind === "unsupported") return { kind: "not_found", definitive: false };
     // A content match is weaker than an id or a client reference: two slots can carry identical
     // content. Never let this slot claim a platform post that another slot already owns.
