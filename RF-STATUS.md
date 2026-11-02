@@ -1,184 +1,117 @@
 # RF-STATUS — LotSocial Hardening Cycle
 
-**Updated:** 2026-08-31 ~18:30 PDT
-**Branch:** `rf/clarity-break-2026-08-28` @ `cbb2d7f` (in sync with origin)
-**Platform:** Sites classified as STAGING by the control gate — 1 pass, 7 fails.
+**Updated:** 2026-11-02
+**Verified against:** `origin/main` @ `949f21f`
+**Cycle status:** **COMPLETE — all six rocks built and landed in `main`.**
 
 ---
 
-## Committed on this branch
+## Verdict
 
-| Commit | What |
-|---|---|
-| `3c2a8d1` | Rock 1 — schema authority, harness, enforced CI |
-| `699ed92` | I-22 — nullable-PK gap proven, repair built (live DB untouched) |
-| `4a23c5c` | RF-STATUS snapshot (subject line says Rock 1; content is status only) |
-| `2154ade` | I-22 headline corrected — five columns, MED |
-| `13ce65c` | Rock 2 — lock the front door (I-01, I-02, I-03) |
-| `cbb2d7f` | I-22 runbook corrected — D1 is Sites-provisioned, not wrangler-reachable |
+Every rock from PLAN.md r4 was built, and all six are in `main`.
 
-`npm test` at this tip: build clean, 26/26 pass, both schema guards pass, lint 0 errors.
+| Rock | Scope | Landed in `main` as | Date |
+|---|---|---|---|
+| 1 | Foundation: schema authority, two-tier harness, enforced CI | `3c2a8d1` Rock 1: schema authority, a harness that runs, enforced CI | 08-29 |
+| 2 | Lock the front door (I-01, I-02, I-03) | `13ce65c` Rock 2: lock the front door | 08-31 |
+| 3 | Un-poison persistence (I-08, I-10, I-11) | `d9bf358` Rock 3: harden persistence recovery and URL identity | 09-12 |
+| 4 | Import telemetry + spend control (I-14, I-02-cost, I-15, I-05) | `e1572a2` Complete closed customer pilot hardening | 09-13 |
+| 5 | Honest authorization state machine (I-06, I-04) | `e1572a2` (same commit) | 09-13 |
+| 6 | Real extractor tests (I-07, I-18) | `7ea76dd` Rock 6: real extractor tests | 09-10 |
 
-**Rock 3 is NOT on this branch or any ref on this remote.** `git log --all --grep="Rock 3"`
-returns nothing and the branch is in sync with origin. Whatever the cloud session
-committed has not reached `github.com/bigjoeingram-coder/lotsocial`. Confirm before
-assuming Rock 3 is preserved anywhere but that session's own machine.
+Rocks 4 and 5 landed folded into a pilot-hardening commit rather than under their own
+names, which is why searching commit messages for "Rock 4" / "Rock 5" finds them only on
+abandoned branches.
 
----
+Rock 6 landed before Rock 3. PLAN permitted this: "Rocks 3–6 are independent of each
+other and could reorder if a rock stalls."
 
-## 2026-08-31 — Task 1: storage_key live test — NOT RUN (blocked)
+### How this was verified
 
-**Blocked, not skipped.** The test requires the live Sites deployment: its URL (which
-appears nowhere in this repo), an authenticated allowlisted associate session, and a
-real render against Shotstack. `app/api/rendered-videos/[id]/route.ts:9` gates playback
-behind `requireAssociate`, and the `oai-*` identity headers are issued by the Sites
-platform. This session has none of that. It is the Q2/Q5 gap the gate documented.
+Commit-ancestry checks are **misleading here** and should not be repeated as the test.
+`git merge-base --is-ancestor` reports Rocks 3, 4 and 5 as absent from `main`, because the
+work landed via squash/rebase under different commits. The decisive test is whether each
+rock's artifacts exist in the tree:
 
-### The test design changed — as originally specified it would have been ambiguous
+- Rock 1 → `app/lib/schema-bootstrap.ts`, `scripts/check-bootstrap-schema.mjs`
+- Rock 2 → `app/lib/limits.ts`, `tests/auth-boundary.test.mjs`, `tests/rate-limits.test.mjs`
+- Rock 3 → `tests/persistence.test.mjs`
+- Rock 4 → `app/lib/telemetry.ts`, `app/api/ops/import-health/route.ts`, `tests/telemetry.test.mjs`
+- Rock 5 → `tests/authorization-flow.test.mjs`, `app/api/authorization-details/[id]/manager-link/route.ts`, the `authorization_management_links` table
+- Rock 6 → `tests/extractor.test.mjs`
 
-Reading the two code paths that touch the column:
-
-- `getRenderJob` (`creative.ts:272`) runs **`SELECT *`**. If `storage_key` is missing
-  from the live table this does NOT error — it returns the columns that exist, and
-  `job.storage_key` is `undefined`, so `route.ts:15` returns a soft
-  **404 "That video is not available in permanent storage."**
-- `updateRenderJob` (`creative.ts:263`) names the column explicitly:
-  `SET status = ?, output_url = ?, storage_key = ?, ...`. A missing column throws
-  `no such column: storage_key`. It is called at
-  `creative-render-handler.ts:112` on the **render status-refresh path**.
-
-**Therefore playback alone cannot distinguish "column missing" from "column present but
-empty" — both return the same 404.** The decisive signal is at render completion, not
-playback. And if the column is missing, every render has been failing at status refresh
-since 2026-07-22, not merely failing to archive.
-
-### Signal table — what to conclude
-
-| Observation | Conclusion |
-|---|---|
-| Render completes, status updates normally | Column EXISTS. I-22-class damage on `storage_key` ruled out. |
-| Render errors at completion / `no such column: storage_key` in logs | Column MISSING. Confirmed live damage predating this cycle. |
-| Render completes, `stored: false`, playback 404s | Column exists, archival did not populate it. Milder, separate issue. |
-| Render completes, `stored: true`, playback streams video | Full pass. |
-
-### The requested storage_key VALUE cannot be reported by anyone
-
-`serializeRenderJob` (`creative.ts:285`) exposes **`stored: Boolean(record.storage_key)`**
-— a boolean, never the value. Reading the actual key requires DB access, which is Q2 =
-FAIL. Substitute the `stored` boolean plus the completion behavior above; that answers
-the question the value was being used to answer.
+All present on `origin/main`.
 
 ---
 
-## 2026-08-31 — Task 2: Deploy Rock 2 to Sites — NOT RUN (blocked)
+## Proof state on `main`
 
-**Blocked, not skipped.** Deploy authority on Sites is console-mediated (gate Q4/Q6),
-the branch is not merged to `main`, and `.github/workflows/lot-hardening.yml` runs
-`npm test` only — there is no deploy step anywhere in the repo. Setting
-`LOTSOCIAL_EXPECTED_SITES_HOSTNAME` and `LOTSOCIAL_ASSOCIATE_ALLOWLIST` happens in the
-Sites console, which passed for Joe (Q7) and is unreachable from here.
+`npm test` still runs the full Rock 1 gate:
 
-### Front-door verification, ready to run once deployed
+```
+npm run build && node --test tests/*.test.mjs && npm run db:bootstrap-check && npm run db:check && npm run lint
+```
 
-`chatgpt-auth.ts:38` rejects when the expected host is unset or mismatched;
-`chatgpt-auth.ts:55` rejects an email absent from the allowlist. Three checks:
+The suite is now 17 test files, up from 2 source-grep fakes at the start of the cycle.
+Every rock's proof is in it: `persistence`, `telemetry`, `authorization-flow`, `extractor`,
+`rate-limits`, `auth-boundary`, `schema-repair`, plus the pilot-era behaviour tests.
 
-1. **Allowlisted associate, correct host** → request succeeds. Front door open to the right people.
-2. **Non-allowlisted email, correct host** → 401. Allowlist enforced.
-3. **Any identity at a non-Sites hostname** → 401. Host pinning enforced.
-
-Check 3 is the one that proves Rock 2's actual security claim. If the worker answers on
-only one hostname, it cannot be exercised — record that as untestable rather than as a pass.
-
-**Set the allowlist deliberately: it is the enforced ceiling on who can use the product
-while Sites remains staging.**
+**Not re-run by this status pass.** This update verified tree contents and history, not a
+fresh test execution. Run `npm test` on `main` before treating the suite as green today.
 
 ---
 
-## Where the rocks stand
+## Rock 5 — implemented better than specified
 
-- **Rock 1** — committed, proven twice.
-- **Rock 2** — committed, undeployed, unverified in production.
-- **Rock 3** — built and fully proven on `rf/rock-3-persistence`; not deployed.
-- **Rock 4** — new table, safe on Sites via bootstrap. Its ops endpoint gets no platform verification (Q5).
-- **Rock 5** — adds a column to an existing table. **Not safely deployable on Sites**; same failure mode as `storage_key`. Wait for cutover or resequence.
-- **Rock 6** — no schema change, safe.
-
-Rock 1's `db:bootstrap-check` is load-bearing now: with controlled migration unavailable,
-it is the only guarantee that new tables get created correctly.
-
-## I-22
-
-Repair built and proven (`drizzle/repair/i22-enforce-pk-not-null.sql`,
-`scripts/i22-check-schema.mjs`, `tests/schema-repair.test.mjs`). Live database never
-inspected — Q2 failed, no SQL surface exists. If the Cloudflare cutover happens, data is
-imported into a fresh D1 built from corrected migrations and the nullable columns never
-exist there; the repair is insurance for staying, not a blocker for leaving.
+PLAN called for "a token-expiry column in the migration and a re-issue path." `main`
+implements the expiry as a **dedicated `authorization_management_links` table** with
+`expires_at NOT NULL` and `authorization_management_links_expiry_idx`, plus
+`manager-link/route.ts` as the re-issue path. A separate table is the stronger design;
+the promise that a decision token stops doubling as a permanent management credential is
+kept, not half-built.
 
 ---
 
-## 2026-09-12 — Rock 3: persistence recovery and canonical VDP identity — BUILT
+## Still open
 
-**Branch:** `rf/rock-3-persistence` from `d82f2c8` (the current hardening base).
+**I-22 — the live D1 may still carry nullable primary keys.** Unchanged since August. The
+repair is built and proven (`drizzle/repair/i22-enforce-pk-not-null.sql`,
+`scripts/i22-check-schema.mjs`, `tests/schema-repair.test.mjs`) but has never been applied,
+because the Sites console exposes no SQL surface to inspect the live schema. Five TEXT
+primary key columns; severity MED, not MED-HIGH, because every insert path uses
+`crypto.randomUUID()` and no code path can write a NULL id. It is an unenforced constraint,
+not known corruption.
 
-- A failed shared schema bootstrap now clears only its rejected cached promise, so the
-  next request retries instead of leaving the Worker isolate permanently poisoned.
-- Vehicle deletion now executes render-job, project, and vehicle deletes as one D1
-  batch. The render-job delete uses a scoped subquery inside that batch, eliminating
-  the prior select/delete race while preserving per-associate isolation.
-- VDP URLs now have one persistence identity: lowercase host, no fragment, no
-  `utm_*`/`gclid`/`fbclid`, stable query ordering, and no non-root trailing slash.
-  Lookup and save both use that identity, so tracking-first and bare-first imports
-  converge on one row.
-- The shared Tier-2 harness now pins `dist/server/index.js` as Miniflare's first module;
-  this is the same cross-platform CI repair already proven on the Rock 6 branch.
-
-**Proof:** `pnpm test` passed end to end: build; 30/30 behavior tests; bootstrap-schema
-match; Drizzle drift check; and lint with 0 errors (five pre-existing UI warnings).
-Targeted Rock 3 proof is 6/6 in `tests/persistence.test.mjs` plus the existing inventory
-delete suite. No schema change, new runtime dependency, deployment, or live data write.
-
-## 2026-09-09 — Rock 6: real extractor tests — BUILT (Fable, cloud session)
-
-**Files:** `app/lib/vdp.ts`, `tests/extractor.test.mjs` (new, 17 tests, offline fixtures).
-
-- **I-07 wrong-neighbor price — fixed and locked.** `vehicleBlockBounds()` constrains the
-  Dealer Inspire window to the matched vehicle's own block: it starts at that vehicle's
-  `## [title](link)` heading and stops at the next heading or the next `VIN:` line. The
-  two-vehicle fixture (vehicle A has no price, vehicle B directly after it does) fails on
-  the old fixed 5000-character window — A inherited B's $64,120 — and passes on the fix
-  with A's price empty. Verified failing-then-fixed by swapping the window logic back in.
-- **I-18 hardcoded 23-make allowlist — removed.** `slugMakeAndModel()` anchors on the year
-  token in the `<condition>-<year>-<make>-<model>-...` slug (fallback: first token after
-  the condition words), handles two-word makes (land-rover, mercedes-benz, alfa-romeo,
-  aston-martin, rolls-royce), keeps single-word MINI intact, and never treats a VIN as a model. Ram, Jeep, Chrysler and
-  Dodge URLs now generate `/new-vehicles/<model>/` candidate paths; Lexus/Maserati paths
-  are unchanged. `certified-` slugs are recognized alongside `new-`/`used-`.
-- **Testability exports:** `parseVehicleHtml`, `parseDealerInspireMarkdown`,
-  `candidateInventoryPaths`, `slugMakeAndModel`, `vehicleBlockBounds`, `vinFromUrl`,
-  `normalizeListedPrice` (behavior unchanged; `isCloudflareChallenge` was already exported).
-- **Fixtures covered:** JSON-LD VDP, meta/regex-only VDP (Jeep), Cloudflare challenge page
-  (HTML + reader markdown), Dealer Inspire two-vehicle listing, no-VIN URL, inventory-page
-  title refusal, no-evidence refusal, price normalization.
-
-**Proof:** `node --test tests/extractor.test.mjs` → 17/17. Full `node --test tests/*.test.mjs`
-in the cloud session: 37 pass / 6 fail, and every failure is the pre-existing Tier-2/worker
-boot set (500 instead of 401 from miniflare in that sandbox) — the untouched branch fails the
-same tests there (20 pass / 7 fail before this change). No schema change (safe on Sites).
-
-**Delivery note:** the cloud session's git proxy refuses to push to this repository
-(403, "not in this session's authorized repository set"), so this rock lands via the GitHub
-web UI on branch `rf/rock-6-extractor-tests` and a PR into `rf/clarity-break-2026-08-28`.
+**Platform decision stands: Sites is a staging surface, not a production home.** The
+control gate run on 2026-08-31 returned 1 pass (env vars / secrets) and 7 fails (database
+identity, schema inspection, backup/export, controlled migration, production verification,
+rollback, portable egress). The exit path, if taken, is direct Cloudflare under Joe's own
+account — not Lovable — because the code is already Cloudflare-shaped (`wrangler`,
+`miniflare`, `cloudflare:workers`, D1, R2). If the cutover happens, data imports into a
+fresh D1 built from corrected migrations and I-22 dissolves on its own.
 
 ---
 
-## 2026-09-13 — Closed customer-pilot build — BUILT LOCALLY, DEPLOYMENT GATED
+## Branch cleanup
 
-**Integration branch:** `codex/customer-pilot-ready-2026-09-13`, based on remote Rock 3 and carrying the final remote Rock 6 fixes.
+Four Rocket Fuel branches are superseded. Their rock content reached `main` by other
+commits, and content-diffing each against `main` shows them strictly behind it
+(8,500–11,000 deletions relative to `main`, i.e. `main` has far more). Nothing unique is
+lost by removing them.
 
-- Rock 4 is implemented: every import records one outcome; the seven-day keyed health endpoint reports success and paid-fallback usage by dealer host; Bright Data is capped per associate and globally; budget skips continue through the free path with honest UI notice.
-- Rock 5 is implemented without altering an existing Sites table: dealership-controlled permissions activate after manager approval, provider-controlled rights remain blocked until provider verification, and a provider decline does not switch off dealership rights. Management links live in a new bootstrap-safe table, expire, rotate, and invalidate older links.
-- Approved centered-car branding is installed as deterministic SVG, favicon/app icons, manifest, and Open Graph art. Starter package/readme identity is removed.
-- Current proof: production build; 57/57 behavior tests; bootstrap/schema parity; Drizzle drift; lint 0 errors (four intentional direct-VDP-image performance warnings).
+| Branch | Tip | Status |
+|---|---|---|
+| `rf/rock-3-persistence` | `65db9f0` | Fully merged into `main` — safe to delete |
+| `rf/clarity-break-2026-08-28` | `3a5a8cc` | Superseded parallel build of Rocks 3–6 |
+| `rf/complete-rocks-3-5-cloudflare` | `035640c` | Superseded; despite the name, holds no Cloudflare cutover work |
+| `rf/rock-6-extractor-tests` | `a94a285` | Superseded; its one unique fix (dropping `mini` from `TWO_WORD_MAKES`) is already in `main` |
 
-**Not deployed:** Sites deployment, live environment values, D1 inspection/cutover, real paid extraction, real email, real render, tester invitations, and public/customer sends remain Joe-gated.
+**Keep — not stale:** `pilot/scrapling-vdp-reliability-phase1` carries
+`SCRAPLING-PILOT-REPORT.md`, `docs/adr/ADR-0001-scrapling-parsing-sidecar.md` and
+`benchmarks/scrapling-vdp/`. That is a documented, deliberately rejected experiment and is
+institutional memory, not dead code. Merge the documents to `main` or archive the branch,
+but do not simply delete it.
+
+Also fully merged and removable: `build/delete-and-draft-revalidation`, `cody-identity`.
+
+Deletes are Joe's call. Nothing in this pass deleted anything.
