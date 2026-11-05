@@ -2,7 +2,8 @@ import { env } from "cloudflare:workers";
 import { associateAuthResponse, requireAssociate } from "../../chatgpt-auth";
 import { saveCreativeProject, serializeCreativeProject } from "../../lib/creative";
 import type { GravyLevel } from "../../lib/creative";
-import { getImportedVehicle } from "../../lib/vdp";
+import { getImportedVehicle, usableVehicleImageUrl } from "../../lib/vdp";
+import { recordUsageEvent } from "../../lib/usage";
 
 function clean(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
@@ -31,7 +32,7 @@ export async function POST(request: Request) {
   const vehicleId = clean(payload.vehicleId);
   const vehicle = await getImportedVehicle(vehicleId, user.email, env);
   if (!vehicle) return Response.json({ error: "That vehicle is not in your inventory." }, { status: 404 });
-  const availableImages = JSON.parse(vehicle.image_urls || "[]") as string[];
+  const availableImages = (JSON.parse(vehicle.image_urls || "[]") as string[]).filter(usableVehicleImageUrl);
   const selectedImages = Array.isArray(payload.selectedImages)
     ? payload.selectedImages.filter((image): image is string => typeof image === "string" && availableImages.includes(image)).slice(0, 10)
     : [];
@@ -55,8 +56,10 @@ export async function POST(request: Request) {
     endCardCta,
     endCardPhotoUrl: cleanProfilePhotoUrl(payload.endCardPhotoUrl, request),
     gravyLevel,
+    legalAccuracyUrl: new URL("/legal/accuracy", request.url).toString(),
     env,
   });
   if (!project) return Response.json({ error: "The creative draft could not be saved." }, { status: 500 });
+  await recordUsageEvent({ accountId: user.accountId, associateEmail: user.email, eventType: "post_draft_created", entityType: "creative_project", entityId: project.id }, env);
   return Response.json({ project: serializeCreativeProject(project) }, { status: 201 });
 }

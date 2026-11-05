@@ -3,6 +3,7 @@ import type { LotSocialEnvironment } from "./schema-bootstrap.ts";
 import { normalizeVehicleYear } from "./vdp.ts";
 import type { ImportedVehicleRecord } from "./vdp.ts";
 import { PRICING_DISCLAIMER_VERSION } from "./evidence.ts";
+import { LEGAL_ACCURACY_URL } from "../legal/generated-content.ts";
 
 export type CreativeProjectRecord = {
   id: string;
@@ -140,7 +141,16 @@ function normalizeGravyLevel(value: GravyLevel | boolean): GravyLevel {
   return value === "light" || value === "extra" ? value : "none";
 }
 
-export function createCopy(vehicle: ImportedVehicleRecord, style: string, durationSeconds: number, endCardName: string, endCardCta: string, gravy: GravyLevel | boolean = "none") {
+function accuracyUrl(value: string) {
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" && url.pathname === "/legal/accuracy" ? url.toString() : LEGAL_ACCURACY_URL;
+  } catch {
+    return LEGAL_ACCURACY_URL;
+  }
+}
+
+export function createCopy(vehicle: ImportedVehicleRecord, style: string, durationSeconds: number, endCardName: string, endCardCta: string, gravy: GravyLevel | boolean = "none", legalAccuracyUrl = LEGAL_ACCURACY_URL) {
   const gravyLevel = normalizeGravyLevel(gravy);
   const hasGravy = gravyLevel !== "none";
   const extraGravy = gravyLevel === "extra";
@@ -226,7 +236,7 @@ export function createCopy(vehicle: ImportedVehicleRecord, style: string, durati
     ? new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit", timeZone: "UTC", timeZoneName: "short" }).format(capturedAt)
     : "the recorded capture time";
   const pricingDisclaimer = `Pricing and availability as shown on the dealer's website on ${capturedAtText}; subject to change. Confirm current price with the dealership.`;
-  const socialCaption = `${captionHeadline}\n\n${gravyIntro}${description ? `${description}\n\n` : ""}${highlights.length ? `${highlights.join(" · ")}\n\n` : ""}${vehicle.price ? `Total price listed on ${cleanCopyLine(vehicle.source_host)}: ${displayPrice(vehicle.price)}.\n\n` : ""}${gravyClose}${endCardCta}.\n\n${pricingDisclaimer}\n\nConfirm equipment and eligibility with the dealership. This ad expires 7 days after posting or when the vehicle sells, whichever comes first.\n\n#${makeModelTag} #${salespersonTag} #${dealershipTag} #lotsocial`;
+  const socialCaption = `${captionHeadline}\n\n${gravyIntro}${description ? `${description}\n\n` : ""}${highlights.length ? `${highlights.join(" · ")}\n\n` : ""}${vehicle.price ? `Total price listed on ${cleanCopyLine(vehicle.source_host)}: ${displayPrice(vehicle.price)}.\n\n` : ""}${gravyClose}${endCardCta}.\n\n${pricingDisclaimer}\n\nConfirm equipment and eligibility with the dealership. This ad expires 7 days after posting or when the vehicle sells, whichever comes first.\n\nAccuracy and listing limitations: ${accuracyUrl(legalAccuracyUrl)}\n\n#${makeModelTag} #${salespersonTag} #${dealershipTag} #lotsocial`;
   return { voiceoverScript: cleanCopyBlock(voiceoverScript), socialCaption: cleanCopyBlock(socialCaption) };
 }
 
@@ -243,12 +253,13 @@ export async function saveCreativeProject(input: {
   endCardPhotoUrl: string;
   gravyLevel?: GravyLevel;
   flavor?: boolean;
+  legalAccuracyUrl?: string;
   env: LotSocialEnvironment;
 }) {
   await ensureCreativeSchema(input.env);
   const db = database(input.env, "creative");
   const id = crypto.randomUUID();
-  const copy = createCopy(input.vehicle, input.style, input.durationSeconds, input.endCardName, input.endCardCta, input.gravyLevel ?? (input.flavor === true ? "light" : "none"));
+  const copy = createCopy(input.vehicle, input.style, input.durationSeconds, input.endCardName, input.endCardCta, input.gravyLevel ?? (input.flavor === true ? "light" : "none"), input.legalAccuracyUrl);
   await db.prepare(`INSERT INTO creative_projects (
     id, vehicle_id, associate_email, selected_images, style, duration_seconds,
     voiceover_script, social_caption, end_card_name, end_card_phone, end_card_email,

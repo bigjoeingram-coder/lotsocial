@@ -1,9 +1,10 @@
 import { database, ensureLotSocialSchema } from "./schema-bootstrap.ts";
 import type { LotSocialEnvironment } from "./schema-bootstrap.ts";
 import type { ExtractedVehicle, ImportedVehicleRecord } from "./vdp.ts";
+import { LEGAL_VERSIONS } from "../legal/generated-content.ts";
 
-export const PRICING_DISCLAIMER_VERSION = "2026-09-14-v1";
-export const TERMS_VERSION = "2026-09-14-v2";
+export const PRICING_DISCLAIMER_VERSION = LEGAL_VERSIONS.disclaimerVersion;
+export const TERMS_VERSION = LEGAL_VERSIONS.termsVersion;
 export const PRICING_DISCLAIMER_TEMPLATE =
   "Pricing and availability as shown on the dealer's website on <date, time, TZ>; subject to change. Confirm current price with the dealership.";
 

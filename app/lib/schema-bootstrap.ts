@@ -28,6 +28,8 @@ export type LotSocialEnvironment = {
   LOTSOCIAL_DAILY_MANAGER_EMAIL_CAP?: string;
   LOTSOCIAL_DAILY_BRIGHTDATA_ASSOCIATE_CAP?: string;
   LOTSOCIAL_DAILY_BRIGHTDATA_GLOBAL_CAP?: string;
+  LOTSOCIAL_DAILY_SHOTSTACK_ASSOCIATE_CAP?: string;
+  LOTSOCIAL_DAILY_SHOTSTACK_GLOBAL_CAP?: string;
   LOTSOCIAL_MANAGER_EMAIL_DOMAIN_ALLOWLIST?: string;
   LOTSOCIAL_MANAGEMENT_LINK_TTL_HOURS?: string;
   OPENAI_API_KEY?: string;
@@ -36,6 +38,14 @@ export type LotSocialEnvironment = {
   RESEND_API_KEY?: string;
   EMAIL_FROM?: string;
   LOTSOCIAL_SESSION_TTL_HOURS?: string;
+  LOTSOCIAL_SHARED_JOIN_TOKEN?: string;
+  LOTSOCIAL_SHARED_JOIN_EXPIRES_AT?: string;
+  LOTSOCIAL_SHARED_JOIN_MAX_SIGNUPS?: string;
+  LOTSOCIAL_DAILY_PUBLIC_SIGNUP_CAP?: string;
+  LOTSOCIAL_ACCOUNT_LOGIN_EMAIL_CAP?: string;
+  LOTSOCIAL_DAILY_ACCOUNT_LOGIN_IP_CAP?: string;
+  NTFY_BASE_URL?: string;
+  NTFY_TOPIC?: string;
 };
 
 let schemaReady = new WeakMap<D1DatabaseLike, Promise<void>>();
@@ -58,6 +68,15 @@ export const SCHEMA_BOOTSTRAP_SQL = [
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
   )`,
   "CREATE INDEX IF NOT EXISTS pilot_invites_email_idx ON pilot_invites(email, created_at DESC)",
+  `CREATE TABLE IF NOT EXISTS shared_join_tokens (
+    token_hash TEXT PRIMARY KEY NOT NULL,
+    expires_at TEXT NOT NULL,
+    max_signups INTEGER NOT NULL,
+    signup_count INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`,
+  "CREATE INDEX IF NOT EXISTS shared_join_tokens_expiry_idx ON shared_join_tokens(expires_at)",
   `CREATE TABLE IF NOT EXISTS associate_accounts (
     id TEXT PRIMARY KEY NOT NULL,
     email TEXT NOT NULL UNIQUE,
@@ -82,6 +101,18 @@ export const SCHEMA_BOOTSTRAP_SQL = [
   )`,
   "CREATE INDEX IF NOT EXISTS associate_sessions_account_idx ON associate_sessions(account_id, created_at DESC)",
   "CREATE INDEX IF NOT EXISTS associate_sessions_expiry_idx ON associate_sessions(expires_at)",
+  `CREATE TABLE IF NOT EXISTS usage_events (
+    id TEXT PRIMARY KEY NOT NULL,
+    account_id TEXT NOT NULL DEFAULT '',
+    associate_email TEXT NOT NULL,
+    event_type TEXT NOT NULL,
+    entity_type TEXT NOT NULL DEFAULT '',
+    entity_id TEXT NOT NULL DEFAULT '',
+    metadata TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`,
+  "CREATE INDEX IF NOT EXISTS usage_events_associate_created_idx ON usage_events(associate_email, created_at DESC)",
+  "CREATE INDEX IF NOT EXISTS usage_events_created_event_idx ON usage_events(created_at DESC, event_type)",
   `CREATE TABLE IF NOT EXISTS account_login_links (
     id TEXT PRIMARY KEY NOT NULL,
     account_id TEXT NOT NULL,
@@ -91,6 +122,23 @@ export const SCHEMA_BOOTSTRAP_SQL = [
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
   )`,
   "CREATE INDEX IF NOT EXISTS account_login_links_account_idx ON account_login_links(account_id, created_at DESC)",
+  `CREATE TABLE IF NOT EXISTS account_email_verifications (
+    id TEXT PRIMARY KEY NOT NULL,
+    token_hash TEXT NOT NULL UNIQUE,
+    source_type TEXT NOT NULL,
+    source_token_hash TEXT NOT NULL,
+    email TEXT NOT NULL,
+    display_name TEXT NOT NULL,
+    phone TEXT NOT NULL,
+    dealership_name TEXT NOT NULL,
+    dealership_domain TEXT NOT NULL,
+    rooftop_location TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    used_at TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`,
+  "CREATE INDEX IF NOT EXISTS account_email_verifications_email_idx ON account_email_verifications(email, created_at DESC)",
+  "CREATE INDEX IF NOT EXISTS account_email_verifications_expiry_idx ON account_email_verifications(expires_at)",
   `CREATE TABLE IF NOT EXISTS authorization_requests (
     id TEXT PRIMARY KEY NOT NULL,
     approval_token_hash TEXT NOT NULL UNIQUE,

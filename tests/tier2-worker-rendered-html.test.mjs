@@ -48,6 +48,26 @@ test("Tier 2 serves rendered LotSocial HTML", async () => {
   }
 });
 
+test("every legal route is anonymously readable while the workspace remains gated", async () => {
+  const worker = await startTier2Worker();
+  try {
+    const routes = ["/legal", "/legal/terms", "/legal/privacy", "/legal/accuracy", "/legal/fraud-awareness", "/legal/authorization", "/legal/report", "/terms", "/privacy"];
+    for (const route of routes) {
+      const response = await worker.fetch(`https://lotsocial.test${route}`, { redirect: "manual" });
+      const html = await response.text();
+      assert.equal(response.status, 200, `${route} should return anonymous 200`);
+      assert.match(response.headers.get("content-type") ?? "", /text\/html/);
+      assert.match(html, /LotSocial/);
+      assert.match(html, /2026-09-28-v0\.9/);
+      assert.doesNotMatch(response.headers.get("location") ?? "", /\/login/);
+    }
+    const workspace = await worker.fetch("https://lotsocial.test/", { redirect: "manual" });
+    assert.match(workspace.headers.get("location") ?? "", /\/login\?return_to=/);
+  } finally {
+    await worker.dispose();
+  }
+});
+
 test("Tier 2 serves the workspace UI for a signed-in allowlisted associate at the expected Sites host", async () => {
   const worker = await startTier2Worker();
   try {
@@ -58,9 +78,29 @@ test("Tier 2 serves the workspace UI for a signed-in allowlisted associate at th
 
     assert.equal(response.status, 200);
     assert.match(response.headers.get("content-type") ?? "", /text\/html/);
+    assert.equal(response.headers.get("x-frame-options"), "DENY");
+    assert.match(response.headers.get("content-security-policy") ?? "", /frame-ancestors 'none'/);
     assert.match(html, /LotSocial Inventory Authorization/);
     assert.match(html, /Authorization workspace/);
+    assert.match(html, /href="\/api\/account-logout"[^>]*>Sign out<\/a>/);
     assert.doesNotMatch(html, /signin-with-chatgpt/);
+  } finally {
+    await worker.dispose();
+  }
+});
+
+test("the Worker denies framing without weakening stricter route CSP", async () => {
+  const worker = await startTier2Worker();
+  try {
+    const api = await worker.fetch("https://lotsocial.test/api/vdp-imports");
+    assert.equal(api.headers.get("x-frame-options"), "DENY");
+    assert.match(api.headers.get("content-security-policy") ?? "", /frame-ancestors 'none'/);
+
+    const confirmation = await worker.fetch("https://lotsocial.test/login/scanner-prefetch-token");
+    const policy = confirmation.headers.get("content-security-policy") ?? "";
+    assert.equal(confirmation.headers.get("x-frame-options"), "DENY");
+    assert.match(policy, /default-src 'none'/);
+    assert.match(policy, /frame-ancestors 'none'/);
   } finally {
     await worker.dispose();
   }

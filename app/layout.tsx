@@ -31,8 +31,17 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
   return <html lang="en"><body className={`${geistSans.variable} ${geistMono.variable}`}>
     {children}
     <InventoryHardeningClient />
-    <footer style={{ padding: "24px", textAlign: "center", fontSize: "13px", opacity: 0.72 }}>
-      <Link href="/privacy">Privacy Policy</Link><span aria-hidden="true"> · </span><Link href="/terms">Terms of Service</Link>
+    <footer className="site-footer">
+      <p>LotSocial</p>
+      <nav aria-label="Site legal links">
+        <Link href="/legal">Legal Center</Link>
+        <Link href="/legal/terms">Terms of Service</Link>
+        <Link href="/legal/privacy">Privacy Policy</Link>
+        <Link href="/legal/accuracy">Accuracy</Link>
+        <Link href="/legal/fraud-awareness">Fraud Awareness</Link>
+        <Link href="/legal/authorization">Authorization</Link>
+        <Link href="/legal/report">Report a Listing</Link>
+      </nav>
     </footer>
   </body></html>;
 }
