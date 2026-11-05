@@ -92,26 +92,37 @@ fresh D1 built from corrected migrations and I-22 dissolves on its own.
 
 ---
 
-## Branch cleanup
+## Branch cleanup — done 2026-11-04
 
-Four Rocket Fuel branches are superseded. Their rock content reached `main` by other
-commits, and content-diffing each against `main` shows them strictly behind it
-(8,500–11,000 deletions relative to `main`, i.e. `main` has far more). Nothing unique is
-lost by removing them.
+Six superseded branches were deleted from `origin` on 2026-11-04 on Joe's explicit
+instruction. Each tip was tagged `archive/<branch-name>` and the tags were confirmed
+present on `origin` **before** any branch was deleted, so nothing is unrecoverable.
 
-| Branch | Tip | Status |
+| Deleted branch | Archive tag | Tip |
 |---|---|---|
-| `rf/rock-3-persistence` | `65db9f0` | Fully merged into `main` — safe to delete |
-| `rf/clarity-break-2026-08-28` | `3a5a8cc` | Superseded parallel build of Rocks 3–6 |
-| `rf/complete-rocks-3-5-cloudflare` | `035640c` | Superseded; despite the name, holds no Cloudflare cutover work |
-| `rf/rock-6-extractor-tests` | `a94a285` | Superseded; its one unique fix (dropping `mini` from `TWO_WORD_MAKES`) is already in `main` |
+| `rf/rock-3-persistence` | `archive/rf/rock-3-persistence` | `65db9f0` |
+| `build/delete-and-draft-revalidation` | `archive/build/delete-and-draft-revalidation` | `c63240a` |
+| `cody-identity` | `archive/cody-identity` | `e82f52e` |
+| `rf/clarity-break-2026-08-28` | `archive/rf/clarity-break-2026-08-28` | `3a5a8cc` |
+| `rf/complete-rocks-3-5-cloudflare` | `archive/rf/complete-rocks-3-5-cloudflare` | `035640c` |
+| `rf/rock-6-extractor-tests` | `archive/rf/rock-6-extractor-tests` | `a94a285` |
 
-**Keep — not stale:** `pilot/scrapling-vdp-reliability-phase1` carries
+Each was verified strictly behind `main` by content diff before deletion (8,500–11,000
+deletions relative to `main` — i.e. `main` carries far more). Their rock content had
+already reached `main` under other commits. The one unique fix on
+`rf/rock-6-extractor-tests` — dropping `mini` from `TWO_WORD_MAKES` — was confirmed
+already present in `main` at `3e9c091`.
+
+Restore any of them with:
+
+```
+git push origin archive/<branch-name>:refs/heads/<branch-name>
+```
+
+That command is also written into each tag's own annotation, so it survives this file.
+
+**Kept, deliberately:** `pilot/scrapling-vdp-reliability-phase1` (`e45c08f`) carries
 `SCRAPLING-PILOT-REPORT.md`, `docs/adr/ADR-0001-scrapling-parsing-sidecar.md` and
 `benchmarks/scrapling-vdp/`. That is a documented, deliberately rejected experiment and is
-institutional memory, not dead code. Merge the documents to `main` or archive the branch,
-but do not simply delete it.
-
-Also fully merged and removable: `build/delete-and-draft-revalidation`, `cody-identity`.
-
-Deletes are Joe's call. Nothing in this pass deleted anything.
+institutional memory, not dead code. It was not touched. Its documents still have not been
+merged to `main` — do that before ever retiring the branch.
