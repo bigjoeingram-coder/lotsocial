@@ -138,7 +138,7 @@ export class FakeD1 {
 
   run(sql, values) {
     if (this.failOnSql && matches(sql, this.failOnSql)) throw new Error(`Injected batch failure: ${this.failOnSql}`);
-    if (matches(sql, "CREATE TABLE") || matches(sql, "CREATE INDEX")) return 0;
+    if (matches(sql, "CREATE TABLE") || matches(sql, "CREATE INDEX") || matches(sql, "CREATE UNIQUE INDEX")) return 0;
     if (matches(sql, "INSERT INTO import_outcomes")) {
       const [id, associateEmail, sourceHost, outcome, elapsedMs, fallback, brightDataUsed, notice] = values;
       this.importOutcomes.push({ id, associate_email: associateEmail, source_host: sourceHost, outcome, elapsed_ms: elapsedMs, fallback, bright_data_used: brightDataUsed, notice });
