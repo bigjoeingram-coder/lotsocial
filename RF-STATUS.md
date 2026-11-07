@@ -72,6 +72,41 @@ kept, not half-built.
 
 ---
 
+## Verified against the live deployment — 2026-11-06
+
+First live verification of this cycle. Run by Joe at
+`lotsocial-authorization.salesgenius.chatgpt.site` on an already-imported vehicle.
+
+**`creative_render_jobs.storage_key` EXISTS in the live D1. Risk closed.**
+
+A Fast Cuts 9:16 render (30s, 9 shots + end card) completed and reported
+`Storage: Saved permanently`. That label is driven by `renderJob.stored`, which is
+`Boolean(record.storage_key)` in `serializeRenderJob` and rendered at
+`app/components/AuthorizationApp.tsx:883`. For it to read true, three things had to
+succeed in production: `archiveRenderedVideo` wrote the MP4 to R2, `updateRenderJob`
+(`app/lib/creative.ts`) executed its `UPDATE ... SET storage_key = ?` without throwing,
+and the value persisted. So `drizzle/0006_goofy_blob.sql` — the only `ALTER TABLE` in the
+migration history, which added that column on 2026-07-22 — did reach the live table.
+
+This retires the open concern recorded on 2026-08-31 that the column might be missing.
+
+**What this does NOT prove — do not conflate the two.** It says nothing about I-22. That
+finding is about five TEXT primary key columns lacking `NOT NULL`, which this render never
+touched. There is still no SQL surface on Sites to read that schema. I-22 stays open below.
+
+**How a missing column would have presented, for the record.** Not as a visible error.
+`app/lib/creative-render-handler.ts:114-138` wraps the status refresh in a try/catch, with
+a second catch around the archive step at line 123. A throw from `updateRenderJob` is
+swallowed by the outer catch, which returns the job *unchanged*. The symptom would have
+been a render that never advanced past "Rendering" no matter how often status was checked
+— not an error message. Worth knowing before diagnosing a stuck render as slow.
+
+**Latency observation, no baseline.** Joe reported the render "took way too long." No
+timing instrumentation exists on this path, so there is nothing to compare it against.
+Recorded as an observation, not a defect.
+
+---
+
 ## Still open
 
 **I-22 — the live D1 may still carry nullable primary keys.** Unchanged since August. The
@@ -81,6 +116,36 @@ because the Sites console exposes no SQL surface to inspect the live schema. Fiv
 primary key columns; severity MED, not MED-HIGH, because every insert path uses
 `crypto.randomUUID()` and no code path can write a NULL id. It is an unenforced constraint,
 not known corruption.
+
+**VDP import is failing on new-vehicle pages — found live 2026-11-06.** Two imports from
+two unrelated dealerships both failed with the same message: "This store blocks the direct
+page and no matching public inventory listing was found."
+
+- `landrovercerritos.com/inventory/2027-land-rover-range-rover-sport-...`
+- `normreevesford.com/inventory/new-2026-ford-maverick-lobo%e2%84%a2-...`
+
+The message is not accurate. An independent fetch of `landrovercerritos.com/inventory/`
+returned HTTP 200 with 75,766 characters of real inventory markup on a basic proxy, so the
+store does not block readers outright. Two candidate causes, which the current error text
+cannot distinguish:
+
+1. **New vs used.** Both vehicles are new (the Ford URL says `new-` in the path; the Land
+   Rover is a 2027). On that Land Rover site `/inventory/` redirects to `/used-vehicles/`,
+   a pre-owned-only catalog of 79 vehicles. Neither the VIN fragment `sal1l9e9xva675` nor
+   the trim `p530` appears in it. The listing fallback may be searching a catalog that
+   structurally cannot contain a new car.
+2. **Encoded entities in the URL.** The Ford path carries `%e2%84%a2` and `%c2%ae` — an
+   encoded trademark and registered symbol.
+
+This is I-14 in practice: with no import outcome telemetry surfaced, one generic string
+covers every failure mode and the cause is unknowable from the UI. Rock 4's
+`/api/ops/import-health` plus the `import_outcomes` table (`source_host`, `outcome`,
+`fallback`, `bright_data_used`, `notice`, 7-day window) is the instrument that would answer
+this, gated by a bearer token against `ENFORCEMENT_API_KEY`. It returns 503 when that key
+is unset, which makes it a cheap first check.
+
+Not yet tested: whether a *used* vehicle from the same dealer imports successfully. That is
+the controlled experiment that would confirm or kill cause 1.
 
 **Platform decision stands: Sites is a staging surface, not a production home.** The
 control gate run on 2026-08-31 returned 1 pass (env vars / secrets) and 7 fails (database
@@ -92,7 +157,7 @@ fresh D1 built from corrected migrations and I-22 dissolves on its own.
 
 ---
 
-## Branch cleanup — done 2026-11-04
+## Branch cleanup — done 2026-11-04 through 11-06
 
 Six superseded branches were deleted from `origin` on 2026-11-04 on Joe's explicit
 instruction. Each tip was tagged `archive/<branch-name>` and the tags were confirmed
@@ -121,8 +186,27 @@ git push origin archive/<branch-name>:refs/heads/<branch-name>
 
 That command is also written into each tag's own annotation, so it survives this file.
 
+Three more were removed after that batch, bringing the total to nine. Remote went from 17
+branches to 10.
+
+| Deleted branch | Archive tag | Tip | When |
+|---|---|---|---|
+| `docs/rf-status-2026-11-02` | `archive/docs/rf-status-2026-11-02` | `c04dfe4` | 11-05, after PR #14 |
+| `chore/drop-deleted-ci-base-branch` | none | `54afc70` | 11-06, after PR #15 |
+| `docs/scrapling-pilot-memory` | none | `462fbe9` | 11-06, after PR #16 |
+
+The last two were deleted through GitHub's post-merge button, which does not create a tag.
+Nothing is lost: both tips are ancestors of `main`, so the commits are permanent regardless
+of the branches. Seven `archive/*` tags exist in total.
+
 **Kept, deliberately:** `pilot/scrapling-vdp-reliability-phase1` (`e45c08f`) carries
 `SCRAPLING-PILOT-REPORT.md`, `docs/adr/ADR-0001-scrapling-parsing-sidecar.md` and
 `benchmarks/scrapling-vdp/`. That is a documented, deliberately rejected experiment and is
-institutional memory, not dead code. It was not touched. Its documents still have not been
-merged to `main` — do that before ever retiring the branch.
+institutional memory, not dead code. It was not touched.
+
+Its decision record now **is** on `main` as of PR #16 — `SCRAPLING-PILOT-REPORT.md`,
+`docs/adr/ADR-0001-scrapling-parsing-sidecar.md`, `docs/scrapling-pilot-operations.md` and
+`benchmarks/scrapling-vdp/`. The implementation was deliberately left off: the branch is
+11,624 deletions against current `main` and would remove most of today's test suite, so it
+must never be merged. The precondition for retiring the branch is therefore satisfied, but
+deleting it remains Joe's call.
